@@ -12,6 +12,33 @@ time. The DB makes reads fast. Nothing more.
 
 ---
 
+## Learning Objectives
+
+By the end of this phase, you will be able to:
+- Explain why WAL mode is required when multiple threads access the same SQLite DB, and what symptom appears without it
+- Implement `upsert_node` with correct FTS5 synchronization and content-hash-based skip logic
+- Explain why a `threading.Lock` is needed even when SQLite is in WAL mode, and give a concrete example of a read-check-write race condition
+- Describe the two-pass indexing strategy and explain why pass 1 must complete before pass 2 begins
+- Distinguish between a derived index and a source of truth and explain the practical consequence for backup and recovery
+
+---
+
+## Before You Start — 2-Minute Self-Assessment
+
+Check each item you can answer confidently. If you can't check 3 or more, review the
+linked foundation doc before proceeding.
+
+- [ ] Phase 1A and Phase 1B are complete: I have working `Edge`, `extract_inline_edges`, `merge_edges`, `write_back`, and `sync_queue` implementations
+  → Required: complete Phase 1A and 1B deliverable tests first
+- [ ] I can write a basic SQL SELECT, INSERT, and INSERT OR REPLACE statement
+  → See `docs/foundations/sqlite-basics.md`
+- [ ] I understand what a database transaction is and what ACID means
+  → See `docs/foundations/sqlite-basics.md`
+- [ ] I know what a Python `threading.Lock` is and can write a `with lock:` block
+  → See `docs/foundations/python-threading.md`
+
+---
+
 ## Concepts
 
 ### SQLite
@@ -25,6 +52,8 @@ stable across decades.
 
 > Akanga node: `SQLite`
 
+> → Foundation doc: `docs/foundations/sqlite-basics.md`
+
 ### WAL Mode (Write-Ahead Logging)
 
 SQLite's concurrency mode. In the default journal mode, any write locks the entire
@@ -36,6 +65,8 @@ event loop (active manager, API), and CLI commands. Without WAL, they would dead
 under normal use.
 
 > Akanga node: `WAL Mode`
+
+> → Foundation doc: `docs/foundations/sqlite-basics.md` (WAL Mode section)
 
 ### Adjacency List (Graph in Relational Tables)
 
@@ -84,6 +115,8 @@ content.
 
 > Akanga node: `FTS5`
 
+> → Foundation doc: `docs/foundations/sqlite-basics.md` (FTS5 section)
+
 ### Thread Safety
 
 Shared mutable state accessed from multiple threads without synchronization produces
@@ -95,6 +128,8 @@ level. A `threading.Lock` wraps each compound operation so only one thread execu
 it at a time.
 
 > Akanga node: `Thread Safety`
+
+> → Foundation doc: `docs/foundations/python-threading.md` (Lock and compound operations section)
 
 ---
 
@@ -217,6 +252,16 @@ CREATE VIRTUAL TABLE nodes_fts USING fts5(
 
 ---
 
+## Common Pitfalls
+
+**FTS5 operator injection.** FTS5 MATCH queries accept operators (`AND`, `OR`, `NOT`, `*`) directly in the query string. A user who searches for `fast*` or `cognition OR memory` gets a different query than expected — and a user who types a malformed FTS5 expression triggers a SQLite error. Mitigation: always use parameterized queries (never string-format the term into SQL), AND quote the term using FTS5's `"..."` literal syntax so it is treated as a phrase, not an operator expression. Example: `WHERE nodes_fts MATCH ?` with the parameter `'"cognition"'` (double-quoted inside the FTS5 string).
+
+**Thread safety: read-check-write must be atomic.** WAL mode prevents SQLite-level deadlocks between readers and writers, but it does not prevent application-level races. The sequence "read content_hash → compare → upsert if different" is a compound operation: between the read and the upsert, another thread can write a different hash. Wrap the entire compound in `with self._lock:` — not just the final write.
+
+**Derived index: never store prose body in the DB.** The DB is rebuilt from files on `akanga index`. If you store prose content in the DB, you have two sources of truth that can diverge — and rebuild becomes lossy if the DB row has content that the file doesn't. FTS5 covers `title`, `tags`, and `description` only. Body search lives at the filesystem level (ripgrep). This is not a performance choice — it is an architectural constraint that keeps the DB expendable.
+
+---
+
 ## Deliverable
 
 ```python
@@ -263,3 +308,11 @@ def test_db_is_expendable(tmp_path):
 
 Plus 7 vault nodes with typed edges. The `test_db_is_expendable` test is the most
 important one — it proves the core architectural promise of this phase.
+
+---
+
+## Reflect
+
+> **Solo:** The content hash skip means `upsert_node` is effectively idempotent for unchanged nodes. But the FTS5 virtual table must stay in sync with the `nodes` table. If you skip the upsert on hash match, when does FTS5 get updated? Is there a scenario where a hash match causes FTS5 to fall out of sync with the nodes table, and how would you detect it?
+
+> **Group:** WAL mode and `threading.Lock` both address concurrency — but at different layers. Map out the two layers: what does WAL prevent, and what does `Lock` prevent that WAL does not? Can you construct a concrete scenario (with two specific threads doing specific operations) where WAL alone is insufficient and `Lock` is the only thing preventing corruption?

@@ -12,6 +12,32 @@ a real database. The point of this phase is to break that instinct.
 
 ---
 
+## Learning Objectives
+
+By the end of this phase, you will be able to:
+- Explain what YAML frontmatter is and why it serves as Akanga's node schema instead of a traditional database schema
+- Implement a `parse → write → parse` roundtrip that is fully idempotent — no fields reordered, no whitespace added, no encoding changed
+- Explain the role of UUID as a stable node identity that survives file renames and title changes
+- Implement an atomic file write using `os.replace` and explain why naive `open(..., 'w')` is unsafe
+
+---
+
+## Before You Start — 2-Minute Self-Assessment
+
+Check each item you can answer confidently. If you can't check 3 or more, review the
+linked foundation doc before proceeding.
+
+- [ ] I can open a file in Python, read its contents, and write new contents back to it
+  → Basic Python I/O (`open`, `read`, `write`)
+- [ ] I know what a Python dictionary is and how to access and mutate its keys
+  → Prerequisite: core Python knowledge
+- [ ] I know what a Python dataclass is and how `@dataclass` generates `__eq__` automatically
+  → See `docs/foundations/python-dataclasses.md`
+- [ ] I understand what YAML is and can read a simple YAML block
+  → See `docs/foundations/yaml-and-markdown-frontmatter.md`
+
+---
+
 ## Concepts
 
 ### YAML Frontmatter
@@ -23,6 +49,8 @@ and edges all live here. Because it is plain text, it is human-readable,
 git-diffable, and editable in any text editor — no proprietary format, no lock-in.
 
 > Akanga node: `YAML Frontmatter`
+
+> → Foundation doc: `docs/foundations/yaml-and-markdown-frontmatter.md`
 
 ### UUID (Universally Unique Identifier)
 
@@ -57,6 +85,8 @@ one.
 
 > Akanga node: `Atomic Write`
 
+> → Foundation doc: `docs/foundations/design-patterns.md` (Atomic Write section)
+
 ### Content Hash (SHA-256)
 
 A fixed-size fingerprint derived deterministically from file content. SHA-256
@@ -77,6 +107,8 @@ made immutable with `@dataclass(frozen=True)` to prevent accidental mutation aft
 creation.
 
 > Akanga node: `Python Dataclass`
+
+> → Foundation doc: `docs/foundations/python-dataclasses.md`
 
 ### Vault Configuration
 
@@ -236,3 +268,11 @@ def test_atomic_write_leaves_no_temp_files():
 
 Plus 7 vault nodes created with typed edges. The vault is the proof of
 understanding, not just the tests.
+
+---
+
+## Reflect
+
+> **Solo:** You wrote `os.replace(temp, target)` instead of streaming directly to the file. Without looking at the code, explain to yourself in one sentence why this matters. If you can't explain it without using the word "atomic," try again.
+
+> **Group:** The file is described as "the source of truth — never derived from anything else." But the `content_hash` in the DB is derived from the file. Is the hash part of the source of truth, or part of the derived index? Where exactly is the boundary, and does the distinction matter for how you reason about correctness?

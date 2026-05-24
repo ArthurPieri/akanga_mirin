@@ -9,6 +9,33 @@ should feel fast, navigable, and visually good — not like a throwback to 1990.
 Modern terminals (Ghostty, Kitty, WezTerm, iTerm2) support true color, mouse events,
 and even pixel-perfect image rendering. The ceiling is much higher than ASCII art.
 
+> **Why this phase is worth the effort:** Phases 0–4 gave you a knowledge graph in a
+> file. Phase 5 gives it a face. The TUI is the primary daily interface — the thing
+> you'll actually open to navigate your notes. The implementation time (12–20h estimated)
+> reflects that this is a full application, not a function. Budget accordingly.
+
+---
+
+## Learning Objectives
+
+By the end of this phase, you will be able to:
+- Build a multi-panel Textual TUI application with keyboard-driven navigation
+- Understand the Textual App lifecycle: compose → mount → event loop → action handlers
+- Wire the TUI to akanga_core directly (single process, no HTTP) using EventBus for live updates
+- Implement at least 6 keyboard actions (quit, new, edit, delete, search, ego-graph)
+- Write Textual pilot tests using `async with app.run_test() as pilot`
+
+---
+
+## Before You Start — 2-Minute Self-Assessment
+
+Check each item you can answer confidently. If you can't check 3 or more, review the linked foundation doc before proceeding.
+
+- [ ] I understand asyncio coroutines and `await` → See `docs/foundations/asyncio-primer.md`
+- [ ] I've completed Phases 0–4 and can use GraphDatabase
+- [ ] I know how to run Textual's test pilot (`async with app.run_test()`)
+- [ ] I've read the Textual quickstart (textual.textualize.io)
+
 ---
 
 ## Concepts
@@ -24,6 +51,8 @@ terminal. This is what enables live updates: a file-watcher event changes a reac
 variable, the widget re-renders without any imperative draw calls.
 
 > Akanga node: `Reactive TUI`
+
+→ Foundation doc: `docs/foundations/asyncio-primer.md` (async event loop section)
 
 ### Widget Composition
 
@@ -46,6 +75,8 @@ live updates from the file watcher (Phase 4) without the watcher knowing anythin
 about the TUI — they share only the EventBus.
 
 > Akanga node: `Event-Driven UI`
+
+→ Foundation doc: `docs/foundations/design-patterns.md` (Observer pattern)
 
 ### Keyboard-First, Mouse-Aware
 
@@ -261,6 +292,18 @@ async def _handle_node_updated(self, node_id: str):
 
 ---
 
+## Common Pitfalls
+
+**Loading data in compose() instead of on_mount():** `compose()` runs before widgets exist — database queries here can cause errors. Always load data in `on_mount()`.
+
+**Blocking the event loop:** Textual is async. Any blocking operation (slow DB query, file read) on the main thread freezes the UI. Use `asyncio.to_thread()` for heavy work.
+
+**Forgetting to refresh after mutations:** After create/delete/update, call `load_node_list()` explicitly — Textual doesn't auto-refresh.
+
+**Hardcoding widget IDs:** Use CSS selectors (`app.query_one("#node-list")`) with explicit IDs for testability with Pilot.
+
+---
+
 ## Deliverable
 
 ```python
@@ -313,3 +356,11 @@ async def test_graph_screen_opens(app):
 Plus 9 vault nodes with typed edges. The `test_live_update_adds_node` test proves
 the full pipeline from file change to TUI refresh. The graph screen tests prove
 navigation works end-to-end.
+
+---
+
+## Reflect
+
+> **Solo:** Sketch the full event flow when a user saves a file in an external editor while the TUI is open: file change → watcher → EventBus → TUI refresh. Which components are running in which threads?
+
+> **Group:** Compare the TUI's approach (single process, direct DB access) with a web app approach (browser + HTTP API). What does each gain? What does each give up?

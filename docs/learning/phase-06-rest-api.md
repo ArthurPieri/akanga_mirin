@@ -12,6 +12,28 @@ boundary vs what trusts internal guarantees? What events should be pushed vs pol
 
 ---
 
+## Learning Objectives
+
+By the end of this phase, you will be able to:
+- Implement a full CRUD REST API with FastAPI, including proper HTTP status codes
+- Understand FastAPI's lifespan context manager for startup/shutdown resource management
+- Apply SEC-02 path traversal protection: `Path.resolve().is_relative_to(vault_root)`
+- Write API tests using FastAPI's `TestClient` (synchronous) or `AsyncClient` (async)
+- Configure CORS correctly for a local-only API (127.0.0.1, no public origins)
+
+---
+
+## Before You Start — 2-Minute Self-Assessment
+
+Check each item you can answer confidently. If you can't check 3 or more, review the linked foundation doc before proceeding.
+
+- [ ] I understand HTTP verbs (GET/POST/PUT/DELETE) and status codes → See `docs/foundations/http-fundamentals.md`
+- [ ] I know what Pydantic models are and how FastAPI uses them for validation
+- [ ] I understand async functions and FastAPI's async routing
+- [ ] I've completed Phases 0–5
+
+---
+
 ## Concepts
 
 ### REST (Representational State Transfer)
@@ -24,6 +46,8 @@ Stateless: every request contains all information needed to process it — no se
 state on the server between requests.
 
 > Akanga node: `REST`
+
+→ Foundation doc: `docs/foundations/http-fundamentals.md`
 
 ### FastAPI
 
@@ -79,6 +103,8 @@ security check that must exist at the API boundary — internal code can trust p
 that have already been validated.
 
 > Akanga node: `Path Traversal Protection`
+
+→ Foundation doc: `docs/foundations/http-fundamentals.md` (security considerations section)
 
 ### API Boundary vs Library Consumer
 
@@ -246,6 +272,18 @@ akanga version
 
 ---
 
+## Common Pitfalls
+
+**Path traversal vulnerability (SEC-02):** `os.path.normpath + startswith` does NOT follow symlinks. Use `Path(body.path).resolve().is_relative_to(vault_root.resolve())` — the only safe approach.
+
+**Forgetting `check_same_thread=False`:** SQLite connections opened outside the lifespan context and used across async routes will raise threading errors. Initialize once in lifespan, store in `app.state`.
+
+**Returning 200 for creates:** Creates should return 201 (Created) with the new resource. A 200 is technically wrong and will fail strict clients.
+
+**Not handling the DELETE of a non-existent node:** If the file is already gone (e.g., manual deletion), the DELETE endpoint should still return 404, not 500.
+
+---
+
 ## Deliverable
 
 ```python
@@ -297,3 +335,11 @@ def test_ego_graph_endpoint(client):
 Plus 8 vault nodes with typed edges. The `test_node_file_is_written` and
 `test_websocket_broadcast` tests are the most important — they prove the API
 is not a DB-only shortcut and that push events work end-to-end.
+
+---
+
+## Reflect
+
+> **Solo:** Why does Akanga's API bind to `127.0.0.1` instead of `0.0.0.0` by default? What attack surface would `0.0.0.0` open for a tool with no authentication?
+
+> **Group:** The DB is a derived index that can be rebuilt. What does this mean for API design decisions? (E.g., should the API update the DB directly, or should it write the file and re-index? Which is the "right" approach and why?)

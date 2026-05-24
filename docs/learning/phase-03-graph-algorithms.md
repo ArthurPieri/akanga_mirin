@@ -8,6 +8,32 @@ write BFS.
 
 ---
 
+## Learning Objectives
+
+By the end of this phase, you will be able to:
+- Explain the structural difference between BFS and DFS and state concretely why BFS is the right choice for ego-graphs
+- Implement BFS using `collections.deque` with a depth limit and a visited set for cycle detection
+- Explain why cycle detection is mandatory in Akanga specifically (cycles are permitted by design, not forbidden)
+- Describe the ego-graph concept: what it includes, what the `direction` flag on `EgoEdge` enables, and why both incoming and outgoing edges are traversed
+
+---
+
+## Before You Start — 2-Minute Self-Assessment
+
+Check each item you can answer confidently. If you can't check 3 or more, review the
+linked foundation doc before proceeding.
+
+- [ ] Phase 2 is complete: I have a working `GraphDatabase` with `upsert_node`, `get_neighbors`, `get_backlinks`, and FTS5 search
+  → Required: complete Phase 2 deliverable tests first
+- [ ] I know what `collections.deque` is and the difference between `append` / `appendleft` and `pop` / `popleft`
+  → Prerequisite: core Python `collections` module knowledge
+- [ ] I understand what a Python `set` is and can use `in` and `.add()` on it
+  → Prerequisite: core Python knowledge
+- [ ] I can explain what a directed graph is and the difference between outgoing and incoming edges
+  → Covered in Phase 1A — Directed Graph concept
+
+---
+
 ## Concepts
 
 ### Graph Traversal
@@ -20,6 +46,8 @@ choice: you want all nodes within N hops, and BFS naturally groups them by dista
 from the root.
 
 > Akanga node: `Graph Traversal`
+
+> → Foundation doc: `docs/foundations/design-patterns.md` (Graph Traversal section)
 
 ### BFS (Breadth-First Search)
 
@@ -167,6 +195,16 @@ def render_ascii(ego: EgoGraph) -> str:
 
 ---
 
+## Common Pitfalls
+
+**Missing cycle detection causes an infinite loop.** Akanga explicitly permits cycles (A supports B, B supports A is valid and meaningful). If you forget the `visited` set, BFS will enqueue A → B → A → B → … until memory is exhausted. This is not a theoretical edge case — any two nodes the user connects bidirectionally will trigger it. The fix is one line: check `if node_id not in visited` before enqueuing.
+
+**Forgetting incoming edges in the ego-graph.** The ego-graph is supposed to show "what does this node connect to, and what connects to it." If you only traverse `get_edges_from` (outgoing), you miss all nodes that point *to* the ego node. The ego-graph must traverse both directions in BFS — outgoing via `get_edges_from` and incoming via `get_edges_to` — with the `direction` flag on `EgoEdge` distinguishing them for the renderer.
+
+**Over-engineering the ASCII renderer.** The ASCII ego-graph has a hard practical ceiling of around 12 nodes regardless of implementation quality. Beyond ~12 nodes, labels overlap and arrows cross unreadably — this is a constraint of the rendering medium, not a bug. Do not spend time building a sophisticated layout algorithm. The correct behavior beyond the ceiling is graceful degradation: truncate with a count ("… and 7 more nodes"). Richer rendering is a v2 feature requiring a proper canvas.
+
+---
+
 ## Deliverable
 
 ```python
@@ -204,3 +242,11 @@ def test_ascii_render_arrows():
 Plus 7 vault nodes with typed edges. The `test_cycle_does_not_loop` test is the most
 important — it proves the visited-set fix works and reflects a deliberate design
 choice (cycles permitted, traversal safe).
+
+---
+
+## Reflect
+
+> **Solo:** The traversal tracks `visited` by node ID. But what about edges — could the same edge appear twice in `ego.edges`? Walk through the case where A → B and B → A both exist and depth=2. How many times does the edge A → B appear in the result, and is that correct behavior for the renderer?
+
+> **Group:** BFS was chosen over DFS because it naturally groups nodes by distance from the root. But the ego-graph result (`EgoGraph.nodes`) is a dict keyed by UUID — distance is not stored. Should distance be included in the result? What would the TUI or ASCII renderer need to do differently if it had distance information, and is that worth the added complexity at this stage?

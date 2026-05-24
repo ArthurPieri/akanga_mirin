@@ -8,6 +8,28 @@ wiring them together safely without deadlocks, missed events, or blocked UIs.
 
 ---
 
+## Learning Objectives
+
+By the end of this phase, you will be able to:
+- Explain why threads and asyncio cannot call each other directly and how `run_coroutine_threadsafe` bridges them
+- Implement a debounced file watcher using watchdog that coalesces rapid saves into single events
+- Implement a thread-safe pub/sub EventBus with subscriber error isolation
+- Wire the watcher, EventBus, and indexer together in an application startup sequence
+
+---
+
+## Before You Start — 2-Minute Self-Assessment
+
+Check each item you can answer confidently. If you can't check 3 or more, review the linked foundation doc before proceeding.
+
+- [ ] I understand the difference between threads and async/await → See `docs/foundations/python-threading.md`
+- [ ] I know what an asyncio event loop is → See `docs/foundations/asyncio-primer.md`
+- [ ] I understand threading.Lock and thread safety → See `docs/foundations/python-threading.md`
+- [ ] I know what a timer is and how threading.Timer works → See `docs/foundations/python-threading.md`
+- [ ] I've completed Phases 0–3
+
+---
+
 ## Concepts
 
 ### File Watching
@@ -20,6 +42,8 @@ close_write, attribute change). The watcher must be selective about what it acts
 and when, or it floods downstream components with redundant work.
 
 > Akanga node: `File Watching`
+
+→ Foundation doc: `docs/foundations/python-threading.md`
 
 ### Debouncing
 
@@ -46,6 +70,8 @@ the whole loop. A bridge is required.
 
 > Akanga node: `Threads vs asyncio`
 
+→ Foundation doc: `docs/foundations/asyncio-primer.md`
+
 ### Event Bus (pub/sub)
 
 A publish/subscribe message bus where publishers emit named events without knowing who
@@ -57,6 +83,8 @@ other subscribers from running. The event bus is the nervous system of the appli
 
 > Akanga node: `Event Bus`
 
+→ Foundation doc: `docs/foundations/design-patterns.md` (Observer pattern section)
+
 ### `run_coroutine_threadsafe`
 
 The standard Python bridge between a daemon thread and an asyncio event loop.
@@ -67,6 +95,8 @@ are scheduled onto the asyncio loop rather than called directly (which would vio
 asyncio's single-thread contract and likely crash).
 
 > Akanga node: `run_coroutine_threadsafe`
+
+→ Foundation doc: `docs/foundations/asyncio-primer.md`
 
 ### Sync Queue Drain
 
@@ -166,6 +196,18 @@ on file_changed:
   git_manager.stage_and_commit()     → debounced 5s (Phase 7)
   eventbus.publish('node_updated')   → TUI refreshes (Phase 5)
 ```
+
+---
+
+## Common Pitfalls
+
+**Calling async from a thread directly:** `await handler()` inside a watchdog callback will fail — watchdog runs in a non-asyncio thread. Use `asyncio.run_coroutine_threadsafe(handler(), loop)` or make the handler sync.
+
+**Global debounce timer instead of per-path:** If you use one timer for all paths, a save to `a.md` resets the timer for `b.md`. Use `dict[path → Timer]` with lock protection.
+
+**Re-raising subscriber exceptions:** If an EventBus subscriber raises and you let it propagate, all subsequent subscribers for that event are skipped. Always `try/except` per handler.
+
+**Forgetting timer.daemon = True:** A non-daemon timer thread keeps the process alive after the main thread exits. Always set `timer.daemon = True` before `timer.start()`.
 
 ---
 
@@ -378,3 +420,11 @@ This section wires logging into Phase 4 specifically. The full observability mod
 sync and async functions, SQLite slow-query detection, in-memory metrics, and
 structured health endpoints. Return to it when you build the REST API (Phase 6) and
 the MCP server (Phase 8) — git specifically is Phase 7.
+
+---
+
+## Reflect
+
+> **Solo:** Draw a timeline diagram showing: a file save event → OS notification → watchdog callback → debounce timer → EventBus publish → indexer subscriber → `node_updated` event. Where do thread boundaries occur?
+
+> **Group:** What would happen if two files changed simultaneously during the debounce window? Would both trigger separate events, or could they interfere? Walk through the per-path timer design together.

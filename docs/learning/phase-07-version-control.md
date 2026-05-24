@@ -14,6 +14,26 @@ with a smart squash step: record everything, clean it up before committing.
 
 ---
 
+## Learning Objectives
+
+By the end of this phase, you will be able to:
+- Implement a GitPython wrapper with non-fatal error handling
+- Understand why git errors must be swallowed (git is optional, not required)
+- Implement debounced auto-commit (5s) that batches rapid file changes
+- Distinguish `is_dirty`, `status`, `commit`, and `push` — and when each is needed
+
+---
+
+## Before You Start — 2-Minute Self-Assessment
+
+Check each item you can answer confidently. If you can't check 3 or more, review the linked foundation doc before proceeding.
+
+- [ ] I understand git commit workflow (add → commit → push) → See `docs/foundations/git-basics.md`
+- [ ] I know how to use GitPython's `Repo` class → See `docs/foundations/git-basics.md`
+- [ ] I've completed Phases 0–6
+
+---
+
 ## Concepts
 
 ### Git as User Feature
@@ -28,6 +48,8 @@ ever running a git command.
 
 > Akanga node: `Git as User Feature`
 
+→ Foundation doc: `docs/foundations/git-basics.md`
+
 ### GitPython
 
 A Python library that wraps git operations without shelling out: `Repo.init()`,
@@ -36,6 +58,8 @@ on failure. Akanga always catches this and logs it as a warning — never re-rai
 Git failure is non-fatal by design.
 
 > Akanga node: `GitPython`
+
+→ Foundation doc: `docs/foundations/git-basics.md`
 
 ### Change Queue
 
@@ -316,6 +340,18 @@ eventbus.subscribe("node_deleted", lambda node_id, title, **_:
 
 ---
 
+## Common Pitfalls
+
+**Not checking is_dirty before committing:** `repo.index.commit(message)` on a clean repo creates an empty commit. Always check `is_dirty()` first.
+
+**Using os.path instead of GitPython:** `git.status()` via GitPython returns structured output; `os.system("git status")` returns a raw string that's harder to parse. Use the library.
+
+**Forgetting git user config in CI:** Git commits fail without `user.email` and `user.name`. In tests, configure these explicitly with `repo.config_writer().set_value("user", "email", "test@test.com").release()`.
+
+**Re-raising git exceptions:** Git is optional. A user without git should still be able to use Akanga. Wrap all GitPython calls in `try/except` and log errors rather than raising.
+
+---
+
 ## Deliverable
 
 ```python
@@ -413,3 +449,11 @@ Plus 9 vault nodes with typed edges. The `test_queue_cancels_create_delete` and
 `test_startup_commits_leftover_queue` tests are the most important — the first proves
 the squash step eliminates noise correctly, the second proves work is never lost even
 if the process dies between commits.
+
+---
+
+## Reflect
+
+> **Solo:** The auto-commit debounce is 5 seconds. What are the tradeoffs between 1s, 5s, and 30s debounce windows for vault auto-commits?
+
+> **Group:** Should git commit messages be generic ("vault update") or descriptive ("Add note: Cognitive Load")? What would you need to implement to generate descriptive messages?
