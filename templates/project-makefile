@@ -1,0 +1,130 @@
+# =============================================================================
+# Akanga — Your Implementation Makefile
+# =============================================================================
+#
+# Copy this file to the root of your own Akanga project directory:
+#
+#   cp /path/to/akanga_mirin/templates/project-makefile Makefile
+#
+# Then set MIRIN to the akanga_mirin repo path (or export it in your shell):
+#
+#   make test PHASE=0 MIRIN=~/code/akanga_mirin
+#
+# Usage: make <target> [PHASE=N]
+
+.DEFAULT_GOAL := help
+
+# ── Variables ─────────────────────────────────────────────────────────────────
+
+PHASE     ?= 0
+PHASE_PAD := $(shell printf "%02d" $(PHASE))
+
+# Path to the akanga_mirin learning repo — where tests/ lives.
+# Override with: make test PHASE=2 MIRIN=~/code/akanga_mirin
+MIRIN     ?= $(HOME)/code/akanga_mirin
+
+VAULT     ?= ./vault
+DB        ?= ./.akanga.db
+HOST      ?= 127.0.0.1
+PORT      ?= 8000
+
+PYTHON    := uv run python
+PYTEST    := uv run pytest
+RUFF      := uv run ruff
+
+.PHONY: help test run serve index init-vault mcp clean lint setup
+
+# =============================================================================
+# HELP
+# =============================================================================
+
+help:
+	@printf '\n'
+	@printf '  \033[1;36mAkanga — Your Implementation\033[0m\n'
+	@printf '\n'
+	@printf '  \033[1;33mLearning workflow\033[0m\n'
+	@printf '    \033[36m%-34s\033[0m %s\n' "make test PHASE=2" "Run phase 02 tests against your src/"
+	@printf '    \033[36m%-34s\033[0m %s\n' "make test" "Run phase 00 tests (default)"
+	@printf '\n'
+	@printf '  \033[1;33mRuntime workflow\033[0m\n'
+	@printf '    \033[36m%-34s\033[0m %s\n' "make run" "Start the Textual TUI"
+	@printf '    \033[36m%-34s\033[0m %s\n' "make serve" "Start the REST API server (127.0.0.1:8000)"
+	@printf '    \033[36m%-34s\033[0m %s\n' "make index" "Re-index the vault"
+	@printf '    \033[36m%-34s\033[0m %s\n' "make mcp" "Start the MCP server"
+	@printf '\n'
+	@printf '  \033[1;33mSetup workflow\033[0m\n'
+	@printf '    \033[36m%-34s\033[0m %s\n' "make setup" "Install project dependencies via uv"
+	@printf '    \033[36m%-34s\033[0m %s\n' "make init-vault" "Create vault/ directory and akanga.yaml"
+	@printf '\n'
+	@printf '  \033[1;33mQuality workflow\033[0m\n'
+	@printf '    \033[36m%-34s\033[0m %s\n' "make lint" "Lint src/ with ruff"
+	@printf '    \033[36m%-34s\033[0m %s\n' "make clean" "Remove .akanga.db and __pycache__"
+	@printf '\n'
+	@printf '  \033[2mMIRIN=%s\033[0m\n' "$(MIRIN)"
+	@printf '  \033[2mSet MIRIN to override: make test PHASE=2 MIRIN=~/code/akanga_mirin\033[0m\n'
+	@printf '\n'
+
+# =============================================================================
+# LEARNING — run tests against your own src/
+# =============================================================================
+
+test: ## Run phase tests against your src/
+	@if [ ! -d "$(MIRIN)/tests/phase_$(PHASE_PAD)" ]; then \
+		printf '\033[0;31merror:\033[0m tests not found at %s/tests/phase_%s\n' \
+			"$(MIRIN)" "$(PHASE_PAD)"; \
+		echo "Set MIRIN to the path of the akanga_mirin repo."; \
+		echo "  make test PHASE=$(PHASE) MIRIN=~/code/akanga_mirin"; \
+		exit 1; \
+	fi; \
+	printf 'Testing phase \033[36m%s\033[0m against ./src/ ...\n' "$(PHASE_PAD)"; \
+	AKANGA_SRC=./src $(PYTEST) "$(MIRIN)/tests/phase_$(PHASE_PAD)/" -v
+
+# =============================================================================
+# RUNTIME
+# =============================================================================
+
+run: ## Start the Textual TUI
+	$(PYTHON) -m akanga_core.cli tui --vault $(VAULT) --db $(DB)
+
+serve: ## Start the REST API server (default: 127.0.0.1:8000)
+	$(PYTHON) -m akanga_core.cli serve \
+		--vault $(VAULT) --db $(DB) \
+		--host $(HOST) --port $(PORT)
+
+index: ## Re-index the vault (scans vault/ and updates .akanga.db)
+	$(PYTHON) -m akanga_core.cli index --vault $(VAULT) --db $(DB)
+
+mcp: ## Start the MCP server (for Claude Code / Claude Desktop integration)
+	$(PYTHON) -m akanga_core.cli mcp-server --vault $(VAULT) --db $(DB)
+
+# =============================================================================
+# SETUP
+# =============================================================================
+
+setup: ## Install project dependencies via uv
+	uv sync
+	@printf '\n\033[0;32mDone.\033[0m Run \033[36mmake init-vault\033[0m then \033[36mmake run\033[0m.\n'
+
+init-vault: ## Create vault/ directory and a minimal akanga.yaml config
+	@mkdir -p $(VAULT)
+	@if [ ! -f "$(VAULT)/akanga.yaml" ]; then \
+		printf 'vault:\n  path: $(VAULT)\ngit:\n  enabled: false\n  auto_push: false\n' \
+			> $(VAULT)/akanga.yaml; \
+		printf 'Created \033[36m$(VAULT)/akanga.yaml\033[0m\n'; \
+	else \
+		echo "$(VAULT)/akanga.yaml already exists — skipping."; \
+	fi
+	@printf 'Vault ready at \033[36m$(VAULT)/\033[0m\n'
+
+# =============================================================================
+# QUALITY
+# =============================================================================
+
+lint: ## Lint src/ with ruff
+	$(RUFF) check src/
+
+clean: ## Remove .akanga.db, __pycache__, .coverage, and .pyc files
+	@rm -f $(DB) $(DB)-wal $(DB)-shm .coverage
+	@find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	@find . -name "*.pyc" -delete 2>/dev/null || true
+	@echo "Cleaned."
