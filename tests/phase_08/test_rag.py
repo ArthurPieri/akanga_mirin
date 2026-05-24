@@ -137,10 +137,8 @@ class TestBuildContextContent:
         context = build_context(root_node, ctx_obj.db, ctx_obj.vault)
 
         # "mental process" is in the body of cognition.md
-        assert "mental process" in context or "Cognition" in context, (
-            "build_context should include body text read from the .md file on disk. "
-            "The Cognition node body mentions 'mental process'. "
-            f"Got context: {context[:400]!r}"
+        assert "mental process" in context, (
+            f"Expected disk-read body content 'mental process' in context, got: {context[:200]!r}"
         )
 
 

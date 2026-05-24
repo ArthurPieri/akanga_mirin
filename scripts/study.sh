@@ -17,7 +17,7 @@
 #
 # Environment variables:
 #   AKANGA_CODE  → path to your code directory (default: ~/code/akanga)
-#   AKANGA_DOCS  → path to akanga_mirin repo  (default: ~/code/akanga_mirin)
+#   AKANGA_DOCS  → path to the docs/ directory (default: ~/code/akanga_mirin/docs)
 
 set -euo pipefail
 
@@ -32,7 +32,7 @@ WINDOW="phase-${PADDED}"
 # ── Locate the phase document ─────────────────────────────────────────────────
 PHASE_DOC=$(find "$AKANGA_DOCS/learning" -name "phase-${PADDED}-*.md" 2>/dev/null | head -1)
 if [[ -z "$PHASE_DOC" ]]; then
-    echo "error: no phase doc found for phase ${PADDED} in $AKANGA_DOCS/docs/learning"
+    echo "error: no phase doc found for phase ${PADDED} in $AKANGA_DOCS/learning"
     exit 1
 fi
 

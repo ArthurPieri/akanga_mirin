@@ -1,4 +1,5 @@
 """Phase 01 conftest — resolves AKANGA_SRC and provides shared fixtures."""
+import sqlite3
 from pathlib import Path
 from textwrap import dedent
 
@@ -20,6 +21,42 @@ def tmp_vault(tmp_path: Path) -> Path:
     config_path = tmp_path / "akanga.yaml"
     config_path.write_text(yaml.dump(MINIMAL_VAULT_CONFIG), encoding="utf-8")
     return tmp_path
+
+
+def _load_sync_queue():
+    """Import the learner's sync_queue module.
+
+    Tries ``sync_queue`` first (flat layout), then ``akanga_core.sync_queue``
+    (package layout).  Fails with a clear message if neither is found.
+    """
+    try:
+        import sync_queue as m  # noqa: PLC0415
+        return m
+    except ModuleNotFoundError:
+        try:
+            from akanga_core import sync_queue as m  # noqa: PLC0415
+            return m
+        except ModuleNotFoundError:
+            pytest.fail("Cannot import sync_queue module.")
+
+
+@pytest.fixture()
+def tmp_db(tmp_path: Path):
+    """A bare SQLite connection with the sync_queue table already created."""
+    conn = sqlite3.connect(str(tmp_path / "test.db"))
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS sync_queue (
+            id TEXT PRIMARY KEY,
+            job_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            new_name TEXT NOT NULL,
+            enqueued_at TEXT NOT NULL,
+            processed_at TEXT
+        )
+    """)
+    conn.commit()
+    yield conn
+    conn.close()
 
 
 @pytest.fixture()

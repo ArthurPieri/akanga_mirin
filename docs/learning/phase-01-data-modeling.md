@@ -1,3 +1,12 @@
+> **⚠ SUPERSEDED — This document has been replaced.**
+> Phase 1 is now split into:
+> - [Phase 1A — Data Modeling & Edge Schema](phase-01a-data-modeling-edge-schema.md)
+> - [Phase 1B — Workspace Registry & Sync Queue](phase-01b-workspace-and-sync.md)
+>
+> This file is kept for reference only. Do not use it as the authoritative spec.
+> The table schema in this file uses deprecated column names (`title_sync_queue`, `node_id`).
+> The current schema uses `sync_queue` and `entity_id`. See Phase 1B for the correct spec.
+
 # Phase 1 — Data Modeling
 
 **Core concept:** Deciding what the data *is* before deciding how to store it. Phase 0

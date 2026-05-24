@@ -30,7 +30,7 @@ Check each item you can answer confidently. If you can't check 3 or more, review
 
 - [ ] I understand git commit workflow (add → commit → push) → See `docs/foundations/git-basics.md`
 - [ ] I know how to use GitPython's `Repo` class → See `docs/foundations/git-basics.md`
-- [ ] I've completed Phases 0–6
+- [ ] I've completed Phases 0, 1A, 1B, 2, 3, 4, 5, and 6
 
 ---
 
@@ -211,132 +211,47 @@ documents the source-of-truth boundary as clearly as any README.
 
 ## What You Build
 
-**`commit_queue.py`** — `ChangeQueue`:
-
-```python
-@dataclass
-class ChangeEntry:
-    type: str        # "create" | "edit" | "delete"
-    node_id: str
-    title: str
-    timestamp: str
-
-@dataclass
-class CommitSummary:
-    created: list[str]
-    edited: list[str]
-    deleted: list[str]
-
-    @property
-    def is_empty(self) -> bool:
-        return not (self.created or self.edited or self.deleted)
-
-class ChangeQueue:
-    def __init__(self, persist_path: Path): ...
-
-    def append(self, entry: ChangeEntry):
-        """Add entry and persist to disk."""
-
-    def squash(self) -> CommitSummary:
-        """Collapse raw log → clean summary (dedup, cancel, reconcile)."""
-
-    def generate_message(self, summary: CommitSummary, prefix: str = "") -> str:
-        """Human-readable commit message from squashed summary."""
-
-    def clear(self):
-        """Called after successful commit. Clears memory + disk."""
-
-    def load(self):
-        """Load persisted queue on startup. Auto-commits leftover if non-empty."""
-```
-
 **`gitmgr.py`** — `GitManager`:
 
 ```python
 class GitManager:
-    def __init__(self, vault: Path, queue: ChangeQueue, enabled: bool = True): ...
+    def __init__(self, repo_path: str | Path) -> None:
+        """Open an existing git repository at repo_path.
+        Sets self.repo = None (with a warning log) if path is not a git repo."""
 
-    def init_or_open(self) -> bool:
-        """Detect existing repo; init if absent. Write .gitignore. Returns True if active."""
+    def is_dirty(self) -> bool:
+        """Return True if there are any uncommitted changes (including untracked files).
+        Returns False if self.repo is None or on any exception."""
 
-    def _write_gitignore(self):
-        content = """# Akanga derived index — rebuilt by `akanga index`
-.akanga.db
-.akanga.db-wal
-.akanga.db-shm
+    def active_branch(self) -> str:
+        """Return the name of the currently checked-out branch.
+        Returns empty string if self.repo is None or on any exception."""
 
-# Akanga internal state
-.akanga/
+    def status(self) -> str:
+        """Return git status output as a human-readable string.
+        Returns empty string if self.repo is None or on any exception."""
 
-# Python
-.venv/
-__pycache__/
-*.pyc
-.coverage
+    def commit(self, message: str) -> str | None:
+        """Stage all changes (git add -A) and create a commit.
+        Returns the commit SHA string, or None on failure or when nothing to commit.
+        Non-fatal — never raises."""
 
-# Editor
-.DS_Store
-*.swp
-*.tmp
-"""
+    def push(self, remote_name: str = "origin") -> None:
+        """Push the current branch to the named remote.
+        Non-fatal — logs and returns on failure, never raises."""
 
-    def stage_and_commit(self, message: str | None = None) -> bool:
-        """Squash queue → git add .md + akanga.yaml → commit. Non-fatal. Returns success."""
+    @staticmethod
+    def init_repo(path: str | Path) -> "GitManager":
+        """Initialize a new git repository at path and return a GitManager for it."""
 
-    def push(self, remote: str = "origin") -> bool:
-        """Push to remote. Returns False and logs on failure. Never raises."""
-
-    def status(self) -> dict:
-        """{'is_repo': bool, 'clean': bool, 'modified': int, 'untracked': int, 'ahead': int}"""
-
-    async def on_session_end(self):
-        """Called on quit. Squash + commit if queue non-empty."""
-
-    async def on_periodic_tick(self):
-        """Called every N minutes. Squash + commit if queue non-empty."""
+    @staticmethod
+    def is_git_repo(path: str | Path) -> bool:
+        """Return True if path contains a valid git repository."""
 ```
 
-**`akanga.yaml` git config block:**
-
-```yaml
-git:
-  enabled: true
-  commit_on_session_end: true
-  commit_interval: null      # minutes, null = disabled. e.g. 15
-  auto_push: false           # explicit P keybinding only
-  remote: origin
-```
-
-**TUI keybinding additions** (to Phase 5's keybinding table):
-
-| Key | Action |
-|---|---|
-| `C` | Manual commit — opens overlay with squashed summary + editable message |
-| `P` | Push to remote — explicit, with confirmation |
-
-**`C` overlay in TUI:**
-
-```
-╭─ Commit ──────────────────────────────────────────────╮
-│ Message: update: Fast Thinking is Unreliable          │
-│                                                       │
-│ 3 edits squashed → 1 commit                           │
-│ Files: fast-thinking-is-unreliable.md                 │
-│                                                       │
-│  [Enter] commit    [e] edit message    [Esc] cancel   │
-╰───────────────────────────────────────────────────────╯
-```
-
-**EventBus wiring in `app.py`:**
-
-```python
-eventbus.subscribe("node_created", lambda node_id, title, **_:
-    queue.append(ChangeEntry(type="create", node_id=node_id, title=title, ...)))
-eventbus.subscribe("node_updated", lambda node_id, title, **_:
-    queue.append(ChangeEntry(type="edit",   node_id=node_id, title=title, ...)))
-eventbus.subscribe("node_deleted", lambda node_id, title, **_:
-    queue.append(ChangeEntry(type="delete", node_id=node_id, title=title, ...)))
-```
+All git operations are non-fatal by design: every method wraps its GitPython calls in
+`try/except` and logs failures at WARNING level rather than re-raising. A user without
+git installed (or whose repo is in a broken state) must still be able to use Akanga.
 
 ---
 
@@ -354,101 +269,20 @@ eventbus.subscribe("node_deleted", lambda node_id, title, **_:
 
 ## Deliverable
 
-```python
-def test_git_init_creates_repo(tmp_path):
-    gm = GitManager(tmp_path, ChangeQueue(tmp_path / ".akanga" / "queue.json"))
-    gm.init_or_open()
-    assert (tmp_path / ".git").exists()
-    assert (tmp_path / ".gitignore").exists()
+The complete test suite is in `tests/phase_07/test_git.py`. It covers:
+`is_git_repo`, `init_repo`, `active_branch`, `is_dirty`, `commit`, `status`, and `push`.
 
-def test_db_not_committed(tmp_path):
-    gm = GitManager(tmp_path, ChangeQueue(...))
-    gm.init_or_open()
-    (tmp_path / ".akanga.db").write_bytes(b"sqlite")
-    (tmp_path / "note.md").write_text("# Note")
-    gm.stage_and_commit("test")
-    repo = Repo(tmp_path)
-    assert ".akanga.db" not in repo.head.commit.stats.files
+Key behaviors the tests verify:
 
-def test_queue_deduplicates_edits():
-    q = ChangeQueue(Path("/tmp/queue.json"))
-    for _ in range(5):
-        q.append(ChangeEntry(type="edit", node_id="abc", title="Note A", timestamp="..."))
-    summary = q.squash()
-    assert summary.edited == ["Note A"]
-    assert len(summary.edited) == 1
+- `is_git_repo` returns `True` for a `.git`-containing directory and `False` otherwise
+- `init_repo` creates a `.git` directory and returns a `GitManager` instance
+- `active_branch` returns a non-empty string (typically `"main"` or `"master"`)
+- `is_dirty` returns `False` on a clean repo and `True` after staging changes
+- `commit` records the given message in `git log` and returns a SHA string or `None`
+- `status` returns a non-empty string without crashing
+- All methods are non-fatal on a broken or non-git directory — errors are caught and logged
 
-def test_queue_cancels_create_delete():
-    q = ChangeQueue(Path("/tmp/queue.json"))
-    q.append(ChangeEntry(type="create", node_id="abc", title="Temp Note", timestamp="..."))
-    q.append(ChangeEntry(type="delete", node_id="abc", title="Temp Note", timestamp="..."))
-    summary = q.squash()
-    assert summary.is_empty   # created + deleted in same session → nothing
-
-def test_queue_edit_then_delete():
-    q = ChangeQueue(Path("/tmp/queue.json"))
-    q.append(ChangeEntry(type="edit",   node_id="abc", title="Note A", timestamp="..."))
-    q.append(ChangeEntry(type="delete", node_id="abc", title="Note A", timestamp="..."))
-    summary = q.squash()
-    assert summary.deleted == ["Note A"]
-    assert summary.edited == []   # edited then deleted → just deleted
-
-def test_queue_message_generation():
-    q = ChangeQueue(Path("/tmp/queue.json"))
-    q.append(ChangeEntry(type="create", node_id="a", title="BFS", timestamp="..."))
-    q.append(ChangeEntry(type="edit",   node_id="b", title="Akanga", timestamp="..."))
-    q.append(ChangeEntry(type="delete", node_id="c", title="Old Note", timestamp="..."))
-    msg = q.generate_message(q.squash())
-    assert "add: BFS" in msg
-    assert "update: Akanga" in msg
-    assert "delete: Old Note" in msg
-
-def test_queue_persists_to_disk(tmp_path):
-    persist_path = tmp_path / "queue.json"
-    q = ChangeQueue(persist_path)
-    q.append(ChangeEntry(type="edit", node_id="abc", title="Note A", timestamp="..."))
-    assert persist_path.exists()
-    # Reload
-    q2 = ChangeQueue(persist_path)
-    q2.load()
-    assert len(q2._entries) == 1
-
-def test_startup_commits_leftover_queue(tmp_path):
-    # Simulate crash: queue has entries, no commit yet
-    persist_path = tmp_path / ".akanga" / "queue.json"
-    persist_path.parent.mkdir()
-    q = ChangeQueue(persist_path)
-    q.append(ChangeEntry(type="edit", node_id="abc", title="Note A", timestamp="..."))
-    (tmp_path / "note-a.md").write_text("# Note A")
-    gm = GitManager(tmp_path, q)
-    gm.init_or_open()
-    # On startup, load() detects non-empty queue and commits
-    gm.commit_from_queue_if_needed()
-    repo = Repo(tmp_path)
-    assert len(list(repo.iter_commits())) >= 1
-
-def test_git_failure_non_fatal(tmp_path):
-    gm = GitManager(tmp_path, ChangeQueue(...))
-    gm.init_or_open()
-    import shutil
-    shutil.rmtree(tmp_path / ".git" / "refs")
-    # Must not raise:
-    result = gm.stage_and_commit("test")
-    assert result is False   # failed but did not crash
-
-def test_push_non_fatal_without_remote(tmp_path):
-    gm = GitManager(tmp_path, ChangeQueue(...))
-    gm.init_or_open()
-    (tmp_path / "note.md").write_text("# Note")
-    gm.stage_and_commit("init")
-    result = gm.push()
-    assert result is False   # no remote → False, no exception
-```
-
-Plus 9 vault nodes with typed edges. The `test_queue_cancels_create_delete` and
-`test_startup_commits_leftover_queue` tests are the most important — the first proves
-the squash step eliminates noise correctly, the second proves work is never lost even
-if the process dies between commits.
+Plus 9 vault nodes with typed edges.
 
 ---
 

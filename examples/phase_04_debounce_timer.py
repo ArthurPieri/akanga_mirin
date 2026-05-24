@@ -5,7 +5,8 @@ Run: python examples/phase_04_debounce_timer.py
 Shows how rapid events are coalesced into a single action
 after the burst settles. 10 rapid calls → 1 actual execution.
 """
-import threading, time
+import threading
+import time
 
 
 class Debouncer:

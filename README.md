@@ -72,11 +72,11 @@ make test-solution PHASE=0            # reference solution (to compare)
 AKANGA_SRC=./src make test PHASE=2
 ```
 
-If `AKANGA_SRC` is not set, the tests automatically fall back to the reference solution — useful for verifying the tests themselves are correct.
+If `AKANGA_SRC` is not set, tests will fail with a clear error message telling you to set it. Use `AKANGA_SRC=./src make test PHASE=N` to test your own code.
 
 **Reference solutions.** `solutions/phase_NN/` contains a complete, working implementation of all phases up to and including phase N. Look at it after you've written your own version, not before.
 
-**Foundation docs.** `docs/foundations/` has 10 optional explainers (SQLite basics, asyncio primer, git basics, JSON-RPC, and more). Skip them if you already know the topic; read them if you're unfamiliar. They are not blocking prerequisites.
+**Foundation docs.** `docs/foundations/` has 13 optional explainers (SQLite basics, asyncio primer, git basics, JSON-RPC, and more). Skip them if you already know the topic; read them if you're unfamiliar. They are not blocking prerequisites.
 
 ---
 
@@ -107,8 +107,9 @@ Requires: `tmux`, `nvim`, `glow`, `claude` (Claude Code CLI).
 akanga_mirin/
 ├── Makefile                        # all workflows: study, test, lint, serve
 ├── docs/
+│   ├── README.md                   # documentation navigation hub ← start here
 │   ├── learning/                   # 9 phase docs (the learning path)
-│   ├── foundations/                # 10 optional explainer docs
+│   ├── foundations/                # 13 optional explainer docs
 │   ├── implementation-plan.md      # master task list for repo contributors
 │   ├── roadmap.md                  # MVP / V1 / V2 / V4+ version plan
 │   ├── user-stories.md             # 38 stories across 5 personas

@@ -5,7 +5,11 @@ Run: python examples/phase_07_git_manager.py
 Shows how to wrap GitPython so git errors never crash the application.
 A user without git gets a warning, not an exception.
 """
-import logging, tempfile, os
+import logging
+import tempfile
+import os
+import shutil
+import sys
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -33,6 +37,10 @@ def safe_git_commit(repo_path: Path, message: str) -> str | None:
 
 
 # Demo with a real temp repo
+if not shutil.which("git"):
+    print("git is not installed or not in PATH. Skipping git demo.")
+    sys.exit(0)
+
 with tempfile.TemporaryDirectory() as tmp:
     import subprocess
     subprocess.run(["git", "init"], cwd=tmp, capture_output=True)

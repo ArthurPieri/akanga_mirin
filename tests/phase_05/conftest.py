@@ -66,11 +66,11 @@ def tmp_db(tmp_vault: Path, tmp_path: Path):
     Yields the open database; closes it after the test.
     """
     from akanga_core.db import GraphDatabase
-    from akanga_core.indexer import index_vault
+    from akanga_core.indexer import full_scan_and_index
 
     db_path = tmp_path / "test.db"
     db = GraphDatabase(str(db_path))
-    index_vault(str(tmp_vault), db)
+    full_scan_and_index(str(tmp_vault), db)
     yield db
     db.close()
 

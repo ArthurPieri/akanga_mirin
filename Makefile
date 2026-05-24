@@ -155,7 +155,7 @@ test-solution: ## Run tests for one phase against the reference solution (PHASE=
 	@PHASE_PAD=$$(printf "%02d" $(PHASE)); \
 	SOLUTION_SRC="solutions/phase_$${PHASE_PAD}/src"; \
 	if [ ! -d "$$SOLUTION_SRC" ]; then \
-		echo "error: no solution found at $$SOLUTION_SRC"; exit 1; \
+		echo "Solutions for phase $(PHASE) are not yet published. See solutions/README.md."; exit 1; \
 	fi; \
 	echo "Testing phase $${PHASE_PAD} against reference solution ..."; \
 	AKANGA_SRC="$$SOLUTION_SRC" $(PYTEST) tests/phase_$${PHASE_PAD}/ -v
@@ -207,7 +207,7 @@ verify: ## Verify solution N passes all tests 00..N cumulatively (PHASE=3)
 	@PHASE_PAD=$$(printf "%02d" $(PHASE)); \
 	SOLUTION_SRC="solutions/phase_$${PHASE_PAD}/src"; \
 	if [ ! -d "$$SOLUTION_SRC" ]; then \
-		echo "error: no solution at $$SOLUTION_SRC"; exit 1; \
+		echo "Solutions for phase $(PHASE) are not yet published. See solutions/README.md."; exit 1; \
 	fi; \
 	echo "Verifying phase $${PHASE_PAD} solution against phases 00..$${PHASE_PAD} ..."; \
 	FAILED=0; \

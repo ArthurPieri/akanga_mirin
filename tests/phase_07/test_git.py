@@ -123,9 +123,6 @@ class TestActiveBranch:
         assert isinstance(branch, str) and branch, (
             f"active_branch() must return a non-empty string, got {branch!r}."
         )
-        assert branch in {"main", "master"} or branch, (
-            "Expected branch name to be a non-empty string."
-        )
 
 
 class TestIsDirty:

@@ -19,12 +19,6 @@ from __future__ import annotations
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# asyncio mode — all tests in this module are async
-# ---------------------------------------------------------------------------
-
-pytestmark = pytest.mark.asyncio
-
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -178,7 +172,7 @@ async def test_tui_node_count_matches_db(tmp_vault, tmp_db, tmp_path):
     app = _make_app(TUI, vault=str(tmp_vault), db_path=db_path)
 
     # The db fixture indexed 3 nodes (alpha, beta, gamma).
-    expected_count = len(tmp_db.get_all_nodes())
+    expected_count = len(tmp_db.list_nodes())
     assert expected_count == 3, f"Precondition: expected 3 nodes in db, got {expected_count}"
 
     async with app.run_test() as pilot:

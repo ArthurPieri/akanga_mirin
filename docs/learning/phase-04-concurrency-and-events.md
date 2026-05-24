@@ -26,7 +26,7 @@ Check each item you can answer confidently. If you can't check 3 or more, review
 - [ ] I know what an asyncio event loop is → See `docs/foundations/asyncio-primer.md`
 - [ ] I understand threading.Lock and thread safety → See `docs/foundations/python-threading.md`
 - [ ] I know what a timer is and how threading.Timer works → See `docs/foundations/python-threading.md`
-- [ ] I've completed Phases 0–3
+- [ ] I've completed Phases 0, 1A, 1B, 2, and 3
 
 ---
 
@@ -100,7 +100,7 @@ asyncio's single-thread contract and likely crash).
 
 ### Sync Queue Drain
 
-The mechanism that executes the lazy work enqueued in Phase 1. The drain worker reads
+The mechanism that executes the lazy work enqueued in Phase 1B. The drain worker reads
 pending jobs from `sync_queue`, processes each (reads the affected file, updates the
 stale display-name field, writes atomically), and marks it processed. Three job types:
 `node_title` (update `target` field in edges), `workspace_name` (update `name` in
