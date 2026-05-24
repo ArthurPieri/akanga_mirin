@@ -153,14 +153,13 @@ CREATE TABLE nodes (
     description   TEXT
 );
 
-CREATE TABLE edges (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    source_id    TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-    target_id    TEXT,
-    target_title TEXT NOT NULL,
-    relation     TEXT NOT NULL,
-    relation_id  TEXT NOT NULL,
-    UNIQUE(source_id, relation_id, target_title)
+CREATE TABLE IF NOT EXISTS edges (
+    id          TEXT PRIMARY KEY,
+    source_id   TEXT NOT NULL,
+    target_id   TEXT,
+    relation    TEXT,
+    relation_id TEXT,
+    FOREIGN KEY (source_id) REFERENCES nodes(id) ON DELETE CASCADE
 );
 
 -- Config mirror (loaded from akanga.yaml at startup)
@@ -271,12 +270,25 @@ def test_upsert_and_get():
     db.upsert_node(node)
     assert db.get_node(node.id).title == node.title
 
-def test_content_hash_skip(mocker):
-    db = GraphDatabase(tmp_db)
-    node = create(title="Test", type="note", vault=tmp_path)
-    db.upsert_node(node)
-    spy = mocker.spy(db, "_write_node")
-    db.upsert_node(node)   # same hash — must skip
+def test_content_hash_skip(tmp_path, mocker):
+    # Arrange: write a real .md file so the indexer can read and hash it.
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    md_file = vault / "test-node.md"
+    md_file.write_text("---\ntitle: Test\ntype: note\n---\nHello.\n")
+
+    db = GraphDatabase(tmp_path / ".akanga.db")
+
+    # First index — must call upsert_node to populate the DB.
+    indexer.index_file(str(md_file), db, str(vault))
+
+    # Spy AFTER the first index so we start with a clean call count.
+    spy = mocker.spy(db, "upsert_node")
+
+    # Second index of the same file — content hash unchanged, so the indexer
+    # must detect the match and return early WITHOUT calling upsert_node.
+    indexer.index_file(str(md_file), db, str(vault))
+
     spy.assert_not_called()
 
 def test_two_pass_edge_resolution():

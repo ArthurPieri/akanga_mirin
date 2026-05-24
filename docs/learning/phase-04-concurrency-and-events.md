@@ -258,6 +258,27 @@ def test_subscriber_error_isolation():
     bus.publish("test")   # must not raise
     assert results == [True]
 
+def test_async_subscriber_receives_event():
+    # Verifies that publish() from a non-asyncio thread schedules async
+    # subscribers via run_coroutine_threadsafe (not called directly).
+    loop = asyncio.new_event_loop()
+    loop_thread = threading.Thread(target=loop.run_forever, daemon=True)
+    loop_thread.start()
+    try:
+        bus = EventBus()
+        bus.set_loop(loop)
+        called = []
+        async def async_handler(**kwargs):
+            called.append(kwargs)
+        bus.subscribe("test_event", async_handler)
+        bus.publish("test_event", source="main_thread")   # called from main thread
+        time.sleep(0.2)
+        assert len(called) == 1
+        assert called[0]["source"] == "main_thread"
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        loop_thread.join(timeout=2)
+
 def test_sync_queue_drain_node_title(tmp_path):
     # Node A has edge to B (target="Old Title", target_id=B.id).
     # B is renamed to "New Title" → job enqueued.
@@ -266,7 +287,9 @@ def test_sync_queue_drain_node_title(tmp_path):
 ```
 
 Plus 7 vault nodes with typed edges. The debounce test proves that rapid saves don't
-flood the indexer — the main performance guarantee of this phase.
+flood the indexer — the main performance guarantee of this phase. The async-subscriber
+test proves that `run_coroutine_threadsafe` is wired correctly — async handlers always
+run on the event loop, even when `publish()` is called from a watchdog daemon thread.
 
 ---
 

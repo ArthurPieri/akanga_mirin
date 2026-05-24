@@ -163,7 +163,6 @@ def test_upsert_edge_and_get_neighbors(tmp_db: str, tmp_vault: Path):
     db.upsert_edge({
         "source_id": node_a.id,
         "target_id": node_b.id,
-        "target_title": node_b.title,
         "relation": "supports",
         "relation_id": "EP-001",
     })
@@ -184,7 +183,6 @@ def test_get_backlinks(tmp_db: str, tmp_vault: Path):
     db.upsert_edge({
         "source_id": node_a.id,
         "target_id": node_b.id,
-        "target_title": node_b.title,
         "relation": "contradicts",
         "relation_id": "EP-002",
     })
@@ -205,7 +203,6 @@ def test_delete_node_removes_edges(tmp_db: str, tmp_vault: Path):
     db.upsert_edge({
         "source_id": node_a.id,
         "target_id": node_b.id,
-        "target_title": node_b.title,
         "relation": "supports",
         "relation_id": "EP-001",
     })

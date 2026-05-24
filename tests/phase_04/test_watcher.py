@@ -10,6 +10,7 @@ NOTE: These tests use real filesystem operations and time.sleep() — this is
 unavoidable for debounce/event integration testing. A short debounce_ms is
 used (DEBOUNCE_MS = 80) and sleeps are proportional.
 """
+import asyncio
 import time
 import threading
 from pathlib import Path
@@ -191,3 +192,49 @@ class TestWatcherLifecycle:
             watcher = VaultWatcher(bad_path, bus, debounce_ms=DEBOUNCE_MS)
             watcher.start()
             watcher.stop()
+
+
+class TestEventBusAsyncSubscriber:
+    def test_async_subscriber_receives_event(self) -> None:
+        """publish() from a non-asyncio thread must schedule async handlers via
+        run_coroutine_threadsafe — the async subscriber must still be called.
+
+        Setup:
+          1. Create an asyncio event loop running in a background thread.
+          2. Create an EventBus and call bus.set_loop(loop).
+          3. Subscribe an async coroutine handler.
+          4. Call bus.publish("test_event") from the main thread (not the asyncio thread).
+          5. Wait briefly and assert the async handler ran.
+        """
+        loop = asyncio.new_event_loop()
+        loop_thread = threading.Thread(target=loop.run_forever, daemon=True)
+        loop_thread.start()
+
+        try:
+            bus = EventBus()
+            bus.set_loop(loop)
+
+            called = []
+
+            async def async_handler(**kwargs):
+                called.append(kwargs)
+
+            bus.subscribe("test_event", async_handler)
+
+            # publish from the main (non-asyncio) thread
+            bus.publish("test_event", source="main_thread")
+
+            # give the event loop time to schedule and execute the coroutine
+            time.sleep(0.2)
+
+            assert len(called) == 1, (
+                "Async subscriber was not called after publish() from a non-asyncio thread; "
+                "check that EventBus.publish() uses run_coroutine_threadsafe for coroutines "
+                "when a loop has been set via set_loop()."
+            )
+            assert called[0].get("source") == "main_thread", (
+                "Async subscriber received unexpected payload: %r" % called[0]
+            )
+        finally:
+            loop.call_soon_threadsafe(loop.stop)
+            loop_thread.join(timeout=2)
