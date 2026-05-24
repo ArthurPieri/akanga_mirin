@@ -17,7 +17,7 @@ def write_atomically(path: str, content: str) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
         os.replace(tmp, path)   # atomic: old or new, never partial
-    except Exception:
+    except BaseException:
         try:
             os.unlink(tmp)       # clean up on failure; ignore errors so original exception propagates cleanly
         except OSError:

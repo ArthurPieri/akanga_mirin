@@ -119,9 +119,9 @@ depth.
 |---|---|---|
 | `File Watching` | note | `uses` → `watchdog`; `enables` → `Auto Re-index`; `has_prerequisite` → `Debouncing` |
 | `Debouncing` | note | `solves` → `Event Burst`; `is_applied_in` → `File Watcher`; `is_applied_in` → `Git Auto-Commit` |
-| `Threads vs asyncio` | note | `contrasts_with` → `asyncio`; `motivates` → `run_coroutine_threadsafe` |
+| `Threads vs asyncio` | note | `contrasts_with` → `asyncio` |
 | `Event Bus` | note | `subtype_of` → `Pub/Sub Pattern`; `enables` → `Component Decoupling`; `is_applied_in` → `Akanga App` |
-| `run_coroutine_threadsafe` | note | `solves` → `Thread-to-asyncio Bridge`; `is_part_of` → `Python asyncio`; `is_applied_in` → `Event Bus` |
+| `run_coroutine_threadsafe` | note | `motivated_by` → `Threads vs asyncio`; `solves` → `Thread-to-asyncio Bridge`; `is_part_of` → `Python asyncio`; `is_applied_in` → `Event Bus` |
 | `Sync Queue Drain` | note | `implements` → `Eventual Consistency`; `consumes` → `Background Sync Queue`; `uses` → `Atomic Write` |
 | `watchdog` | reference | `implements` → `File Watching`; `is_applied_in` → `Akanga Watcher` |
 

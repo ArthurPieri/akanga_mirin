@@ -111,9 +111,9 @@ Relations:
 
 Cap at ~80 triples and enforce a hard 12,000-character budget independent of triple
 count. Include node type and a one-sentence description per entity. Descriptions come
-from `node.description` or the first 500 chars of the node body read from disk — never
-from a DB object (the DB does not store body prose). Omit full body prose — the LLM
-should call `get_node` explicitly if it needs the full content.
+from the first 500 chars of the node body read from disk — never from a DB object
+(the DB does not store body prose). Omit full body prose — the LLM should call
+`get_node` explicitly if it needs the full content.
 
 > Akanga node: `Triple Serialization`
 
@@ -150,7 +150,7 @@ dropping data or crashing.
 | Node | Type | Key Edges |
 |---|---|---|
 | `MCP` | reference | `enables` → `AI Integration`; `is_applied_in` → `Akanga MCP Server`; `is_part_of` → `Anthropic Ecosystem` |
-| `FastMCP` | reference | `implements` → `MCP`; `is_applied_in` → `Akanga MCP Server`; `uses` → `FastAPI` |
+| `FastMCP` | reference | `implements` → `MCP`; `is_applied_in` → `Akanga MCP Server`; `uses` → `Starlette` |
 | `Graph RAG` | note | `contrasts_with` → `Vector RAG`; `uses` → `Ego-Graph`; `is_applied_in` → `Akanga RAG` |
 | `Triple Serialization` | note | `is_applied_in` → `Graph RAG`; `enables` → `Prompt Context Injection` |
 | `MCP Tool Design` | note | `is_applied_in` → `Akanga MCP Server`; `qualifies` → `MCP`; `uses` → `codegraph` |
@@ -240,15 +240,16 @@ def _serialize_triples(nodes: dict, edges: list) -> str:
             body_snippet = parse_node_file(node.path).content[:500].replace("\n", " ")
         else:
             body_snippet = ""
-        desc = node.description or body_snippet
+        desc = body_snippet
         lines.append(f"- {node.title} ({node.type}): {desc}")
     lines.append("\nRelations:")
     for edge in edges:
         src = nodes.get(edge.source_id)
         tgt = nodes.get(edge.target_id)
         if src and tgt:
-            # BUG: use relation_id for outgoing edges; for incoming edges (where
-            # the current node is the target) use inverse_id if defined, or <-- prefix.
+            # NOTE: For outgoing edges the current node is the source; use edge.relation.
+            # For incoming edges (current node is the target), prefix with "<-" to show direction:
+            #   f"{src.title} <-[{edge.relation}]- {tgt.title}"
             lines.append(
                 f"- {src.title}  --[{edge.relation_id}]-->  {tgt.title}"
             )

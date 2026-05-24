@@ -3,7 +3,9 @@
 Run: python examples/phase_08_rag_context.py
 
 Shows how to build a safe LLM context string from a knowledge graph node,
-with SEC-01 prompt injection protection via [KNOWLEDGE GRAPH CONTEXT] delimiters.
+with [KNOWLEDGE GRAPH CONTEXT] delimiters for LLM context separation (SEC-01).
+NOTE: Delimiters alone do NOT prevent injection if node titles or content
+contain the literal delimiter string — production code must strip or escape it.
 """
 
 MAX_CONTEXT_CHARS = 12_000
@@ -22,6 +24,10 @@ def build_context(title: str, node_type: str, body: str, triples: list[tuple]) -
         f"Relations:\n" + "\n".join(triple_lines) + "\n"
     )
     body_budget = MAX_CONTEXT_CHARS - WRAPPER_OVERHEAD
+    # SEC-01: Delimiter wrapping is a convention for LLM context separation.
+    # NOTE: Delimiters do NOT prevent injection if node titles or body content
+    # contains the literal string "[/KNOWLEDGE GRAPH CONTEXT]". Production code
+    # should strip or escape the delimiter string from all untrusted content.
     context = _OPEN_DELIM + body_text[:body_budget] + _CLOSE_DELIM
     return context
 
@@ -37,5 +43,12 @@ body = "Cognitive Load Theory states that working memory has limited capacity...
 ctx = build_context("Cognitive Load", "note", body, triples)
 print(ctx)
 print(f"\nContext length: {len(ctx)} chars (cap: {MAX_CONTEXT_CHARS})")
-assert "[/KNOWLEDGE GRAPH CONTEXT]" in ctx, "Closing delimiter was truncated!"
+# Verify the total length is within budget
+assert len(ctx) <= MAX_CONTEXT_CHARS + len(_CLOSE_DELIM) + len(_OPEN_DELIM), (
+    f"Context exceeds MAX_CONTEXT_CHARS ({MAX_CONTEXT_CHARS}): {len(ctx)} chars"
+)
+# Verify closing delimiter is at the very END (budget-first truncation)
+assert ctx.endswith("[/KNOWLEDGE GRAPH CONTEXT]"), (
+    "Closing delimiter must be at the end (budget-first truncation)."
+)
 print("Delimiters present:", "[KNOWLEDGE GRAPH CONTEXT" in ctx and "[/KNOWLEDGE GRAPH CONTEXT]" in ctx)

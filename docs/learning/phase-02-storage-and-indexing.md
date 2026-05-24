@@ -164,8 +164,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
 );
 ```
 
-> **Note:** The `sync_queue` table is added in Phase 1B when the background sync queue is
-> introduced. The `active_results` table is added when building the active node manager
+> **Note:** The `sync_queue` table is added to DB_SCHEMA in Phase 2 (it was introduced conceptually in Phase 1B). The `active_results` table is added when building the active node manager
 > (advanced — not covered in this phase). Fields like `author`, `created_at`, `updated_at`,
 > `meta`, `url`, `external_type`, and `description` that you see in node frontmatter are not
 > columns in the Phase 02 `nodes` table — they are stored only in the `.md` file itself and
@@ -219,7 +218,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
 
 **Thread safety: read-check-write must be atomic.** WAL mode prevents SQLite-level deadlocks between readers and writers, but it does not prevent application-level races. The sequence "read content_hash → compare → upsert if different" is a compound operation: between the read and the upsert, another thread can write a different hash. Wrap the entire compound in `with self._lock:` — not just the final write.
 
-**Derived index: never store prose body in the DB.** The DB is rebuilt from files on `akanga index`. If you store prose content in the DB, you have two sources of truth that can diverge — and rebuild becomes lossy if the DB row has content that the file doesn't. FTS5 covers `title`, `tags`, and `description` only. Body search lives at the filesystem level (ripgrep). This is not a performance choice — it is an architectural constraint that keeps the DB expendable.
+**Derived index: never store prose body in the DB.** The DB is rebuilt from files on `akanga index`. If you store prose content in the DB, you have two sources of truth that can diverge — and rebuild becomes lossy if the DB row has content that the file doesn't. FTS5 covers `title` and `tags` only. Body search lives at the filesystem level (ripgrep). This is not a performance choice — it is an architectural constraint that keeps the DB expendable.
 
 ---
 

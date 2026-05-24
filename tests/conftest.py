@@ -16,9 +16,10 @@ def pytest_configure(config):
     """Insert AKANGA_SRC into sys.path before collection begins."""
     src = os.environ.get("AKANGA_SRC")
     if src:
-        if src in sys.path:
-            sys.path.remove(src)
-        sys.path.insert(0, src)
+        resolved = str(Path(src).resolve())
+        if resolved in sys.path:
+            sys.path.remove(resolved)
+        sys.path.insert(0, resolved)
 
 
 def _resolve_akanga_src(phase: int) -> Path:

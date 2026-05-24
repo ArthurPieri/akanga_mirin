@@ -38,6 +38,13 @@ CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
     content='nodes',
     content_rowid='rowid'
 );
+CREATE TABLE IF NOT EXISTS sync_queue (
+    id TEXT PRIMARY KEY,
+    entity_id TEXT NOT NULL,
+    new_name TEXT NOT NULL,
+    processed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 # ---------------------------------------------------------------------------
@@ -107,18 +114,24 @@ class GraphDatabase:
            fields `id`, `path`, `title`, `type`, `tags`, and `content_hash`.
            If `tags` is a list, JSON-encode it with `json.dumps`; if already a
            string, use it as-is.
-        2. Inside `with self._lock, self.conn:`, execute:
+           Hint: `val = node[field] if isinstance(node, dict) else getattr(node, field)`
+        2. Inside `with self._lock, self.conn:`, fetch the old rowid BEFORE the
+           upsert (INSERT OR REPLACE changes the rowid):
+             old = conn.execute("SELECT rowid FROM nodes WHERE id = ?", (node_id,)).fetchone()
+        3. Run the upsert:
              INSERT OR REPLACE INTO nodes (id, path, title, type, tags, content_hash)
              VALUES (?, ?, ?, ?, ?, ?)
-        3. FTS5 content tables do not auto-update on INSERT OR REPLACE; you
-           must maintain them manually:
-             a. DELETE FROM nodes_fts WHERE rowid = (SELECT rowid FROM nodes WHERE id = ?)
-             b. INSERT INTO nodes_fts(rowid, title, tags) SELECT rowid, title, tags
+        4. FTS5 content tables do not auto-update on INSERT OR REPLACE; you
+           must maintain them manually. IMPORTANT: INSERT OR REPLACE changes
+           the rowid — delete the old FTS entry BEFORE the INSERT OR REPLACE,
+           then insert the new one AFTER:
+             a. Fetch old rowid BEFORE upsert:
+                    old_rowid = conn.execute("SELECT rowid FROM nodes WHERE id = ?", (node_id,)).fetchone()
+             b. If old_rowid exists: DELETE FROM nodes_fts WHERE rowid = ?  (using old_rowid[0])
+             c. Run the INSERT OR REPLACE on nodes (step 3)
+             d. INSERT INTO nodes_fts(rowid, title, tags) SELECT rowid, title, tags
                 FROM nodes WHERE id = ?
-           Run both statements in the same transaction as the upsert.
-
-        Hint: if isinstance(node, dict): use node[field]. Otherwise: use getattr(node, field).
-        Example: `val = node[field] if isinstance(node, dict) else getattr(node, field)`
+           All four statements must be in the same `with self._lock, self.conn:` block.
         """
         raise NotImplementedError(
             "INSERT OR REPLACE INTO nodes ...; then DELETE old FTS row and INSERT new one "
@@ -150,7 +163,7 @@ class GraphDatabase:
         )
 
     def get_node(self, node_id: str) -> Any | None:
-        """WHAT: Fetch one node by UUID and return it as a Node dataclass (or dict).
+        """WHAT: Fetch one node by UUID and return it as a SimpleNamespace.
 
         WHY: Core lookup used by the API, TUI, indexer, and graph algorithms.
         Returning None (rather than raising) lets callers handle missing nodes
@@ -160,13 +173,15 @@ class GraphDatabase:
         1. Inside `with self._lock:`, execute:
              SELECT * FROM nodes WHERE id = ?
         2. Call `.fetchone()`. If the result is None, return None.
-        3. Convert the `sqlite3.Row` to a Node (or dict). At minimum the return
-           value must expose `.id`, `.title`, `.type`, `.path`, `.tags`,
-           and `.content_hash` as attributes.
-           Decode `tags` from its JSON string with `json.loads`.
+        3. Convert the `sqlite3.Row` to a SimpleNamespace with tags decoded:
+             ns = types.SimpleNamespace(**dict(row))
+             ns.tags = json.loads(ns.tags)
+             return ns
 
-        Tip: you may return a simple `types.SimpleNamespace(**dict(row))` and
-        then fix up `tags` — or define a `_row_to_node` helper.
+        Tip: use `types.SimpleNamespace(**dict(row))` and decode tags with
+        `json.loads`. This gives attribute access (node.id, node.title, etc.)
+        which all downstream callers (Phase 06 server, Phase 08 RAG) use.
+        Do NOT return a plain dict — callers use attribute access.
         """
         raise NotImplementedError(
             "SELECT * FROM nodes WHERE id=?; fetchone(); if None return None; "

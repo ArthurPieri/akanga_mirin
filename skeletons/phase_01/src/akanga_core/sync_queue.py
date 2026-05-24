@@ -9,7 +9,7 @@ a lightweight job record in SQLite and process it lazily in the background.
 This module must NOT import from db.py (circular import). It speaks raw SQL
 via the `db` handle passed into each function.
 
-Table schema (created by db.py on startup):
+Table schema (added to GraphDatabase.DB_SCHEMA in Phase 2 — see skeletons/phase_02/src/akanga_core/db.py):
 
     CREATE TABLE IF NOT EXISTS sync_queue (
         id           TEXT PRIMARY KEY,

@@ -94,8 +94,9 @@ def search_nodes(query: str) -> list[dict]:
     HOW:
     1. db = _get_db()
     2. nodes = db.search_fts(query, limit=10)
-    3. Return list of dicts:
-       [{"id": str(n["id"]), "title": n["title"], "type": n["type"]}
+    3. Return list of dicts using attribute access (db.search_fts returns Node-like
+       objects — SimpleNamespace or dataclass — not plain dicts):
+       [{"id": str(n.id), "title": n.title, "type": n.type}
         for n in nodes]
 
     Note: return only id/title/type — not the full node — to keep the

@@ -88,6 +88,9 @@ class AkangaTUI(App):
         Binding("shift+g", "vault_graph", "Vault Graph", key_display="G"),
         Binding("question_mark", "help_cheatsheet", "Help", key_display="?"),
         Binding("r", "refresh", "Refresh"),
+        Binding("j", "focus_next_node", "Next node"),
+        Binding("k", "focus_prev_node", "Prev node"),
+        Binding("o", "open_url", "Open URL"),
     ]
 
     # ------------------------------------------------------------------
@@ -441,6 +444,46 @@ class AkangaTUI(App):
         raise NotImplementedError(
             "Build a table from self.BINDINGS, push a ModalScreen showing the table. "
             "Dismiss on any key press."
+        )
+
+    def action_focus_next_node(self) -> None:
+        """WHAT: Move selection to the next node in the list.
+
+        HOW:
+        1. Get the NodeList widget: node_list = self.query_one(NodeList)
+        2. Call node_list.action_cursor_down() or equivalent Textual method
+        """
+        raise NotImplementedError(
+            "Move selection to the next item in the NodeList widget."
+        )
+
+    def action_focus_prev_node(self) -> None:
+        """WHAT: Move selection to the previous node in the list.
+
+        HOW:
+        1. Get the NodeList widget: node_list = self.query_one(NodeList)
+        2. Call node_list.action_cursor_up() or equivalent Textual method
+        """
+        raise NotImplementedError(
+            "Move selection to the previous item in the NodeList widget."
+        )
+
+    def action_open_url(self) -> None:
+        """WHAT: Open the selected virtual node's URL in the system browser.
+
+        WHY: Virtual nodes represent external resources (GitHub repos, web pages).
+        The `o` key launches the URL without leaving the TUI.
+
+        HOW:
+        1. Get selected node: node = self._get_selected_node()
+        2. If node is None or node.type != "virtual": return (only for virtual nodes)
+        3. import webbrowser, yaml, pathlib
+           fm = yaml.safe_load(pathlib.Path(node.path).read_text().split("---")[1])
+           url = fm.get("virtual", {}).get("url", "")
+        4. If url: webbrowser.open(url)
+        """
+        raise NotImplementedError(
+            "Read the virtual node's frontmatter.virtual.url and open with webbrowser.open()."
         )
 
     def action_refresh(self) -> None:

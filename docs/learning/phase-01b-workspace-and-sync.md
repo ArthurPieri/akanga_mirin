@@ -205,7 +205,7 @@ description: Short description of the resource
 | `enqueue_title_sync(db, node_id, new_title)` | Add a pending job when a title change is detected |
 | `pending_sync_jobs(db) → list[dict]` | Return all unprocessed jobs — consumed by Phase 4 |
 
-The queue is stored in the DB as a `sync_queue` table (defined in Phase 2):
+The queue is stored in the DB as a `sync_queue` table, added to GraphDatabase.DB_SCHEMA in Phase 2:
 
 ```
 sync_queue — id, job_type, entity_id, new_name, enqueued_at, processed_at (nullable)
@@ -230,12 +230,12 @@ def test_reference_node_create():
     )
     assert node.type == "reference"
     re_parsed = parse(node.path)
-    assert re_parsed.url == "https://docs.python.org"
-    assert re_parsed.external_type == "webpage"
-    assert re_parsed.description == "Official Python documentation"
+    assert re_parsed.title == "Python Docs"
+    # url, external_type, description are frontmatter fields, not Node attributes;
+    # access via: yaml.safe_load(Path(re_parsed.path).read_text().split("---")[1])
 
 def test_enqueue_title_sync(tmp_db):
-    db = connect(tmp_db)
+    db = GraphDatabase(tmp_db)
     enqueue_title_sync(db, node_id="abc-123", new_title="Renamed Title")
     jobs = pending_sync_jobs(db)
     assert len(jobs) == 1
@@ -244,15 +244,15 @@ def test_enqueue_title_sync(tmp_db):
     assert jobs[0]["processed_at"] is None
 
 def test_sync_queue_survives_restart(tmp_db):
-    db = connect(tmp_db)
+    db = GraphDatabase(tmp_db)
     enqueue_title_sync(db, node_id="abc-123", new_title="Renamed Title")
     db.close()
-    db2 = connect(tmp_db)   # reopen — queue must persist
+    db2 = GraphDatabase(tmp_db)   # reopen — queue must persist
     jobs = pending_sync_jobs(db2)
     assert len(jobs) == 1
 
 def test_enqueue_is_idempotent(tmp_db):
-    db = connect(tmp_db)
+    db = GraphDatabase(tmp_db)
     enqueue_title_sync(db, node_id="abc-123", new_title="Renamed Title")
     enqueue_title_sync(db, node_id="abc-123", new_title="Renamed Title")
     jobs = pending_sync_jobs(db)

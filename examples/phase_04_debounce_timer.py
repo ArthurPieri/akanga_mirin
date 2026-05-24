@@ -3,7 +3,7 @@
 Run: python examples/phase_04_debounce_timer.py
 
 Shows how rapid events are coalesced into a single action
-after the burst settles. 10 rapid calls → 1 actual execution.
+after the burst settles. 8 rapid calls across 2 keys → 2 actual executions (1 per key).
 
 WHY PER-KEY TIMERS MATTER (Phase 04 Common Pitfalls):
 A single shared timer means a save to `a.md` resets the debounce

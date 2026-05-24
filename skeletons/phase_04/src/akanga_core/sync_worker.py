@@ -86,8 +86,11 @@ class SyncWorker:
             Number of jobs successfully processed.
         """
         raise NotImplementedError(
-            "Call db.pending_sync_jobs(limit), iterate jobs, "
-            "find and update stale edge display names in .md files, "
+            "Import and call the module-level function: "
+            "from akanga_core.sync_queue import pending_sync_jobs, mark_processed; "
+            "jobs = pending_sync_jobs(db, limit)  — NOT db.pending_sync_jobs(limit). "
+            "Iterate jobs, find and update stale edge display names in .md files, "
             "write files back atomically with write_node_file(), "
-            "mark each job processed in the DB, return count"
+            "call mark_processed(db, job['id']) for each job (NOT raw SQL), "
+            "return count of jobs processed."
         )

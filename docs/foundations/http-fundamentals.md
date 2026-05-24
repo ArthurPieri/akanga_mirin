@@ -239,12 +239,9 @@ class NodeCreate(BaseModel):
 @app.post("/api/v1/nodes", status_code=201)
 async def create_node(payload: NodeCreate):
     # payload is a validated NodeCreate instance
-    node = db.create_node(
-        title=payload.title,
-        type=payload.type,
-        tags=payload.tags,
-        content=payload.content,
-    )
+    # parse_node_file to get a Node, then upsert_node into the DB
+    node = parse_node_file(str(file_path))
+    db.upsert_node(node)
     return node
 ```
 
@@ -323,6 +320,6 @@ The TUI listens and refreshes its view without polling.
   this document exists there.
 - The WebSocket endpoint at `GET /ws` is in `server.py`; the client side is in
   `src/akanga_tui/app.py`.
-- **Phase 3** of the learning path teaches HTTP fundamentals by reading
+- **Phase 6** of the learning path teaches HTTP fundamentals by reading
   `server.py` and adding a new endpoint from scratch.
-- **Phase 5** covers the WebSocket broadcast mechanism and live TUI updates.
+- **Phase 6** covers the WebSocket broadcast mechanism and live TUI updates.

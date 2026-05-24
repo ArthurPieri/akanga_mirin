@@ -117,7 +117,8 @@ feature requiring a proper canvas.
 | `Cycle Detection` | note | `solves` → `Infinite Traversal Loop`; `is_applied_in` → `BFS`; `uses` → `Visited Set` |
 | `Ego-Graph` | note | `uses` → `BFS`; `is_applied_in` → `Akanga TUI`; `enables` → `Graph Navigation` |
 | `Directed Edge Traversal` | note | `qualifies` → `BFS`; `enables` → `Incoming and Outgoing Display` |
-| `Graph Density Ceiling` | note | `qualifies` → `ASCII Ego-Graph`; `motivates` → `Canvas Renderer in v2` |
+| `Graph Density Ceiling` | note | `qualifies` → `ASCII Ego-Graph` |
+| `Canvas Renderer in v2` | note | `motivated_by` → `Graph Density Ceiling` |
 
 ---
 

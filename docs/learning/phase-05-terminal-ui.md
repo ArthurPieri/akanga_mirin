@@ -255,7 +255,7 @@ active_workspace: reactive[str]         = reactive("nhamandu-uuid")
 ```python
 class EgoGraphScreen(Screen):
     depth: reactive[int] = reactive(1)
-    # calls ego_graph() from Phase 3
+    # calls build_ego_graph() from Phase 3
     # detects terminal capability → Layer 1 or Layer 2 renderer
     # +/- keys adjust depth and re-render
     # click on node → navigate_to(node_id)

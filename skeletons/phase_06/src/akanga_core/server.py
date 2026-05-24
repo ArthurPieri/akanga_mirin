@@ -98,17 +98,23 @@ def create_node(body: CreateNodeRequest):
 
     HOW:
     1. SEC-02 — path traversal protection:
-       vault_root = Path(get_db()... vault).resolve()
+       vault_root = Path(_app_state["vault"]).resolve()
        If body.path is given: full_path = vault_root.joinpath(body.path).resolve()
        Assert full_path.is_relative_to(vault_root) — raise HTTP 400 if not.
     2. If body.path is empty: auto-generate filename from title.
        slug = body.title.lower().replace(" ", "_")
        full_path = vault_root / f"{slug}.md"
+       ALSO validate the auto-generated slug path (SEC-02):
+           resolved_slug = (vault_root / f"{slug}.md").resolve()
+           if not resolved_slug.is_relative_to(vault_root):
+               raise HTTPException(status_code=400, detail="Title produces invalid path")
     3. If the file already exists: raise HTTP 409 Conflict.
     4. Build frontmatter dict: {"title": body.title, "type": body.type, "tags": body.tags}
     5. write_node_file(str(full_path), frontmatter, body.content)
     6. node = parse_node_file(str(full_path))
-    7. Persist the UUID back: write_node_file again with fm["id"] = str(node.id)
+    7. Persist UUID: re-build the frontmatter dict from node attributes and add id:
+           fm = {"title": node.title, "type": node.type, "tags": node.tags, "id": str(node.id)}
+           write_node_file(str(full_path), fm, body.content)
        (prevents UUID churn on re-parse)
     8. db.upsert_node(node)
     9. Return HTTP 201 with node dict from db.get_node(str(node.id))
@@ -178,7 +184,9 @@ def update_node(node_id: str, body: UpdateNodeRequest):
        vault_root = Path(_app_state["vault"]).resolve()
        if not Path(path).resolve().is_relative_to(vault_root): raise HTTPException(400)
     4. current = parse_node_file(path)  — read current frontmatter + content
-    5. Build updated frontmatter dict from current.frontmatter:
+    5. Build updated frontmatter dict from Node attributes (Node has no .frontmatter field):
+           fm = {"title": current.title, "type": current.type, "tags": current.tags, "id": str(current.id)}
+       Then apply overrides:
        - If body.title is not None: fm["title"] = body.title
        - If body.tags is not None: fm["tags"] = body.tags
        Always keep fm["id"] = existing["id"]  (don't lose the UUID)
@@ -207,9 +215,20 @@ def delete_node(node_id: str):
        vault_root = Path(_app_state["vault"]).resolve()
        if not Path(path).resolve().is_relative_to(vault_root): raise HTTPException(400)
     4. get_db().delete_edges_for_node(node_id)  — clean up edges first
-       Note: You will need to implement `get_edges_for_node(node_id)` and
-       `delete_edges_for_node(node_id)` in GraphDatabase as part of this
-       phase's deliverable.
+       Note: GraphDatabase does not have a delete_edges_for_node method by default.
+       Either add one to your db.py as part of this phase's deliverable:
+           def delete_edges_for_node(self, node_id: str) -> None:
+               with self._lock, self.conn:
+                   self.conn.execute(
+                       "DELETE FROM edges WHERE source_id = ? OR target_id = ?",
+                       (node_id, node_id)
+                   )
+       Or execute the SQL inline here directly:
+           with get_db()._lock, get_db().conn:
+               get_db().conn.execute(
+                   "DELETE FROM edges WHERE source_id = ? OR target_id = ?",
+                   (node_id, node_id)
+               )
     5. If os.path.exists(path): os.remove(path)
     6. get_db().delete_node(node_id)
     7. Return HTTP 204 No Content (no body)
@@ -230,9 +249,16 @@ def get_node_edges(node_id: str):
     HOW:
     1. existing = get_db().get_node(node_id)  — raise 404 if None
     2. edges = get_db().get_edges_for_node(node_id)
-       Note: You will need to implement `get_edges_for_node(node_id)` and
-       `delete_edges_for_node(node_id)` in GraphDatabase as part of this
-       phase's deliverable.
+       Note: GraphDatabase does not have a get_edges_for_node method by default.
+       Add one to your db.py as part of this phase's deliverable:
+           def get_edges_for_node(self, node_id: str) -> list[dict]:
+               with self._lock:
+                   rows = self.conn.execute(
+                       "SELECT * FROM edges WHERE source_id = ? OR target_id = ?",
+                       (node_id, node_id)
+                   ).fetchall()
+                   return [dict(row) for row in rows]
+       (You will also need delete_edges_for_node — see delete_node HOW above.)
     3. Return JSONResponse(content=edges)
     """
     raise NotImplementedError(

@@ -1,6 +1,6 @@
-# Relation Vocabulary — The 71 Built-in Relation Types
+# Relation Vocabulary — The 70 Built-in Relation Types
 
-Akanga ships 71 relation types organized into 11 semantic categories. This is the
+Akanga ships 70 relation types organized into 11 semantic categories. This is the
 vocabulary you build in Phase 1 and query by ID in Phase 8 (`list_relation_types()`).
 
 Custom types are always allowed — assigned a UUID at creation, no pre-registration
@@ -38,7 +38,7 @@ the relation name is a human-readable display cache and can be renamed without b
 
 ---
 
-## Hierarchical / Taxonomic (5)
+## Hierarchical / Taxonomic (4)
 *Classification, containment, and hierarchy.*
 
 | ID | Relation | Meaning | Flags |
@@ -47,7 +47,6 @@ the relation name is a human-readable display cache and can be renamed without b
 | `HT-002` | `is_part_of` | A is a component, section, or member of B | ↔ HT-001 |
 | `HT-003` | `subtype_of` | A is a more specific version or subtype of B | |
 | `HT-004` | `sibling_of` | A and B are at the same level of a hierarchy, sharing a common parent | ⇄ |
-| `HT-005` | `member_of` | A is a member of group, organization, or collection B | |
 
 ---
 
@@ -185,7 +184,7 @@ the relation name is a human-readable display cache and can be renamed without b
 | Category | Prefix | Count |
 |---|---|---|
 | Epistemic / Reasoning | `EP` | 10 |
-| Hierarchical / Taxonomic | `HT` | 5 |
+| Hierarchical / Taxonomic | `HT` | 4 |
 | Structural / Compositional | `SC` | 7 |
 | Causal / Temporal | `CT` | 12 |
 | Attribution / Provenance | `AP` | 7 |
@@ -195,7 +194,7 @@ the relation name is a human-readable display cache and can be renamed without b
 | Personal / Associative | `PA` | 3 |
 | Social / Organizational | `SO` | 8 |
 | Topical / Classification | `TC` | 4 |
-| **Total** | | **71** |
+| **Total** | | **70** |
 
 ---
 

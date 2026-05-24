@@ -53,6 +53,7 @@ def tmp_vault_with_nodes(tmp_path: Path):
     Edges:
         Cognition  -supports->       Attention
         Cognition  -is_related_to->  Memory
+        Cognition  -enables->        Learning
         Attention  -enables->        Learning
 
     Each node has a real .md file on disk so body-from-disk tests work.
@@ -175,6 +176,7 @@ def tmp_vault_with_nodes(tmp_path: Path):
     # Wire up the edges
     db.upsert_edge(_ID_COGNITION, _ID_ATTENTION, relation="supports")
     db.upsert_edge(_ID_COGNITION, _ID_MEMORY,    relation="is_related_to")
+    db.upsert_edge(_ID_COGNITION, _ID_LEARNING,  relation="enables")
     db.upsert_edge(_ID_ATTENTION, _ID_LEARNING,  relation="enables")
 
     # Expose as a namespace object so tests can access .vault, .db, .id_*

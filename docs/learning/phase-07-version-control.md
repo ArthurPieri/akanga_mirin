@@ -195,6 +195,12 @@ git installed (or whose repo is in a broken state) must still be able to use Aka
 
 **Omitting `untracked_files=True` in `is_dirty()`:** `repo.is_dirty()` alone returns `False` for newly created files (untracked). The skeleton explicitly requires `is_dirty(untracked_files=True)` to catch nodes added to the vault before the first commit. Omitting the flag means a fresh vault with new nodes will appear clean and silently skip the commit.
 
+### Debounced Auto-Commit
+
+The watcher fires on every file change, but committing on every keystroke would create thousands of commits per hour. The solution is a **debounced commit**: after a file changes, wait 5 seconds before committing. If another change arrives within that window, restart the 5-second timer. Only when the vault is quiet for 5 full seconds does a commit fire.
+
+This is the same per-key timer pattern from Phase 4, applied to the vault path as the key. `GitManager.commit` is non-fatal — if git fails, log and continue.
+
 ---
 
 ## Deliverable

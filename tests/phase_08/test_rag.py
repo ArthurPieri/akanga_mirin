@@ -225,7 +225,11 @@ class TestBuildContextCaps:
     def test_build_context_max_triples_respected(
         self, tmp_vault_with_nodes
     ) -> None:
-        """build_context with max_triples=2 must produce at most 2 triple lines."""
+        """build_context with max_triples=2 must produce at most 2 triple lines.
+
+        The Cognition node has 3 outgoing edges in the fixture, so max_triples=2
+        actually enforces a limit. A correct implementation must cap the output.
+        """
         rag = _load_rag()
         build_context = _get_build_context(rag)
 
@@ -367,11 +371,11 @@ class TestBuildContextErrors:
         # Option A: learner passes the node object directly (None case)
         try:
             result = build_context(fake_node, ctx.db, ctx.vault)
-            # If it doesn't raise, it must return an empty string or falsy value
-            assert not result or isinstance(result, str), (
-                "build_context with None node must return '' or raise, "
+            # If it doesn't raise, it must return an empty string or None
+            assert result == "" or result is None or isinstance(result, str), (
+                "build_context with None node must return an empty string, None, or raise; "
                 f"got {result!r}."
             )
-        except (TypeError, AttributeError, ValueError, Exception) as exc:
+        except (TypeError, AttributeError, ValueError) as exc:
             # Raising is also acceptable
-            pass  # any exception is fine — behavior is documented by the test
+            pass  # any of these is acceptable
