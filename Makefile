@@ -43,6 +43,7 @@ GLOW         := glow
         skeleton skeleton-check \
         setup setup-phase \
         lint typecheck check \
+        status where-is-my-src sync-forward \
         commit-progress push
 
 # =============================================================================
@@ -82,7 +83,12 @@ help: ## Show this help message
 	@grep -E '^(verify|verify-all|commit-progress|push)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
 		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
 	@printf '\n'
-	@printf '  \033[2mVariables: PHASE=N (default 0)  FROM=N  TO=N  TOPIC=name\033[0m\n'
+	@printf '\n'
+	@printf '  \033[1;33mDiagnostics\033[0m\n'
+	@grep -E '^(status|where-is-my-src|sync-forward)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
+		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
+	@printf '\n'
+	@printf '  \033[2mVariables: PHASE=N (default 0)  FROM=N  TO=N  FILE=path  TOPIC=name\033[0m\n'
 	@printf '\n'
 
 # =============================================================================
@@ -136,7 +142,13 @@ test: ## Run tests for one phase against AKANGA_SRC (PHASE=2)
 	if [ ! -d "tests/phase_$${PHASE_PAD}" ]; then \
 		echo "error: tests/phase_$${PHASE_PAD}/ not found — tests may not exist yet"; exit 1; \
 	fi; \
-	echo "Testing phase $${PHASE_PAD} against $(AKANGA_SRC) ..."; \
+	if [ "$(AKANGA_SRC)" = "./src" ] && [ "$(origin AKANGA_SRC)" = "default" ]; then \
+		printf '\n\033[1;33m⚠  WARNING: AKANGA_SRC is not set — defaulting to ./src\033[0m\n'; \
+		printf '\033[1;33m   If ./src is empty or missing, you are NOT testing your code.\033[0m\n'; \
+		printf '\033[1;33m   To test your code:      AKANGA_SRC=/path/to/src make test PHASE=%d\033[0m\n' "$(PHASE)"; \
+		printf '\033[1;33m   To test the solution:   make test-solution PHASE=%d\033[0m\n\n' "$(PHASE)"; \
+	fi; \
+	printf 'Testing phase \033[1m%s\033[0m against \033[36m%s\033[0m ...\n' "$${PHASE_PAD}" "$(AKANGA_SRC)"; \
 	AKANGA_SRC="$(AKANGA_SRC)" $(PYTEST) tests/phase_$${PHASE_PAD}/ -v
 
 test-solution: ## Run tests for one phase against the reference solution (PHASE=2)
@@ -327,6 +339,41 @@ check: ## Full quality gate: lint + test-all (run before a facilitator commit)
 	@$(MAKE) lint
 	@$(MAKE) test-all
 	@printf '\n\033[0;32mAll checks passed.\033[0m\n'
+
+# =============================================================================
+# DIAGNOSTICS — understand the current state of the repo
+# =============================================================================
+
+status: ## Show phase completion matrix (skeleton / tests / solution per phase)
+	@printf '\n  \033[1;36mPhase Completion Status\033[0m\n\n'; \
+	printf '  %-8s %-12s %-10s %-12s\n' 'Phase' 'Skeleton' 'Tests' 'Solution'; \
+	printf '  %-8s %-12s %-10s %-12s\n' '-----' '--------' '-----' '--------'; \
+	for n in 0 1 2 3 4 5 6 7 8; do \
+		PHASE_PAD=$$(printf "%02d" $$n); \
+		SKEL=$$([ -d "skeletons/phase_$${PHASE_PAD}" ] && echo "✓ done" || echo "- todo"); \
+		TEST=$$([ -d "tests/phase_$${PHASE_PAD}" ] && echo "✓ done" || echo "- todo"); \
+		SOLN=$$([ -d "solutions/phase_$${PHASE_PAD}" ] && echo "✓ done" || echo "- todo"); \
+		printf '  %-8s %-12s %-10s %-12s\n' "$$PHASE_PAD" "$$SKEL" "$$TEST" "$$SOLN"; \
+	done; \
+	printf '\n'
+
+where-is-my-src: ## Show which source directory 'make test' is pointing at
+	@if [ -d "$(AKANGA_SRC)" ]; then \
+		printf '\033[0;32mAKANGA_SRC = %s\033[0m (directory exists)\n' "$(AKANGA_SRC)"; \
+		printf 'Contents:\n'; \
+		ls "$(AKANGA_SRC)" 2>/dev/null | awk '{printf "  %s\n", $$1}'; \
+	else \
+		printf '\033[0;31mAKANGA_SRC = %s\033[0m (DOES NOT EXIST)\n' "$(AKANGA_SRC)"; \
+		printf 'Set it: export AKANGA_SRC=/path/to/your/src\n'; \
+	fi
+
+sync-forward: ## Preview or apply a fix from phase FROM to all later phases (FROM=2 FILE=src/...)
+	@if [ -z "$(FILE)" ]; then \
+		echo "Usage: make sync-forward FROM=2 FILE=src/akanga_core/parser.py"; \
+		echo "       make sync-forward FROM=2 FILE=src/akanga_core/parser.py APPLY=1"; \
+		exit 1; \
+	fi; \
+	$(PYTHON) scripts/sync_forward.py "$(FILE)" $(FROM) $(if $(APPLY),--apply,)
 
 # =============================================================================
 # GIT — facilitator workflow

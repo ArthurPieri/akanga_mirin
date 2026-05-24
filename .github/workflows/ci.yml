@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    name: Lint + verify solutions
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Lint
+        run: uv run ruff check tests/ skeletons/ scripts/ || true
+
+      - name: Check skeletons raise NotImplementedError
+        run: |
+          for dir in skeletons/phase_*/src; do
+            if [ -d "$dir" ]; then
+              echo "Checking $dir ..."
+              uv run python scripts/skeleton_check.py "$dir"
+            fi
+          done
+
+      - name: Run tests against solutions
+        run: |
+          FAILED=0
+          for n in 0 1 2 3 4 5 6 7 8; do
+            PHASE_PAD=$(printf "%02d" $n)
+            SOLUTION_SRC="solutions/phase_${PHASE_PAD}/src"
+            if [ -d "$SOLUTION_SRC" ] && [ -d "tests/phase_${PHASE_PAD}" ]; then
+              echo "── Phase ${PHASE_PAD} ──"
+              AKANGA_SRC="$SOLUTION_SRC" uv run pytest tests/phase_${PHASE_PAD}/ -v \
+                || FAILED=$((FAILED+1))
+            fi
+          done
+          if [ $FAILED -gt 0 ]; then
+            echo "$FAILED phase(s) failed."
+            exit 1
+          fi
+
+      - name: Phase completion status
+        run: |
+          echo ""
+          echo "Phase | Skeleton | Tests | Solution"
+          echo "------|----------|-------|--------"
+          for n in 0 1 2 3 4 5 6 7 8; do
+            PHASE_PAD=$(printf "%02d" $n)
+            SKEL=$([ -d "skeletons/phase_${PHASE_PAD}" ] && echo "yes" || echo "-")
+            TEST=$([ -d "tests/phase_${PHASE_PAD}" ] && echo "yes" || echo "-")
+            SOLN=$([ -d "solutions/phase_${PHASE_PAD}" ] && echo "yes" || echo "-")
+            echo "${PHASE_PAD}    | ${SKEL}      | ${TEST}   | ${SOLN}"
+          done

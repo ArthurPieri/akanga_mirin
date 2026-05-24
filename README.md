@@ -1,5 +1,8 @@
 # Akanga Mirin
 
+> **Status:** Sprint 1 of 5 active — tests, skeletons, and solutions are in progress.
+> Phase docs and Makefile are complete. Star/watch for updates.
+
 Akanga Mirin is an open-source, project-based learning path for Python developers who want to understand how real systems are built — not by following a tutorial, but by building one themselves. Across nine phases, you construct a personal, offline-first knowledge graph: from atomic file writes and UUID identity through SQLite indexing, graph algorithms, a Textual TUI, a FastAPI server, GitPython version control, and finally an AI layer using the Model Context Protocol. At the end of every phase, you have a working artifact you can use — not a checkpoint in someone else's codebase.
 
 > **Ship a working artifact at the end of every phase. Your knowledge graph. Your vault. No cloud required.**
@@ -15,12 +18,14 @@ Akanga Mirin is an open-source, project-based learning path for Python developer
 | 2 | Storage and Indexing | SQLite + WAL + FTS5 full-text search | 3–4h |
 | 3 | Graph Algorithms | BFS ego-graph, cycle detection, ASCII renderer | 2–3h |
 | 4 | Concurrency and Events | Watchdog file watcher, debounce, EventBus | 3–4h |
-| 5 | Terminal UI | Textual three-panel TUI with live graph view | 5–7h |
+| 5 | Terminal UI | Textual three-panel TUI with live graph view | 12–20h |
 | 6 | REST API | FastAPI server with WebSocket push events | 3–4h |
 | 7 | Version Control | GitPython auto-commit, squash queue, change history | 2–3h |
 | 8 | AI Integration | MCP server + Graph RAG (FTS5 seed → BFS context) | 3–4h |
 
-Total: roughly 40–80 hours for an intermediate Python developer working alone.
+Total: **roughly 380 hours ±30%** for an intermediate Python developer working alone.
+Per-phase estimates above are realistic learner time, not author time. Phase 5
+(Textual TUI) is the steepest; budget 12–20 hours if you have not used Textual before.
 
 ---
 
@@ -152,7 +157,7 @@ This learning path is local-first and personal. The following are explicitly out
 
 ## Contributing
 
-See `CONTRIBUTING.md` (coming soon). In the meantime: bug reports and questions in [GitHub Issues](https://github.com/ArthurPieri/akanga_mirin/issues), discussion in [GitHub Discussions](https://github.com/ArthurPieri/akanga_mirin/discussions).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Bug reports and questions in [GitHub Issues](https://github.com/ArthurPieri/akanga_mirin/issues), discussion in [GitHub Discussions](https://github.com/ArthurPieri/akanga_mirin/discussions).
 
 ---
 
