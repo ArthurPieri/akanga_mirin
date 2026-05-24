@@ -12,6 +12,15 @@ MINIMAL_VAULT_CONFIG = {
 }
 
 
+def pytest_configure(config):
+    """Insert AKANGA_SRC into sys.path before collection begins."""
+    src = os.environ.get("AKANGA_SRC")
+    if src:
+        if src in sys.path:
+            sys.path.remove(src)
+        sys.path.insert(0, src)
+
+
 def _resolve_akanga_src(phase: int) -> Path:
     env_src = os.environ.get("AKANGA_SRC")
     if not env_src:
@@ -27,6 +36,7 @@ def _resolve_akanga_src(phase: int) -> Path:
     for key in list(sys.modules.keys()):
         if "akanga" in key:
             del sys.modules[key]
-    if str(src) not in sys.path:
-        sys.path.insert(0, str(src))
+    if str(src) in sys.path:
+        sys.path.remove(str(src))
+    sys.path.insert(0, str(src))
     return src

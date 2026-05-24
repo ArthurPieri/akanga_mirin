@@ -129,7 +129,7 @@ editor will be detected and indexed when the TUI resumes, triggering a live refr
 | Node | Type | Key Edges |
 |---|---|---|
 | `Reactive TUI` | note | `is_applied_in` → `Akanga TUI`; `is_analogous_to` → `React`; `uses` → `Textual` |
-| `Widget Composition` | note | `is_applied_in` → `Akanga TUI`; `is_a` → `UI Design Pattern` |
+| `Widget Composition` | note | `is_applied_in` → `Akanga TUI`; `subtype_of` → `UI Design Pattern` |
 | `Event-Driven UI` | note | `uses` → `Event Bus`; `enables` → `Live Updates`; `is_applied_in` → `Akanga TUI` |
 | `Keyboard-First Mouse-Aware` | note | `qualifies` → `Terminal UI`; `is_applied_in` → `Akanga TUI` |
 | `Two-Layer Graph Renderer` | note | `uses` → `textual-kitty`; `uses` → `textual-canvas`; `solves` → `Graph Density Ceiling` |

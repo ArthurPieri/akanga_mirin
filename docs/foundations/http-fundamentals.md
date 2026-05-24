@@ -219,7 +219,7 @@ async def list_nodes(
     limit: int = 50,
     offset: int = 0,
 ):
-    return db.search_nodes(query=query, type=type, limit=limit, offset=offset)
+    return db.search_fts(query=query, limit=limit)
 ```
 
 ### Pydantic models for request bodies

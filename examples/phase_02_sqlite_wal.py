@@ -3,7 +3,9 @@
 Run: python examples/phase_02_sqlite_wal.py
 
 Shows WAL mode enabling concurrent reads+writes, and threading.Lock
-protecting compound read-check-write sequences.
+serializing access to the sqlite3.Connection object, which is not
+thread-safe for concurrent statement execution (even with WAL mode).
+Each thread acquires the lock before any execute() call.
 """
 import sqlite3
 import tempfile
@@ -16,7 +18,7 @@ fd, db_path = tempfile.mkstemp(suffix=".db")
 os.close(fd)
 try:
     # Setup
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("CREATE TABLE IF NOT EXISTS notes (id TEXT PRIMARY KEY, title TEXT)")
     conn.commit()

@@ -166,10 +166,10 @@ Single module: `parser.py`
 
 | Function | What it does |
 |---|---|
-| `parse(path) → Node` | Read `.md` file → `Node` dataclass |
-| `write(node, path)` | `Node` → `.md` file, atomically |
+| `parse_node_file(path) → Node` | Read `.md` file → `Node` dataclass |
+| `write_node_file(path, frontmatter_dict, content)` | Serialize frontmatter + content to `.md` file, atomically |
 | `create(title, type, vault) → Node` | Generate new node file with fresh UUID |
-| `hash(path) → str` | SHA-256 hex digest of file content |
+| `content_hash(path) → str` | SHA-256 hex digest of file content |
 
 The canonical frontmatter schema:
 
@@ -199,31 +199,30 @@ This is the same dual-key pattern as edges. Absent or empty `graph` auto-populat
 with the default workspace (Nhamandu) on first write-back.
 
 `meta` is an optional block of user-defined key:value pairs — no schema
-enforcement, stored as JSON in the DB index for filtering queries.
+enforcement. It is stored only in the `.md` file; the Phase 02 DB schema does not
+index `meta` as a column (you access it by re-parsing the file).
 
 The `Node` dataclass at this phase:
 
 ```python
 @dataclass
-class WorkspaceRef:
-    name: str   # display cache — may be stale after workspace rename
-    id: str     # authoritative UUID — never changes
-
-@dataclass
 class Node:
-    id: str                    # UUID — generated once, lives in frontmatter
+    id: str             # UUID — generated once, lives in frontmatter
     title: str
-    type: str                  # "note" | "reference"
+    type: str           # "note" | "reference"
     tags: list[str]
-    graph: list[WorkspaceRef]  # workspace memberships — default: [Nhamandu]
-    author: str                # from vault config on create; preserved on parse
-    created_at: str            # ISO date string
-    updated_at: str            # ISO date string
-    meta: dict                 # user-defined key:value pairs, default {}
-    edges: list                # always [] at Phase 0 — defined in Phase 1
-    body: str                  # raw markdown body (everything below frontmatter)
-    path: Path                 # runtime only — not written to frontmatter
+    content_hash: str   # SHA-256 hex digest — computed at parse/index time
+    content: str = ""   # raw markdown body (everything below frontmatter)
+    path: str = ""      # runtime only — not written to frontmatter
 ```
+
+> **Phase 00 introduces a simplified Node for learning. By Phase 02, the full Node
+> dataclass uses exactly these fields: `id`, `path`, `title`, `type`, `tags`,
+> `content_hash`, `content`. You'll evolve your Node incrementally across phases —
+> fields like `graph`, `author`, `created_at`, `updated_at`, `meta`, and `edges`
+> that appear in Phase 00 concepts are frontmatter keys accessible via
+> `node.frontmatter` (the raw dict). They are not dedicated dataclass fields in
+> the final shape.**
 
 `create()` reads vault config to stamp author and default workspace:
 
@@ -243,25 +242,25 @@ Three tests that prove the contract:
 ```python
 def test_roundtrip():
     node = create(title="Fast Thinking is Unreliable", type="note", vault=tmp_path)
-    parsed = parse(node.path)
+    parsed = parse_node_file(node.path)
     assert parsed.id == node.id
     assert parsed.title == node.title
-    assert parsed.body == node.body
-    write(parsed, parsed.path)
-    re_parsed = parse(parsed.path)
+    assert parsed.content == node.content
+    write_node_file(parsed.path, dict(parsed.frontmatter), parsed.content)
+    re_parsed = parse_node_file(parsed.path)
     assert re_parsed == parsed           # write → parse is idempotent
 
 def test_uuid_stability():
     node = create(title="Test", type="note", vault=tmp_path)
     original_id = node.id
-    content = node.path.read_text().replace("Test", "Test Renamed")
-    node.path.write_text(content)
-    re_parsed = parse(node.path)
+    content = Path(node.path).read_text().replace("Test", "Test Renamed")
+    Path(node.path).write_text(content)
+    re_parsed = parse_node_file(node.path)
     assert re_parsed.id == original_id  # UUID unchanged after external edit
 
 def test_atomic_write_leaves_no_temp_files():
     node = create(title="Test", type="note", vault=tmp_path)
-    write(node, node.path)
+    write_node_file(node.path, dict(node.frontmatter), node.content)
     temp_files = list(tmp_path.glob("*.tmp"))
     assert temp_files == []
 ```

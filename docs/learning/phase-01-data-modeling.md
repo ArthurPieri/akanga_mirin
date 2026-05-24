@@ -209,17 +209,18 @@ description: Short description of the resource
 
 | Node | Type | Key Edges |
 |---|---|---|
-| `Directed Graph` | note | `is_a` → `Graph`; `contrasts_with` → `Undirected Graph` |
-| `Labeled Property Graph` | note | `is_a` → `Directed Graph`; `implements` → `Semantic Edge Types` |
+| `Directed Graph` | note | `subtype_of` → `Graph`; `contrasts_with` → `Undirected Graph` |
+| `Labeled Property Graph` | note | `subtype_of` → `Directed Graph`; `implements` → `Semantic Edge Types` |
 | `Source of Truth` | note | `qualifies` → `Frontmatter Edge Block`; `contrasts_with` → `Derived Index` |
 | `Eventual Consistency` | note | `qualifies` → `Write-Back Sync`; `contrasts_with` → `Strong Consistency` |
 | `Two-Pass Parsing` | note | `is_applied_in` → `Akanga Parser`; `enables` → `Inline Edge Shorthand` |
-| `Node Types as Schema Variants` | note | `is_applied_in` → `Node Data Model`; `is_a` → `Schema Design Pattern` |
-| `Reference Integrity` | note | `solved_by` → `UUID`; `qualifies` → `Edge Target Field` |
+| `Node Types as Schema Variants` | note | `is_applied_in` → `Node Data Model`; `subtype_of` → `Schema Design Pattern` |
+| `Reference Integrity` | note | `qualifies` → `Edge Target Field` |
+| `UUID` | note | `solves` → `Reference Integrity` |
 | `Background Sync Queue` | note | `solves` → `Stale Title Display`; `solves` → `Stale Workspace Name`; `enables` → `Lazy Sync` |
 | `Workspace Registry` | note | `is_part_of` → `Vault Configuration`; `implements` → `Named Graph Scoping`; `uses` → `UUID` |
-| `Nhamandu` | note | `is_a` → `Guaraní Deity`; `is_applied_in` → `Akanga Default Workspace`; `is_analogous_to` → `Primordial Source` |
-| `Akanga` | note | `is_a` → `Tupi-Guaraní Word`; `is_applied_in` → `Personal Knowledge Graph Tool`; `has_context` → `Tupi-Guaraní Language` |
+| `Nhamandu` | note | `subtype_of` → `Guaraní Deity`; `is_applied_in` → `Akanga Default Workspace`; `is_analogous_to` → `Primordial Source` |
+| `Akanga` | note | `subtype_of` → `Tupi-Guaraní Word`; `is_applied_in` → `Personal Knowledge Graph Tool`; `has_context` → `Tupi-Guaraní Language` |
 
 ### Seed Notes
 
@@ -348,17 +349,22 @@ def test_writeback_roundtrip():
     node = create(title="Test", type="note", vault=tmp_path)
     node.path.write_text(node.path.read_text() + "\n[[Blink | contradicts]]")
     write_back(node.path)
-    re_parsed = parse(node.path)
-    assert len(re_parsed.edges) == 1
-    assert re_parsed.edges[0].relation == "contradicts"
+    re_parsed = parse_node_file(node.path)
+    # Edges live in frontmatter, not as a dedicated Node field. In Phase 02+,
+    # edges are stored in the DB edges table — access them via db.get_neighbors().
+    # For Phase 01, read edges from the parsed frontmatter dict:
+    edges = re_parsed.frontmatter.get("edges", [])
+    assert len(edges) == 1
+    assert edges[0]["relation"] == "contradicts"
 
 def test_writeback_is_idempotent():
     node = create(title="Test", type="note", vault=tmp_path)
     node.path.write_text(node.path.read_text() + "\n[[Blink | contradicts]]")
     write_back(node.path)
     write_back(node.path)  # second call must not duplicate the edge
-    re_parsed = parse(node.path)
-    assert len(re_parsed.edges) == 1
+    re_parsed = parse_node_file(node.path)
+    edges = re_parsed.frontmatter.get("edges", [])
+    assert len(edges) == 1
 ```
 
 Plus 8 vault nodes with typed edges. The vault is the proof of understanding,

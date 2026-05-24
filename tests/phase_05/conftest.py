@@ -17,6 +17,36 @@ def _setup_akanga_src() -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Dual-try import helpers
+# ---------------------------------------------------------------------------
+
+def _load_db():
+    """Import GraphDatabase from 'db' or 'akanga_core.db'."""
+    try:
+        from db import GraphDatabase  # noqa: PLC0415
+        return GraphDatabase
+    except ModuleNotFoundError:
+        try:
+            from akanga_core.db import GraphDatabase  # noqa: PLC0415
+            return GraphDatabase
+        except ModuleNotFoundError:
+            pytest.fail("Cannot import GraphDatabase from 'db' or 'akanga_core.db'")
+
+
+def _load_indexer():
+    """Import full_scan_and_index from 'indexer' or 'akanga_core.indexer'."""
+    try:
+        from indexer import full_scan_and_index  # noqa: PLC0415
+        return full_scan_and_index
+    except (ModuleNotFoundError, ImportError):
+        try:
+            from akanga_core.indexer import full_scan_and_index  # noqa: PLC0415
+            return full_scan_and_index
+        except (ModuleNotFoundError, ImportError):
+            pytest.fail("Cannot import full_scan_and_index from 'indexer' or 'akanga_core.indexer'")
+
+
+# ---------------------------------------------------------------------------
 # Vault + DB helpers
 # ---------------------------------------------------------------------------
 
@@ -65,8 +95,8 @@ def tmp_db(tmp_vault: Path, tmp_path: Path):
 
     Yields the open database; closes it after the test.
     """
-    from akanga_core.db import GraphDatabase
-    from akanga_core.indexer import full_scan_and_index
+    GraphDatabase = _load_db()
+    full_scan_and_index = _load_indexer()
 
     db_path = tmp_path / "test.db"
     db = GraphDatabase(str(db_path))
@@ -78,7 +108,7 @@ def tmp_db(tmp_vault: Path, tmp_path: Path):
 @pytest.fixture()
 def empty_db(empty_vault: Path, tmp_path: Path):
     """A GraphDatabase backed by an empty vault (zero nodes)."""
-    from akanga_core.db import GraphDatabase
+    GraphDatabase = _load_db()
 
     db_path = tmp_path / "empty.db"
     db = GraphDatabase(str(db_path))

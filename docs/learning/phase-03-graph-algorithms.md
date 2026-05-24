@@ -112,8 +112,8 @@ feature requiring a proper canvas.
 | Node | Type | Key Edges |
 |---|---|---|
 | `Graph Traversal` | note | `has_prerequisite` → `Directed Graph`; `enables` → `Ego-Graph` |
-| `BFS` | note | `is_a` → `Graph Traversal`; `contrasts_with` → `DFS`; `is_applied_in` → `Ego-Graph` |
-| `DFS` | note | `is_a` → `Graph Traversal`; `contrasts_with` → `BFS` |
+| `BFS` | note | `subtype_of` → `Graph Traversal`; `contrasts_with` → `DFS`; `is_applied_in` → `Ego-Graph` |
+| `DFS` | note | `subtype_of` → `Graph Traversal`; `contrasts_with` → `BFS` |
 | `Cycle Detection` | note | `solves` → `Infinite Traversal Loop`; `is_applied_in` → `BFS`; `uses` → `Visited Set` |
 | `Ego-Graph` | note | `uses` → `BFS`; `is_applied_in` → `Akanga TUI`; `enables` → `Graph Navigation` |
 | `Directed Edge Traversal` | note | `qualifies` → `BFS`; `enables` → `Incoming and Outgoing Display` |
@@ -150,10 +150,10 @@ class EgoGraph:
     depth: int               # max hops requested
 ```
 
-**The traversal — written out explicitly, because this is the learning:**
+**The traversal — written out explicitly, because this is the learning (`build_ego_graph`):**
 
 ```python
-def ego_graph(root_id: str, db: GraphDatabase, depth: int = 1) -> EgoGraph:
+def build_ego_graph(root_id: str, db: GraphDatabase, depth: int = 1) -> EgoGraph:
     queue   = deque([(root_id, 0)])
     visited = {root_id}
     nodes   = {root_id: db.get_node(root_id)}
@@ -165,18 +165,21 @@ def ego_graph(root_id: str, db: GraphDatabase, depth: int = 1) -> EgoGraph:
         if current_depth >= depth:
             continue   # include the node but don't expand further
 
-        for edge in db.get_edges_from(node_id):
-            if edge.target_id and edge.target_id not in visited:
-                visited.add(edge.target_id)
-                nodes[edge.target_id] = db.get_node(edge.target_id)
-                queue.append((edge.target_id, current_depth + 1))
+        # Note: `get_neighbors` and `get_backlinks` return Node objects, not Edge
+        # objects. To get the relation name, you must query the edges table directly
+        # or use `ego.edges` after building.
+        for neighbor in db.get_neighbors(node_id):
+            if neighbor.id and neighbor.id not in visited:
+                visited.add(neighbor.id)
+                nodes[neighbor.id] = neighbor
+                queue.append((neighbor.id, current_depth + 1))
             edges.append(EgoEdge(..., direction=EdgeDirection.OUTGOING))
 
-        for edge in db.get_edges_to(node_id):
-            if edge.source_id not in visited:
-                visited.add(edge.source_id)
-                nodes[edge.source_id] = db.get_node(edge.source_id)
-                queue.append((edge.source_id, current_depth + 1))
+        for backlink in db.get_backlinks(node_id):
+            if backlink.id not in visited:
+                visited.add(backlink.id)
+                nodes[backlink.id] = backlink
+                queue.append((backlink.id, current_depth + 1))
             edges.append(EgoEdge(..., direction=EdgeDirection.INCOMING))
 
     return EgoGraph(root=nodes[root_id], nodes=nodes, edges=edges, depth=depth)
@@ -199,7 +202,7 @@ def render_ascii(ego: EgoGraph) -> str:
 
 **Missing cycle detection causes an infinite loop.** Akanga explicitly permits cycles (A supports B, B supports A is valid and meaningful). If you forget the `visited` set, BFS will enqueue A → B → A → B → … until memory is exhausted. This is not a theoretical edge case — any two nodes the user connects bidirectionally will trigger it. The fix is one line: check `if node_id not in visited` before enqueuing.
 
-**Forgetting incoming edges in the ego-graph.** The ego-graph is supposed to show "what does this node connect to, and what connects to it." If you only traverse `get_edges_from` (outgoing), you miss all nodes that point *to* the ego node. The ego-graph must traverse both directions in BFS — outgoing via `get_edges_from` and incoming via `get_edges_to` — with the `direction` flag on `EgoEdge` distinguishing them for the renderer.
+**Forgetting incoming edges in the ego-graph.** The ego-graph is supposed to show "what does this node connect to, and what connects to it." If you only traverse `get_neighbors` (outgoing), you miss all nodes that point *to* the ego node. The ego-graph must traverse both directions in BFS — outgoing via `get_neighbors` and incoming via `get_backlinks` — with the `direction` flag on `EgoEdge` distinguishing them for the renderer.
 
 **Over-engineering the ASCII renderer.** The ASCII ego-graph has a hard practical ceiling of around 12 nodes regardless of implementation quality. Beyond ~12 nodes, labels overlap and arrows cross unreadably — this is a constraint of the rendering medium, not a bug. Do not spend time building a sophisticated layout algorithm. The correct behavior beyond the ceiling is graceful degradation: truncate with a count ("… and 7 more nodes"). Richer rendering is a v2 feature requiring a proper canvas.
 
@@ -210,17 +213,17 @@ def render_ascii(ego: EgoGraph) -> str:
 ```python
 def test_ego_graph_depth_1():
     # A contradicts B, A supports C
-    # ego_graph(A, depth=1) → nodes {A,B,C}, 2 outgoing edges
+    # build_ego_graph(A, depth=1) → nodes {A,B,C}, 2 outgoing edges
     ...
 
 def test_ego_graph_incoming():
     # A contradicts B
-    # ego_graph(B, depth=1) → nodes {A,B}, 1 incoming edge from A
+    # build_ego_graph(B, depth=1) → nodes {A,B}, 1 incoming edge from A
     ...
 
 def test_cycle_does_not_loop():
     # A supports B, B supports A
-    # ego_graph(A, depth=3) terminates, returns {A,B}, not infinite
+    # build_ego_graph(A, depth=3) terminates, returns {A,B}, not infinite
     ...
 
 def test_depth_boundary():
@@ -230,11 +233,11 @@ def test_depth_boundary():
 
 def test_disconnected_node():
     # D has no edges
-    # ego_graph(D, depth=1) → {D}, edges []
+    # build_ego_graph(D, depth=1) → {D}, edges []
     ...
 
 def test_ascii_render_arrows():
-    ego = ego_graph(root_id, db, depth=1)
+    ego = build_ego_graph(root_id, db, depth=1)
     output = render_ascii(ego)
     assert "──" in output or "<·" in output
 ```
@@ -247,6 +250,6 @@ choice (cycles permitted, traversal safe).
 
 ## Reflect
 
-> **Solo:** The traversal tracks `visited` by node ID. But what about edges — could the same edge appear twice in `ego.edges`? Walk through the case where A → B and B → A both exist and depth=2. How many times does the edge A → B appear in the result, and is that correct behavior for the renderer?
+> **Solo:** The traversal tracks `visited` by node ID. But what about edges — could the same edge appear twice in `ego.edges`? Walk through the case where A → B and B → A both exist and depth=2. How many times does the edge A → B appear in the result (after calling `build_ego_graph`), and is that correct behavior for the renderer?
 
 > **Group:** BFS was chosen over DFS because it naturally groups nodes by distance from the root. But the ego-graph result (`EgoGraph.nodes`) is a dict keyed by UUID — distance is not stored. Should distance be included in the result? What would the TUI or ASCII renderer need to do differently if it had distance information, and is that worth the added complexity at this stage?

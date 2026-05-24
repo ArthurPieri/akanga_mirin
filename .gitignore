@@ -16,8 +16,8 @@ wheels/
 .claude-edited-files.log
 .codegraph/
 
-# Runtime artifacts created by learners
-src/
+# Runtime artifacts created by learners (root-level only, not skeleton src/)
+/src/
 vault/
 *.db
 *.db-wal

@@ -138,16 +138,15 @@ def populated_db(tmp_path: Path, tmp_vault: Path):
     db.upsert_edge({
         "source_id": node_a.id,
         "target_id": node_b.id,
-        "target_title": node_b.title,
         "relation": "supports",
         "relation_id": "EP-001",
     })
     db.upsert_edge({
         "source_id": node_b.id,
         "target_id": node_c.id,
-        "target_title": node_c.title,
         "relation": "contradicts",
         "relation_id": "EP-002",
     })
 
-    return db
+    yield db
+    db.close()

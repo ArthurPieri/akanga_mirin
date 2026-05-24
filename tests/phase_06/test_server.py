@@ -313,14 +313,18 @@ def test_create_node_path_traversal_blocked(test_client):
 
 
 def test_create_node_missing_title_returns_422(test_client):
-    """POST /api/v1/nodes without a 'path' field must return 422 (FastAPI validation)."""
-    # 'path' is required in the NodeCreate model — omitting it triggers FastAPI validation.
+    """POST /api/v1/nodes without a 'title' field must return 422 (FastAPI validation).
+
+    'title' is required in the CreateNodeRequest model — omitting it triggers
+    FastAPI/Pydantic validation and returns HTTP 422 Unprocessable Entity automatically.
+    """
+    # 'title' is required in CreateNodeRequest — omitting it triggers FastAPI validation.
     resp = test_client.post(
         "/api/v1/nodes",
-        json={"title": "No Path Node"},
+        json={"type": "note", "content": "No title here"},
     )
     assert resp.status_code == 422, (
-        f"Expected 422 (Unprocessable Entity) when 'path' is missing, got {resp.status_code}.\n"
+        f"Expected 422 (Unprocessable Entity) when 'title' is missing, got {resp.status_code}.\n"
         f"Body: {resp.text}\n"
         "FastAPI raises 422 automatically for missing required fields when using Pydantic models."
     )

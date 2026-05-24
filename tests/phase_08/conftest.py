@@ -7,6 +7,24 @@ import pytest
 
 from tests.conftest import _resolve_akanga_src
 
+
+# ---------------------------------------------------------------------------
+# Dual-try import helper
+# ---------------------------------------------------------------------------
+
+def _load_db():
+    """Import GraphDatabase from 'db' or 'akanga_core.db'."""
+    try:
+        from db import GraphDatabase  # noqa: PLC0415
+        return GraphDatabase
+    except ModuleNotFoundError:
+        try:
+            from akanga_core.db import GraphDatabase  # noqa: PLC0415
+            return GraphDatabase
+        except ModuleNotFoundError:
+            pytest.fail("Cannot import GraphDatabase from 'db' or 'akanga_core.db'")
+
+
 # Stable UUIDs used across all phase-08 fixtures
 _ID_COGNITION = str(uuid.UUID("aaaaaaaa-0800-0000-0000-000000000001"))
 _ID_ATTENTION = str(uuid.UUID("bbbbbbbb-0800-0000-0000-000000000002"))
@@ -43,7 +61,7 @@ def tmp_vault_with_nodes(tmp_path: Path):
         .db       — GraphDatabase instance
         .id_*     — node UUIDs as strings
     """
-    from akanga_core.db import GraphDatabase  # noqa: PLC0415
+    GraphDatabase = _load_db()
 
     vault = tmp_path / "vault"
     vault.mkdir()
@@ -179,7 +197,7 @@ def tmp_vault_with_nodes(tmp_path: Path):
 @pytest.fixture()
 def rag_context(tmp_vault_with_nodes):
     """Pre-built RAG context string for the Cognition root node."""
-    from akanga_core.db import GraphDatabase  # noqa: PLC0415
+    GraphDatabase = _load_db()  # noqa: F841 — kept for layout compatibility
 
     ctx = tmp_vault_with_nodes
 

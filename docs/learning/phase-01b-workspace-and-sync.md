@@ -133,12 +133,13 @@ initialization and save times fast regardless of vault size.
 
 | Node | Type | Key Edges |
 |---|---|---|
-| `Node Types as Schema Variants` | note | `is_applied_in` → `Node Data Model`; `is_a` → `Schema Design Pattern` |
-| `Reference Integrity` | note | `solved_by` → `UUID`; `qualifies` → `Edge Target Field` |
+| `Node Types as Schema Variants` | note | `is_applied_in` → `Node Data Model`; `subtype_of` → `Schema Design Pattern` |
+| `Reference Integrity` | note | `qualifies` → `Edge Target Field` |
+| `UUID` | note | `solves` → `Reference Integrity` |
 | `Background Sync Queue` | note | `solves` → `Stale Title Display`; `solves` → `Stale Workspace Name`; `enables` → `Lazy Sync` |
 | `Workspace Registry` | note | `is_part_of` → `Vault Configuration`; `implements` → `Named Graph Scoping`; `uses` → `UUID` |
-| `Nhamandu` | note | `is_a` → `Guaraní Deity`; `is_applied_in` → `Akanga Default Workspace`; `is_analogous_to` → `Primordial Source` |
-| `Akanga` | note | `is_a` → `Tupi-Guaraní Word`; `is_applied_in` → `Personal Knowledge Graph Tool`; `has_context` → `Tupi-Guaraní Language` |
+| `Nhamandu` | note | `subtype_of` → `Guaraní Deity`; `is_applied_in` → `Akanga Default Workspace`; `is_analogous_to` → `Primordial Source` |
+| `Akanga` | note | `subtype_of` → `Tupi-Guaraní Word`; `is_applied_in` → `Personal Knowledge Graph Tool`; `has_context` → `Tupi-Guaraní Language` |
 
 ### Seed Notes
 

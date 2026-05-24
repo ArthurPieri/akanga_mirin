@@ -132,8 +132,8 @@ as any README.
 | `Git Commit Model` | note | `enables` → `Version History`; `is_applied_in` → `Akanga Vault` |
 | `GitPython` | reference | `implements` → `Git Integration`; `is_applied_in` → `Akanga GitManager` |
 | `Non-Fatal Error Handling` | note | `is_applied_in` → `Akanga GitManager`; `contrasts_with` → `Fail-Fast Pattern` |
-| `Idempotent Commit` | note | `prevents` → `Empty Commit`; `uses` → `is_dirty Check` |
-| `.gitignore as Contract` | note | `excludes` → `*.db`; `excludes` → `*.db-wal`; `enables` → `Clean Vault History` |
+| `Idempotent Commit` | note | `blocks` → `Empty Commit`; `uses` → `is_dirty Check` |
+| `.gitignore as Contract` | note | `blocks` → `Unversioned DB Files`; `enables` → `Clean Vault History` |
 
 ---
 

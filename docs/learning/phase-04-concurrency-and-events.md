@@ -120,7 +120,7 @@ depth.
 | `File Watching` | note | `uses` → `watchdog`; `enables` → `Auto Re-index`; `has_prerequisite` → `Debouncing` |
 | `Debouncing` | note | `solves` → `Event Burst`; `is_applied_in` → `File Watcher`; `is_applied_in` → `Git Auto-Commit` |
 | `Threads vs asyncio` | note | `contrasts_with` → `asyncio`; `motivates` → `run_coroutine_threadsafe` |
-| `Event Bus` | note | `is_a` → `Pub/Sub Pattern`; `enables` → `Component Decoupling`; `is_applied_in` → `Akanga App` |
+| `Event Bus` | note | `subtype_of` → `Pub/Sub Pattern`; `enables` → `Component Decoupling`; `is_applied_in` → `Akanga App` |
 | `run_coroutine_threadsafe` | note | `solves` → `Thread-to-asyncio Bridge`; `is_part_of` → `Python asyncio`; `is_applied_in` → `Event Bus` |
 | `Sync Queue Drain` | note | `implements` → `Eventual Consistency`; `consumes` → `Background Sync Queue`; `uses` → `Atomic Write` |
 | `watchdog` | reference | `implements` → `File Watching`; `is_applied_in` → `Akanga Watcher` |
@@ -186,15 +186,17 @@ Per job type:
 **`app.py`** — `AkangaApp` startup sequence:
 
 ```
-1. load_vault_config  → populate DB config tables
+1. db = GraphDatabase(db_path)  → connection opens in __init__ (no db.connect() call)
+   # TODO: load_vault_config(vault) — reads akanga.yaml; no skeleton implementation
+   # exists yet (described in Phase 00 concepts). Add when implemented.
 2. full_scan_and_index → two-pass; DB fully populated
 3. sync_worker.drain  → resolve stale display names
 4. watcher.start      → begin watching for changes
 
 on file_changed:
-  indexer.index_file(path, db)       → re-index
-  git_manager.stage_and_commit()     → debounced 5s (Phase 7)
-  eventbus.publish('node_updated')   → TUI refreshes (Phase 5)
+  indexer.index_file(path, db)            → re-index
+  git_manager.commit("auto: update node") → debounced 5s (Phase 7)
+  eventbus.publish('node_updated')        → TUI refreshes (Phase 5)
 ```
 
 ---

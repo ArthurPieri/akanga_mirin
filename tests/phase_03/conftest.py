@@ -15,8 +15,21 @@ def _setup_akanga_src() -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Dual-try import helper for graph module
+# Dual-try import helpers
 # ---------------------------------------------------------------------------
+
+def _load_db():
+    """Import GraphDatabase from 'db' or 'akanga_core.db'."""
+    try:
+        from db import GraphDatabase  # noqa: PLC0415
+        return GraphDatabase
+    except ModuleNotFoundError:
+        try:
+            from akanga_core.db import GraphDatabase  # noqa: PLC0415
+            return GraphDatabase
+        except ModuleNotFoundError:
+            pytest.fail("Cannot import GraphDatabase from 'db' or 'akanga_core.db'")
+
 
 def _load_graph():
     """Import the graph module from 'graph' or 'akanga_core.graph'."""
@@ -43,7 +56,7 @@ def populated_graph_db(tmp_path: Path):
     Node UUIDs are stable strings exposed on the returned object as attributes:
         db.id_a, db.id_b, db.id_c, db.id_d
     """
-    from akanga_core.db import GraphDatabase
+    GraphDatabase = _load_db()
 
     db_path = tmp_path / "graph_test.db"
     db = GraphDatabase(str(db_path))

@@ -135,14 +135,14 @@ implementation must match it.
 
 | Node | Type | Key Edges |
 |---|---|---|
-| `REST` | note | `is_a` → `API Architectural Style`; `contrasts_with` → `WebSocket`; `is_applied_in` → `Akanga API` |
+| `REST` | note | `subtype_of` → `API Architectural Style`; `contrasts_with` → `WebSocket`; `is_applied_in` → `Akanga API` |
 | `FastAPI` | reference | `implements` → `REST`; `uses` → `Pydantic`; `uses` → `asyncio` |
 | `Lifespan Context Manager` | note | `is_part_of` → `FastAPI`; `solves` → `Resource Leak on Shutdown`; `is_applied_in` → `Akanga Server` |
 | `Pydantic` | reference | `is_applied_in` → `FastAPI`; `implements` → `API Boundary`; `enables` → `Automatic Validation` |
 | `WebSocket` | note | `contrasts_with` → `REST`; `enables` → `Push Events`; `is_applied_in` → `Akanga API` |
-| `Path Traversal Protection` | note | `is_a` → `Security Pattern`; `is_applied_in` → `Akanga API`; `solves` → `Path Traversal Attack` |
+| `Path Traversal Protection` | note | `subtype_of` → `Security Pattern`; `is_applied_in` → `Akanga API`; `solves` → `Path Traversal Attack` |
 | `API Boundary` | note | `contrasts_with` → `Library Consumer`; `qualifies` → `Pydantic`; `is_applied_in` → `Akanga API` |
-| `OpenAPI` | note | `generated_by` → `FastAPI`; `documents` → `Akanga API`; `enables` → `Client Code Generation` |
+| `OpenAPI` | note | `was_generated_by` → `FastAPI`; `documents` → `Akanga API`; `enables` → `Client Code Generation` |
 
 ---
 
@@ -205,9 +205,10 @@ watcher handles it. This keeps the API stateless between write calls.
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # startup
-    config = load_vault_config(vault)
-    db.connect(db_path)
-    db.load_config(config)
+    # Note: GraphDatabase opens the connection in __init__ — no db.connect() call needed.
+    # db = GraphDatabase(db_path) is called before passing db into the lifespan.
+    # TODO: load_vault_config(vault) — reads akanga.yaml config; no skeleton
+    # implementation exists yet (described in Phase 00 concepts). Add when implemented.
     indexer.full_scan_and_index(vault, db)
     sync_worker.drain(db, vault)
     watcher.start()

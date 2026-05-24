@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.phase_03.conftest import _load_graph
+from tests.phase_03.conftest import _load_graph, _load_db
 
 _graph_mod = _load_graph()
 build_ego_graph = _graph_mod.build_ego_graph
@@ -25,7 +25,7 @@ EdgeDirection = _graph_mod.EdgeDirection
 
 def _simple_chain_db(tmp_path: Path):
     """Return a db + (id_a, id_b, id_c) for a simple A → B → C chain."""
-    from akanga_core.db import GraphDatabase
+    GraphDatabase = _load_db()
 
     db_path = tmp_path / "chain.db"
     db = GraphDatabase(str(db_path))
@@ -131,7 +131,7 @@ class TestBuildEgoGraphStructure:
 
     def test_build_ego_graph_both_directions(self, tmp_path: Path) -> None:
         """A→B (outgoing) and C→A (incoming): depth=1 from A includes both B and C."""
-        from akanga_core.db import GraphDatabase
+        GraphDatabase = _load_db()
 
 
         db_path = tmp_path / "bidir.db"
@@ -174,7 +174,7 @@ class TestBuildEgoGraphStructure:
 
         db_path = tmp_path / "dir.db"
 
-        from akanga_core.db import GraphDatabase
+        GraphDatabase = _load_db()
 
         db = GraphDatabase(str(db_path))
 
@@ -218,7 +218,7 @@ class TestBuildEgoGraphStructure:
 
     def test_build_ego_graph_empty_graph(self, tmp_path: Path) -> None:
         """Node with no edges: ego contains only the root, no edges."""
-        from akanga_core.db import GraphDatabase
+        GraphDatabase = _load_db()
 
 
         db_path = tmp_path / "empty.db"

@@ -226,7 +226,7 @@ def get_node(node_id: str) -> dict:
 @mcp.tool()
 def search_nodes(query: str, limit: int = 10) -> list[dict]:
     """Full-text search over the akanga vault."""
-    nodes = db.search_nodes(query=query, limit=limit)
+    nodes = db.search_fts(query, limit=limit)
     return [{"id": n.id, "title": n.title, "type": n.type} for n in nodes]
 
 if __name__ == "__main__":

@@ -17,8 +17,11 @@ def write_atomically(path: str, content: str) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
         os.replace(tmp, path)   # atomic: old or new, never partial
-    except BaseException:
-        os.unlink(tmp)           # clean up on failure
+    except Exception:
+        try:
+            os.unlink(tmp)       # clean up on failure; ignore errors so original exception propagates cleanly
+        except OSError:
+            pass
         raise
 
 
@@ -28,6 +31,9 @@ with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w", encoding
 try:
     write_atomically(target, "Hello, atomic world!")
     print(f"Written to {target}: {pathlib.Path(target).read_text(encoding='utf-8')!r}")
-    print("No .tmp file remains:", not any(f.endswith('.tmp') for f in os.listdir(str(pathlib.Path(target).parent)) if 'akanga' in f))
+    parent = pathlib.Path(target).parent
+    leftover_tmp = [f for f in os.listdir(parent) if f.endswith('.tmp')]
+    print("No .tmp file remains:", not leftover_tmp)
+    assert not leftover_tmp, f"Leaked temp files: {leftover_tmp}"
 finally:
     pathlib.Path(target).unlink(missing_ok=True)

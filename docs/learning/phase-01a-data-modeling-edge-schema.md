@@ -139,8 +139,8 @@ yet (dangling reference, resolved on next sync after the target is created).
 
 | Node | Type | Key Edges |
 |---|---|---|
-| `Directed Graph` | note | `is_a` → `Graph`; `contrasts_with` → `Undirected Graph` |
-| `Labeled Property Graph` | note | `is_a` → `Directed Graph`; `implements` → `Semantic Edge Types` |
+| `Directed Graph` | note | `subtype_of` → `Graph`; `contrasts_with` → `Undirected Graph` |
+| `Labeled Property Graph` | note | `subtype_of` → `Directed Graph`; `implements` → `Semantic Edge Types` |
 | `Source of Truth` | note | `qualifies` → `Frontmatter Edge Block`; `contrasts_with` → `Derived Index` |
 | `Eventual Consistency` | note | `qualifies` → `Write-Back Sync`; `contrasts_with` → `Strong Consistency` |
 | `Two-Pass Parsing` | note | `is_applied_in` → `Akanga Parser`; `enables` → `Inline Edge Shorthand` |
@@ -214,17 +214,22 @@ def test_writeback_roundtrip():
     node = create(title="Test", type="note", vault=tmp_path)
     node.path.write_text(node.path.read_text() + "\n[[Blink | contradicts]]")
     write_back(node.path)
-    re_parsed = parse(node.path)
-    assert len(re_parsed.edges) == 1
-    assert re_parsed.edges[0].relation == "contradicts"
+    re_parsed = parse_node_file(node.path)
+    # Edges live in the frontmatter dict, not as a dedicated Node field. In Phase 02+,
+    # edges move to the DB edges table and are accessed via db.get_neighbors().
+    # For Phase 01A, read edges from the parsed frontmatter:
+    edges = re_parsed.frontmatter.get("edges", [])
+    assert len(edges) == 1
+    assert edges[0]["relation"] == "contradicts"
 
 def test_writeback_is_idempotent():
     node = create(title="Test", type="note", vault=tmp_path)
     node.path.write_text(node.path.read_text() + "\n[[Blink | contradicts]]")
     write_back(node.path)
     write_back(node.path)  # second call must not duplicate the edge
-    re_parsed = parse(node.path)
-    assert len(re_parsed.edges) == 1
+    re_parsed = parse_node_file(node.path)
+    edges = re_parsed.frontmatter.get("edges", [])
+    assert len(edges) == 1
 ```
 
 Plus 5 vault nodes with typed edges. The vault is the proof of understanding,

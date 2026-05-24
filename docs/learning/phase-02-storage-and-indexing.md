@@ -83,12 +83,13 @@ and requires schema changes when new nodes are added.
 
 A data structure that is fully reconstructible from its source and therefore
 expendable. The Akanga DB is a derived index: every row in `nodes` was parsed from a
-`.md` file; every row in `edges` was parsed from a frontmatter `edges:` block; every
-row in `workspaces` and `relations` was loaded from `akanga.yaml`. If the DB is
-deleted, `akanga index --vault ./vault` rebuilds it identically. This means the DB is
-never committed to git, can be excluded from backups, and can be safely deleted to
-resolve corruption. The corollary: never write anything to the DB that doesn't have a
-corresponding representation in a file or in `akanga.yaml`.
+`.md` file; every row in `edges` was extracted from wikilinks and frontmatter edge
+blocks in those same files; workspace and relation vocabulary data lives only in
+`akanga.yaml` (not in the DB at this phase). If the DB is deleted, `akanga index
+--vault ./vault` rebuilds it identically. This means the DB is never committed to git,
+can be excluded from backups, and can be safely deleted to resolve corruption. The
+corollary: never write anything to the DB that doesn't have a corresponding
+representation in a file or in `akanga.yaml`.
 
 > Akanga node: `Derived Index`
 
@@ -108,10 +109,10 @@ all edges against the complete node registry.
 SQLite's built-in full-text search extension. Creates a virtual table with an
 inverted index: for each word in the indexed fields, it stores which rows contain it.
 `SELECT * FROM nodes_fts WHERE nodes_fts MATCH 'cognition'` returns all matching
-nodes fast, regardless of vault size. In Akanga, FTS5 covers `title`, `tags`, and
-`description` (reference node short description) only — never the prose body. Body
+nodes fast, regardless of vault size. In Akanga, FTS5 covers `title` and `tags` only — never the prose body. Body
 search is handled by ripgrep at the filesystem level. The DB never stores prose
-content.
+content. (A `description` column for reference nodes is a candidate for a later
+phase — it is not in the Phase 02 schema.)
 
 > Akanga node: `FTS5`
 
@@ -135,80 +136,40 @@ it at a time.
 
 ## The Complete DB Schema
 
-```sql
--- Structural graph index
-CREATE TABLE nodes (
-    id            TEXT PRIMARY KEY,
-    path          TEXT NOT NULL UNIQUE,
-    title         TEXT NOT NULL,
-    type          TEXT NOT NULL,
-    tags          TEXT NOT NULL DEFAULT '[]',
-    author        TEXT,
-    created_at    TEXT,
-    updated_at    TEXT,
-    meta          TEXT NOT NULL DEFAULT '{}',
-    content_hash  TEXT NOT NULL,
-    url           TEXT,
-    external_type TEXT,
-    description   TEXT
-);
+The schema below is the exact `DB_SCHEMA` constant in `skeletons/phase_02/src/akanga_core/db.py`.
+Do not add extra tables or columns at this phase.
 
+```sql
+CREATE TABLE IF NOT EXISTS nodes (
+    id TEXT PRIMARY KEY,
+    path TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    type TEXT NOT NULL,
+    tags TEXT NOT NULL DEFAULT '[]',
+    content_hash TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS edges (
-    id          TEXT PRIMARY KEY,
-    source_id   TEXT NOT NULL,
-    target_id   TEXT,
-    relation    TEXT,
+    id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL,
+    target_id TEXT,
+    relation TEXT,
     relation_id TEXT,
     FOREIGN KEY (source_id) REFERENCES nodes(id) ON DELETE CASCADE
 );
-
--- Config mirror (loaded from akanga.yaml at startup)
-CREATE TABLE workspaces (
-    id         TEXT PRIMARY KEY,
-    name       TEXT NOT NULL,
-    is_default INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE node_workspaces (
-    node_id      TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    PRIMARY KEY (node_id, workspace_id)
-);
-
-CREATE TABLE relations (
-    id          TEXT PRIMARY KEY,
-    name        TEXT NOT NULL,
-    category    TEXT NOT NULL,
-    description TEXT,
-    symmetric   INTEGER NOT NULL DEFAULT 0,
-    inverse_id  TEXT
-);
-
--- Unified sync queue (drained in Phase 4)
-CREATE TABLE sync_queue (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_type     TEXT NOT NULL,
-    entity_id    TEXT NOT NULL,
-    new_name     TEXT NOT NULL,
-    enqueued_at  TEXT NOT NULL,
-    processed_at TEXT
-);
-
--- Active node health check results (Phase 7)
-CREATE TABLE active_results (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    node_id   TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-    timestamp TEXT NOT NULL,
-    status    TEXT NOT NULL,
-    payload   TEXT
-);
-
--- FTS5: title + tags + description only (no prose body)
-CREATE VIRTUAL TABLE nodes_fts USING fts5(
-    title, tags, description,
-    content=nodes, content_rowid=rowid
+CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+    title,
+    tags,
+    content='nodes',
+    content_rowid='rowid'
 );
 ```
+
+> **Note:** The `sync_queue` table is added in Phase 1B when the background sync queue is
+> introduced. The `active_results` table is added when building the active node manager
+> (advanced — not covered in this phase). Fields like `author`, `created_at`, `updated_at`,
+> `meta`, `url`, `external_type`, and `description` that you see in node frontmatter are not
+> columns in the Phase 02 `nodes` table — they are stored only in the `.md` file itself and
+> accessible by re-parsing it.
 
 ---
 
@@ -216,9 +177,9 @@ CREATE VIRTUAL TABLE nodes_fts USING fts5(
 
 | Node | Type | Key Edges |
 |---|---|---|
-| `SQLite` | reference | `is_applied_in` → `Akanga DB`; `is_a` → `Embedded Database` |
+| `SQLite` | reference | `is_applied_in` → `Akanga DB`; `subtype_of` → `Embedded Database` |
 | `WAL Mode` | note | `is_part_of` → `SQLite`; `enables` → `Concurrent DB Access`; `solves` → `Reader-Writer Blocking` |
-| `Adjacency List` | note | `is_a` → `Graph Representation`; `is_applied_in` → `Akanga Edge Table`; `contrasts_with` → `Adjacency Matrix` |
+| `Adjacency List` | note | `subtype_of` → `Graph Representation`; `is_applied_in` → `Akanga Edge Table`; `contrasts_with` → `Adjacency Matrix` |
 | `Derived Index` | note | `qualifies` → `Akanga DB`; `contrasts_with` → `Source of Truth`; `enables` → `Safe DB Deletion` |
 | `Two-Pass Indexing` | note | `is_applied_in` → `Akanga Indexer`; `solves` → `Unresolved Edge Targets` |
 | `FTS5` | note | `is_part_of` → `SQLite`; `is_applied_in` → `Akanga Search`; `contrasts_with` → `ripgrep` |
@@ -232,15 +193,16 @@ CREATE VIRTUAL TABLE nodes_fts USING fts5(
 
 | Method | What it does |
 |---|---|
-| `connect(path)` | Open DB, create schema, enable WAL, load config |
+| `__init__(db_path)` | Open DB, create schema, enable WAL mode (connection is in `__init__`, not a separate `connect`) |
+| `close()` | Close the underlying SQLite connection |
 | `upsert_node(node)` | Insert or replace node row + sync FTS5 |
 | `delete_node(node_id)` | Remove node + cascade edges |
-| `upsert_edge(edge)` | Insert or replace edge row |
+| `upsert_edge(source_id, target_id, relation, relation_id)` | Insert a new edge row, return its UUID |
 | `get_node(node_id) → Node` | Fetch by UUID |
+| `list_nodes(limit=100, offset=0) → list[Node]` | Paginated list of all nodes |
 | `get_neighbors(node_id) → list[Node]` | Outgoing edges → target nodes |
 | `get_backlinks(node_id) → list[Node]` | Incoming edges → source nodes |
-| `search(query) → list[Node]` | FTS5 over title + tags + description |
-| `load_config()` | Load workspaces + relations from `akanga.yaml` into config tables |
+| `search_fts(query, limit=20) → list[Node]` | FTS5 over title + tags |
 
 **`indexer.py`** — `VaultIndexer`:
 
@@ -291,6 +253,10 @@ def test_content_hash_skip(tmp_path, mocker):
 
     spy.assert_not_called()
 
+# Note: Implement test_content_hash_skip in your test_indexer.py. The skeleton's
+# index_file function should check content_hash before calling upsert_node — see
+# the hash-skip step in the index_file HOW section above.
+
 def test_two_pass_edge_resolution():
     # Node A contradicts Node B. Index A before B.
     # After full full_scan_and_index(), edge from A has target_id resolved to B's UUID.
@@ -305,16 +271,16 @@ def test_fts5_search():
     node = create(title="Fast Thinking", type="note", vault=tmp_path)
     node.tags = ["cognition"]
     db.upsert_node(node)
-    results = db.search("cognition")
+    results = db.search_fts("cognition")
     assert any(r.id == node.id for r in results)
 
 def test_db_is_expendable(tmp_path):
     vault, db_path = setup_vault_with_nodes(tmp_path)
     indexer.full_scan_and_index(vault, GraphDatabase(db_path))
-    results_before = GraphDatabase(db_path).search("cognition")
+    results_before = GraphDatabase(db_path).search_fts("cognition")
     db_path.unlink()
     indexer.full_scan_and_index(vault, GraphDatabase(db_path))
-    results_after = GraphDatabase(db_path).search("cognition")
+    results_after = GraphDatabase(db_path).search_fts("cognition")
     assert {r.id for r in results_before} == {r.id for r in results_after}
 ```
 
