@@ -14,6 +14,23 @@ def _setup_akanga_src() -> Path:
     return _resolve_akanga_src(3)
 
 
+# ---------------------------------------------------------------------------
+# Dual-try import helper for graph module
+# ---------------------------------------------------------------------------
+
+def _load_graph():
+    """Import the graph module from 'graph' or 'akanga_core.graph'."""
+    try:
+        import graph as m  # noqa: PLC0415
+        return m
+    except ModuleNotFoundError:
+        try:
+            from akanga_core import graph as m  # noqa: PLC0415
+            return m
+        except ModuleNotFoundError:
+            pytest.fail("Cannot import 'graph' or 'akanga_core.graph'")
+
+
 def _make_node_id() -> str:
     return str(uuid.uuid4())
 

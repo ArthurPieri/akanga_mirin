@@ -208,7 +208,7 @@ async def lifespan(app: FastAPI):
     config = load_vault_config(vault)
     db.connect(db_path)
     db.load_config(config)
-    indexer.index_vault(vault, db)
+    indexer.full_scan_and_index(vault, db)
     sync_worker.drain(db, vault)
     watcher.start()
     active_manager.start()

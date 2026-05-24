@@ -588,7 +588,7 @@ def indexed_db(populated_vault, tmp_db) -> GraphDatabase:
     All 5 nodes from VAULT_FIXTURE_NODES are present; 2 edges are indexed.
     """
     db = GraphDatabase(tmp_db)
-    VaultIndexer().index_vault(populated_vault, db)
+    full_scan_and_index(populated_vault, db)
     return db
 ```
 
@@ -624,7 +624,7 @@ would not make sense globally. Examples:
 → tmp_db → indexed_db`. All downstream tests depend on this chain, not on individual
 pieces. A test that needs only the DB gets `indexed_db` and gets the vault for free.
 A test that needs to modify vault files gets `populated_vault` directly and calls
-`VaultIndexer().index_vault()` itself when it needs DB access after the modification.
+`full_scan_and_index()` itself when it needs DB access after the modification.
 
 ---
 

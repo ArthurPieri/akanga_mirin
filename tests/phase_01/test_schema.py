@@ -9,6 +9,17 @@ import pytest
 # Module-level import helper
 # ---------------------------------------------------------------------------
 
+def _get_parse_fn(m):
+    """Return the parse function, accepting either 'parse' or 'parse_node_file'."""
+    fn = getattr(m, "parse", None) or getattr(m, "parse_node_file", None)
+    if fn is None:
+        pytest.fail(
+            "parser module must export either 'parse' or 'parse_node_file'. "
+            "Found neither."
+        )
+    return fn
+
+
 def _load_module():
     """Import the learner's parser module.
 
@@ -106,7 +117,9 @@ def test_extract_inline_edges_ignores_regular_wikilinks():
     body = "See [[NodeName]] for more details."
     edges = extract_inline_edges(body)
     # Plain wikilinks have no relation — they must not appear as edges.
-    assert not any(e.target == "NodeName" and e.relation == "" for e in edges)
+    assert edges == [], (
+        f"Plain [[NodeName]] wikilinks must produce no inline edges, got: {edges!r}"
+    )
 
 
 def test_extract_inline_edges_empty_body():
@@ -181,7 +194,7 @@ def test_write_back_moves_inline_to_frontmatter(tmp_vault: Path):
     After write_back(), the edges block contains the inline edge.
     """
     m = _load_module()
-    parse = m.parse
+    parse = _get_parse_fn(m)
     write_back = m.write_back
 
     content = dedent("""\
@@ -201,15 +214,16 @@ def test_write_back_moves_inline_to_frontmatter(tmp_vault: Path):
     write_back(node_file)
 
     reparsed = parse(node_file)
-    assert len(reparsed.edges) == 1
-    assert reparsed.edges[0].relation == "contradicts"
-    assert reparsed.edges[0].target == "Blink — Gladwell"
+    raw_edges = reparsed.frontmatter.get("edges", [])
+    assert len(raw_edges) == 1
+    assert raw_edges[0]["relation"] == "contradicts"
+    assert raw_edges[0]["target"] == "Blink — Gladwell"
 
 
 def test_write_back_idempotent(tmp_vault: Path):
     """Calling write_back() twice on the same file must not duplicate edges."""
     m = _load_module()
-    parse = m.parse
+    parse = _get_parse_fn(m)
     write_back = m.write_back
 
     content = dedent("""\
@@ -230,7 +244,8 @@ def test_write_back_idempotent(tmp_vault: Path):
     write_back(node_file)
 
     reparsed = parse(node_file)
-    assert len(reparsed.edges) == 1
+    raw_edges = reparsed.frontmatter.get("edges", [])
+    assert len(raw_edges) == 1
 
 
 def test_write_back_preserves_existing_edges(tmp_vault: Path):
@@ -239,7 +254,7 @@ def test_write_back_preserves_existing_edges(tmp_vault: Path):
     After write_back(), both edges are present without duplication.
     """
     m = _load_module()
-    parse = m.parse
+    parse = _get_parse_fn(m)
     write_back = m.write_back
 
     content = dedent("""\
@@ -263,7 +278,8 @@ def test_write_back_preserves_existing_edges(tmp_vault: Path):
     write_back(node_file)
 
     reparsed = parse(node_file)
-    assert len(reparsed.edges) == 2
-    relations = {e.relation for e in reparsed.edges}
+    raw_edges = reparsed.frontmatter.get("edges", [])
+    assert len(raw_edges) == 2
+    relations = {e["relation"] for e in raw_edges}
     assert "supports" in relations
     assert "contradicts" in relations

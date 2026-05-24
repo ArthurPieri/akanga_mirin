@@ -247,7 +247,7 @@ CREATE VIRTUAL TABLE nodes_fts USING fts5(
 
 | Method | What it does |
 |---|---|
-| `index_vault(vault, db)` | Full two-pass scan of vault directory |
+| `full_scan_and_index(vault, db)` | Full two-pass scan of vault directory |
 | `index_file(path, db)` | Single file upsert — used by file watcher in Phase 4 |
 
 ---
@@ -281,7 +281,7 @@ def test_content_hash_skip(mocker):
 
 def test_two_pass_edge_resolution():
     # Node A contradicts Node B. Index A before B.
-    # After full index_vault(), edge from A has target_id resolved to B's UUID.
+    # After full full_scan_and_index(), edge from A has target_id resolved to B's UUID.
     ...
 
 def test_backlinks():
@@ -298,10 +298,10 @@ def test_fts5_search():
 
 def test_db_is_expendable(tmp_path):
     vault, db_path = setup_vault_with_nodes(tmp_path)
-    indexer.index_vault(vault, GraphDatabase(db_path))
+    indexer.full_scan_and_index(vault, GraphDatabase(db_path))
     results_before = GraphDatabase(db_path).search("cognition")
     db_path.unlink()
-    indexer.index_vault(vault, GraphDatabase(db_path))
+    indexer.full_scan_and_index(vault, GraphDatabase(db_path))
     results_after = GraphDatabase(db_path).search("cognition")
     assert {r.id for r in results_before} == {r.id for r in results_after}
 ```

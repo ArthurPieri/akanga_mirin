@@ -2,6 +2,13 @@
 import sqlite3
 from pathlib import Path
 
+import pytest
+
+from tests.phase_02.conftest import _load_db, _load_parser
+
+GraphDatabase = _load_db()
+_parser_mod = _load_parser()
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -9,7 +16,7 @@ from pathlib import Path
 
 def _make_node(node_id: str, title: str, tmp_vault: Path, *, tags=None, content_hash=None):
     """Construct a minimal Node instance for use in tests."""
-    from parser import Node  # noqa: PLC0415
+    Node = _parser_mod.Node
 
     return Node(
         id=node_id,
@@ -27,7 +34,7 @@ def _make_node(node_id: str, title: str, tmp_vault: Path, *, tags=None, content_
 
 def test_upsert_and_get_node(tmp_db: str, tmp_vault: Path):
     """Upserting a node and retrieving it by id returns matching fields."""
-    from db import GraphDatabase  # noqa: PLC0415
+
 
     db = GraphDatabase(tmp_db)
     node = _make_node("aaaaaaaa-0001-0001-0001-000000000001", "Cognitive Load", tmp_vault)
@@ -42,7 +49,7 @@ def test_upsert_and_get_node(tmp_db: str, tmp_vault: Path):
 
 def test_upsert_is_idempotent(tmp_db: str, tmp_vault: Path):
     """Upserting the same node twice results in exactly one row in the DB."""
-    from db import GraphDatabase  # noqa: PLC0415
+
 
     db = GraphDatabase(tmp_db)
     node = _make_node("aaaaaaaa-0002-0002-0002-000000000002", "Idempotent Node", tmp_vault)
@@ -57,7 +64,7 @@ def test_upsert_is_idempotent(tmp_db: str, tmp_vault: Path):
 
 def test_upsert_updates_existing(tmp_db: str, tmp_vault: Path):
     """Upserting a node with a changed title overwrites the previous title."""
-    from db import GraphDatabase  # noqa: PLC0415
+
 
     db = GraphDatabase(tmp_db)
     node = _make_node("aaaaaaaa-0003-0003-0003-000000000003", "Original Title", tmp_vault)
@@ -72,7 +79,7 @@ def test_upsert_updates_existing(tmp_db: str, tmp_vault: Path):
 
 def test_delete_node(tmp_db: str, tmp_vault: Path):
     """Deleting a node by id means get_node returns None afterwards."""
-    from db import GraphDatabase  # noqa: PLC0415
+
 
     db = GraphDatabase(tmp_db)
     node = _make_node("aaaaaaaa-0004-0004-0004-000000000004", "To Delete", tmp_vault)
@@ -88,7 +95,7 @@ def test_delete_node(tmp_db: str, tmp_vault: Path):
 
 def test_list_nodes(tmp_db: str, tmp_vault: Path):
     """After upserting 3 nodes, list_nodes returns all 3."""
-    from db import GraphDatabase  # noqa: PLC0415
+
 
     db = GraphDatabase(tmp_db)
     for i in range(3):
@@ -100,7 +107,7 @@ def test_list_nodes(tmp_db: str, tmp_vault: Path):
 
 def test_list_nodes_limit_offset(tmp_db: str, tmp_vault: Path):
     """list_nodes respects limit and offset for pagination."""
-    from db import GraphDatabase  # noqa: PLC0415
+
 
     db = GraphDatabase(tmp_db)
     for i in range(5):
@@ -117,7 +124,7 @@ def test_list_nodes_limit_offset(tmp_db: str, tmp_vault: Path):
 
 def test_search_fts_basic(tmp_db: str, tmp_vault: Path):
     """A node titled 'Cognitive Load' is returned when searching 'cognitive'."""
-    from db import GraphDatabase  # noqa: PLC0415
+
 
     db = GraphDatabase(tmp_db)
     node = _make_node("dddddddd-0001-0001-0001-000000000001", "Cognitive Load", tmp_vault, tags=["cognition"])
@@ -129,7 +136,7 @@ def test_search_fts_basic(tmp_db: str, tmp_vault: Path):
 
 def test_search_fts_no_operator_injection(tmp_db: str, tmp_vault: Path):
     """FTS5 operator-like input must not crash (SEC-06: terms are double-quoted)."""
-    from db import GraphDatabase  # noqa: PLC0415
+
 
     db = GraphDatabase(tmp_db)
     # Should return an empty list (or any list), never raise an exception.
@@ -146,7 +153,7 @@ def test_search_fts_no_operator_injection(tmp_db: str, tmp_vault: Path):
 
 def test_upsert_edge_and_get_neighbors(tmp_db: str, tmp_vault: Path):
     """After inserting an edge A→B, get_neighbors(A.id) includes B."""
-    from db import GraphDatabase  # noqa: PLC0415
+
 
     db = GraphDatabase(tmp_db)
     node_a = _make_node("eeeeeeee-0001-0001-0001-000000000001", "Source Node", tmp_vault)
@@ -167,7 +174,7 @@ def test_upsert_edge_and_get_neighbors(tmp_db: str, tmp_vault: Path):
 
 def test_get_backlinks(tmp_db: str, tmp_vault: Path):
     """After inserting edge A→B, get_backlinks(B.id) includes A."""
-    from db import GraphDatabase  # noqa: PLC0415
+
 
     db = GraphDatabase(tmp_db)
     node_a = _make_node("ffffffff-0001-0001-0001-000000000001", "Backlink Source", tmp_vault)
@@ -188,7 +195,7 @@ def test_get_backlinks(tmp_db: str, tmp_vault: Path):
 
 def test_delete_node_removes_edges(tmp_db: str, tmp_vault: Path):
     """Deleting the source node cascades to remove its outgoing edges."""
-    from db import GraphDatabase  # noqa: PLC0415
+
 
     db = GraphDatabase(tmp_db)
     node_a = _make_node("11111111-0001-0001-0001-000000000001", "Cascade Source", tmp_vault)
@@ -217,7 +224,7 @@ def test_delete_node_removes_edges(tmp_db: str, tmp_vault: Path):
 
 def test_wal_mode(tmp_db: str):
     """After GraphDatabase.__init__, SQLite journal_mode must be 'wal'."""
-    from db import GraphDatabase  # noqa: PLC0415
+
 
     GraphDatabase(tmp_db)
     conn = sqlite3.connect(tmp_db)
@@ -232,7 +239,7 @@ def test_wal_mode(tmp_db: str):
 
 def test_get_node_not_found(tmp_db: str):
     """get_node with a non-existent id returns None without raising."""
-    from db import GraphDatabase  # noqa: PLC0415
+
 
     db = GraphDatabase(tmp_db)
     result = db.get_node("nonexistent-id-that-does-not-exist")
@@ -241,7 +248,7 @@ def test_get_node_not_found(tmp_db: str):
 
 def test_delete_nonexistent_node(tmp_db: str):
     """delete_node with a non-existent id does not raise an exception."""
-    from db import GraphDatabase  # noqa: PLC0415
+
 
     db = GraphDatabase(tmp_db)
     # Must complete without raising.

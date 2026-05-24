@@ -3,16 +3,16 @@
 Tests the learner's sync_queue module, which must live at AKANGA_SRC/sync_queue.py
 (or AKANGA_SRC/akanga_core/sync_queue.py).  The module must export:
 
-    enqueue_sync_job(db, job_type, entity_id, new_name) -> None
-    pending_sync_jobs(db) -> list[...]
+    enqueue_title_sync(db, node_id, new_title) -> None
+    pending_sync_jobs(db) -> list[dict]
     mark_processed(db, job_id) -> None
 
 The sync_queue table schema:
-    id          TEXT PRIMARY KEY
-    job_type    TEXT NOT NULL
-    entity_id   TEXT NOT NULL
-    new_name    TEXT NOT NULL
-    enqueued_at TEXT NOT NULL
+    id           TEXT PRIMARY KEY
+    job_type     TEXT NOT NULL
+    entity_id    TEXT NOT NULL
+    new_name     TEXT NOT NULL
+    enqueued_at  TEXT NOT NULL
     processed_at TEXT   (NULL = pending)
 
 All tests receive a ``tmp_db`` fixture (a sqlite3.Connection with the table
@@ -35,31 +35,31 @@ from tests.phase_01.conftest import _load_sync_queue
 
 
 def test_enqueue_creates_row(tmp_db):
-    """enqueue_sync_job inserts exactly one row into sync_queue."""
+    """enqueue_title_sync inserts exactly one row into sync_queue."""
     m = _load_sync_queue()
 
-    m.enqueue_sync_job(tmp_db, job_type="rename", entity_id="node-001", new_name="New Title")
+    m.enqueue_title_sync(tmp_db, node_id="node-001", new_title="New Title")
 
     rows = tmp_db.execute("SELECT * FROM sync_queue").fetchall()
     assert len(rows) == 1, (
-        f"Expected 1 row in sync_queue after enqueue_sync_job, got {len(rows)}."
+        f"Expected 1 row in sync_queue after enqueue_title_sync, got {len(rows)}."
     )
 
 
 def test_enqueue_is_idempotent(tmp_db):
-    """Calling enqueue twice with same entity_id and job_type creates only one pending row."""
+    """Calling enqueue_title_sync twice with the same node_id creates only one pending row."""
     m = _load_sync_queue()
 
-    m.enqueue_sync_job(tmp_db, job_type="rename", entity_id="node-001", new_name="Title A")
-    m.enqueue_sync_job(tmp_db, job_type="rename", entity_id="node-001", new_name="Title A")
+    m.enqueue_title_sync(tmp_db, node_id="node-001", new_title="Title A")
+    m.enqueue_title_sync(tmp_db, node_id="node-001", new_title="Title A")
 
     rows = tmp_db.execute(
-        "SELECT * FROM sync_queue WHERE entity_id = ? AND job_type = ? AND processed_at IS NULL",
-        ("node-001", "rename"),
+        "SELECT * FROM sync_queue WHERE entity_id = ? AND processed_at IS NULL",
+        ("node-001",),
     ).fetchall()
     assert len(rows) == 1, (
-        f"Expected only 1 pending row for the same (entity_id, job_type), got {len(rows)}.\n"
-        "enqueue_sync_job must be idempotent: do not insert a duplicate pending job."
+        f"Expected only 1 pending row for the same node_id, got {len(rows)}.\n"
+        "enqueue_title_sync must be idempotent: do not insert a duplicate pending job."
     )
 
 
@@ -67,8 +67,8 @@ def test_pending_jobs_returns_unprocessed(tmp_db):
     """pending_sync_jobs returns only rows where processed_at IS NULL."""
     m = _load_sync_queue()
 
-    m.enqueue_sync_job(tmp_db, job_type="rename", entity_id="node-001", new_name="Alpha")
-    m.enqueue_sync_job(tmp_db, job_type="rename", entity_id="node-002", new_name="Beta")
+    m.enqueue_title_sync(tmp_db, node_id="node-001", new_title="Alpha")
+    m.enqueue_title_sync(tmp_db, node_id="node-002", new_title="Beta")
 
     # Manually mark node-002 as processed so we have one pending and one done.
     tmp_db.execute(
@@ -88,11 +88,11 @@ def test_mark_processed_sets_timestamp(tmp_db):
     """mark_processed sets processed_at to a non-null value."""
     m = _load_sync_queue()
 
-    m.enqueue_sync_job(tmp_db, job_type="rename", entity_id="node-001", new_name="Alpha")
+    m.enqueue_title_sync(tmp_db, node_id="node-001", new_title="Alpha")
 
     # Retrieve the job id so we can mark it processed.
     row = tmp_db.execute("SELECT id FROM sync_queue WHERE entity_id = ?", ("node-001",)).fetchone()
-    assert row is not None, "Precondition: enqueue_sync_job must have inserted a row."
+    assert row is not None, "Precondition: enqueue_title_sync must have inserted a row."
     job_id = row[0]
 
     m.mark_processed(tmp_db, job_id)
@@ -125,7 +125,7 @@ def test_sync_queue_survives_restart(tmp_path: Path):
         )
     """)
     conn1.commit()
-    m.enqueue_sync_job(conn1, job_type="rename", entity_id="node-persist", new_name="Persisted")
+    m.enqueue_title_sync(conn1, node_id="node-persist", new_title="Persisted")
     conn1.close()
 
     # Session 2: reopen and verify the job is still there.
@@ -137,5 +137,5 @@ def test_sync_queue_survives_restart(tmp_path: Path):
 
     assert len(rows) == 1, (
         f"Expected the enqueued job to persist after reopening the DB, but found {len(rows)} rows.\n"
-        "Make sure enqueue_sync_job commits the transaction."
+        "Make sure enqueue_title_sync commits the transaction."
     )

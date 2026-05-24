@@ -3,6 +3,9 @@
 This directory contains all documentation for the akanga_mirin learning path.
 Navigate to the section that matches where you are.
 
+> **New here? Start with [Phase 0 → filesystem as database](learning/phase-00-file-system-as-database.md).**
+> Each phase builds on the previous. Complete them in order.
+
 ---
 
 ## Learning Path (docs/learning/)

@@ -1,6 +1,12 @@
 """Phase 02 tests — links: extract_wikilinks, resolve_wikilink."""
 from pathlib import Path
 
+from tests.phase_02.conftest import _load_db, _load_links, _load_parser
+
+GraphDatabase = _load_db()
+_links_mod = _load_links()
+_parser_mod = _load_parser()
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -8,7 +14,7 @@ from pathlib import Path
 
 def _make_node(node_id: str, title: str, tmp_vault: Path):
     """Construct a minimal Node instance."""
-    from parser import Node  # noqa: PLC0415
+    Node = _parser_mod.Node
 
     return Node(
         id=node_id,
@@ -26,7 +32,7 @@ def _make_node(node_id: str, title: str, tmp_vault: Path):
 
 def test_extract_wikilinks_basic():
     """Plain [[Title]] wikilinks are extracted as a list of title strings."""
-    from links import extract_wikilinks  # noqa: PLC0415
+    extract_wikilinks = _links_mod.extract_wikilinks
 
     content = "See [[Blink]] and [[Flow]] for more."
     result = extract_wikilinks(content)
@@ -36,7 +42,7 @@ def test_extract_wikilinks_basic():
 
 def test_extract_wikilinks_none():
     """Content without any [[...]] patterns returns an empty list."""
-    from links import extract_wikilinks  # noqa: PLC0415
+    extract_wikilinks = _links_mod.extract_wikilinks
 
     result = extract_wikilinks("No wikilinks here at all.")
     assert result == []
@@ -53,7 +59,7 @@ def test_extract_wikilinks_skips_inline_edges():
 
     Either behaviour is compliant with the spec; the test validates both.
     """
-    from links import extract_wikilinks  # noqa: PLC0415
+    extract_wikilinks = _links_mod.extract_wikilinks
 
     content = "See [[Flow State | supports]] for context."
     result = extract_wikilinks(content)
@@ -71,8 +77,7 @@ def test_extract_wikilinks_skips_inline_edges():
 
 def test_resolve_wikilink_found(tmp_db: str, tmp_vault: Path):
     """resolve_wikilink returns the node_id when the title exists in the DB."""
-    from db import GraphDatabase  # noqa: PLC0415
-    from links import resolve_wikilink  # noqa: PLC0415
+    resolve_wikilink = _links_mod.resolve_wikilink
 
     db = GraphDatabase(tmp_db)
     node = _make_node("aaaa1111-0000-0000-0000-000000000001", "Cognitive Load", tmp_vault)
@@ -84,8 +89,7 @@ def test_resolve_wikilink_found(tmp_db: str, tmp_vault: Path):
 
 def test_resolve_wikilink_case_insensitive(tmp_db: str, tmp_vault: Path):
     """resolve_wikilink matches titles case-insensitively."""
-    from db import GraphDatabase  # noqa: PLC0415
-    from links import resolve_wikilink  # noqa: PLC0415
+    resolve_wikilink = _links_mod.resolve_wikilink
 
     db = GraphDatabase(tmp_db)
     node = _make_node("aaaa2222-0000-0000-0000-000000000002", "Cognitive Load", tmp_vault)
@@ -97,8 +101,7 @@ def test_resolve_wikilink_case_insensitive(tmp_db: str, tmp_vault: Path):
 
 def test_resolve_wikilink_not_found(tmp_db: str, tmp_vault: Path):
     """resolve_wikilink returns None when the title has no matching node."""
-    from db import GraphDatabase  # noqa: PLC0415
-    from links import resolve_wikilink  # noqa: PLC0415
+    resolve_wikilink = _links_mod.resolve_wikilink
 
     db = GraphDatabase(tmp_db)
 

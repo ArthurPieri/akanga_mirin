@@ -10,6 +10,14 @@ from pathlib import Path
 
 import pytest
 
+from tests.phase_03.conftest import _load_graph
+
+_graph_mod = _load_graph()
+build_ego_graph = _graph_mod.build_ego_graph
+render_ascii = _graph_mod.render_ascii
+EgoGraph = _graph_mod.EgoGraph
+EdgeDirection = _graph_mod.EdgeDirection
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -56,7 +64,7 @@ def _simple_chain_db(tmp_path: Path):
 class TestBuildEgoGraphDepth:
     def test_build_ego_graph_depth_1(self, tmp_path: Path) -> None:
         """depth=1 from A in A→B→C: only A and B, not C."""
-        from graph import build_ego_graph
+
 
         db, id_a, id_b, id_c = _simple_chain_db(tmp_path)
         try:
@@ -69,7 +77,7 @@ class TestBuildEgoGraphDepth:
 
     def test_build_ego_graph_depth_2(self, tmp_path: Path) -> None:
         """depth=2 from A in A→B→C: A, B, and C all present."""
-        from graph import build_ego_graph
+
 
         db, id_a, id_b, id_c = _simple_chain_db(tmp_path)
         try:
@@ -82,7 +90,7 @@ class TestBuildEgoGraphDepth:
 
     def test_ego_graph_max_depth_zero(self, tmp_path: Path) -> None:
         """max_depth=0: only the root node, no neighbors."""
-        from graph import build_ego_graph
+
 
         db, id_a, id_b, id_c = _simple_chain_db(tmp_path)
         try:
@@ -102,7 +110,7 @@ class TestBuildEgoGraphDepth:
 class TestBuildEgoGraphStructure:
     def test_build_ego_graph_includes_root(self, populated_graph_db) -> None:
         """Root node is always present in ego.nodes regardless of depth."""
-        from graph import build_ego_graph
+
 
         db = populated_graph_db
         ego = build_ego_graph(db.id_a, db, max_depth=1)
@@ -112,7 +120,7 @@ class TestBuildEgoGraphStructure:
 
     def test_build_ego_graph_cycle_handling(self, populated_graph_db) -> None:
         """Cycle A→B→A at depth=3: terminates without infinite loop."""
-        from graph import build_ego_graph
+
 
         db = populated_graph_db
         # Should complete — pytest timeout is the implicit guard here
@@ -124,7 +132,7 @@ class TestBuildEgoGraphStructure:
     def test_build_ego_graph_both_directions(self, tmp_path: Path) -> None:
         """A→B (outgoing) and C→A (incoming): depth=1 from A includes both B and C."""
         from akanga_core.db import GraphDatabase
-        from graph import build_ego_graph
+
 
         db_path = tmp_path / "bidir.db"
         db = GraphDatabase(str(db_path))
@@ -162,7 +170,7 @@ class TestBuildEgoGraphStructure:
 
     def test_build_ego_graph_edge_directions(self, tmp_path: Path) -> None:
         """EgoEdge objects carry the correct EdgeDirection value."""
-        from graph import build_ego_graph, EdgeDirection
+
 
         db_path = tmp_path / "dir.db"
 
@@ -211,7 +219,7 @@ class TestBuildEgoGraphStructure:
     def test_build_ego_graph_empty_graph(self, tmp_path: Path) -> None:
         """Node with no edges: ego contains only the root, no edges."""
         from akanga_core.db import GraphDatabase
-        from graph import build_ego_graph
+
 
         db_path = tmp_path / "empty.db"
         db = GraphDatabase(str(db_path))
@@ -238,7 +246,7 @@ class TestBuildEgoGraphStructure:
 
     def test_build_ego_graph_nonexistent_root(self, populated_graph_db) -> None:
         """Nonexistent root_id: implementation must raise (not silently return None)."""
-        from graph import build_ego_graph
+
 
         db = populated_graph_db
         bad_id = str(uuid.UUID("00000000-dead-beef-0000-000000000000"))
@@ -249,7 +257,7 @@ class TestBuildEgoGraphStructure:
 class TestRenderAscii:
     def test_render_ascii_returns_string(self, populated_graph_db) -> None:
         """render_ascii must return a non-empty string without crashing."""
-        from graph import build_ego_graph, render_ascii
+
 
         db = populated_graph_db
         ego = build_ego_graph(db.id_a, db, max_depth=1)
@@ -259,7 +267,7 @@ class TestRenderAscii:
 
     def test_render_ascii_contains_node_title(self, populated_graph_db) -> None:
         """The root node's title must appear somewhere in the ASCII output."""
-        from graph import build_ego_graph, render_ascii
+
 
         db = populated_graph_db
         ego = build_ego_graph(db.id_a, db, max_depth=1)

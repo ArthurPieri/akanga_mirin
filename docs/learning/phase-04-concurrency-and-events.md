@@ -187,7 +187,7 @@ Per job type:
 
 ```
 1. load_vault_config  → populate DB config tables
-2. index_vault        → two-pass; DB fully populated
+2. full_scan_and_index → two-pass; DB fully populated
 3. sync_worker.drain  → resolve stale display names
 4. watcher.start      → begin watching for changes
 

@@ -16,6 +16,11 @@ from pathlib import Path
 
 import pytest
 
+from tests.phase_04.conftest import _load_eventbus, _load_watcher
+
+EventBus = _load_eventbus()
+VaultWatcher = _load_watcher()
+
 # Short debounce to keep tests fast; sleep = debounce + generous buffer
 DEBOUNCE_MS = 80
 SETTLE_S = (DEBOUNCE_MS / 1000) + 0.35  # seconds to wait for event to settle
@@ -23,8 +28,6 @@ SETTLE_S = (DEBOUNCE_MS / 1000) + 0.35  # seconds to wait for event to settle
 
 def _make_watcher_and_bus(vault: Path, debounce_ms: int = DEBOUNCE_MS):
     """Return (watcher, bus, events_list) where events_list collects published events."""
-    from eventbus import EventBus
-    from watcher import VaultWatcher
 
     bus = EventBus()
     events = []
@@ -71,9 +74,6 @@ class TestWatcherBasicEvents:
         target = tmp_vault / "to_delete.md"
         target.write_text("bye", encoding="utf-8")
 
-        from eventbus import EventBus
-        from watcher import VaultWatcher
-
         bus = EventBus()
         deleted_events = []
         bus.subscribe("file_deleted", lambda **kw: deleted_events.append(kw))
@@ -90,9 +90,6 @@ class TestWatcherBasicEvents:
 
     def test_watcher_event_contains_path(self, tmp_vault: Path) -> None:
         """The file_changed event payload must include the path of the changed file."""
-        from eventbus import EventBus
-        from watcher import VaultWatcher
-
         bus = EventBus()
         received = []
         bus.subscribe("file_changed", lambda **kw: received.append(kw))
@@ -179,9 +176,6 @@ class TestWatcherFilters:
 class TestWatcherLifecycle:
     def test_watcher_stop_and_start(self, tmp_vault: Path) -> None:
         """start() then stop() must complete without raising an exception."""
-        from eventbus import EventBus
-        from watcher import VaultWatcher
-
         bus = EventBus()
         watcher = VaultWatcher(tmp_vault, bus, debounce_ms=DEBOUNCE_MS)
         watcher.start()
@@ -189,9 +183,6 @@ class TestWatcherLifecycle:
 
     def test_watcher_nonexistent_vault_raises(self, tmp_path: Path) -> None:
         """VaultWatcher with a nonexistent vault path raises on start() or __init__."""
-        from eventbus import EventBus
-        from watcher import VaultWatcher
-
         bad_path = tmp_path / "does_not_exist"
         bus = EventBus()
 

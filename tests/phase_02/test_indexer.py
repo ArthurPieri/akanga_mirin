@@ -4,6 +4,11 @@ from textwrap import dedent
 
 import pytest
 
+from tests.phase_02.conftest import _load_db, _load_indexer
+
+GraphDatabase = _load_db()
+_indexer_mod = _load_indexer()
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -33,8 +38,7 @@ def _write_md(directory: Path, filename: str, node_id: str, title: str, body: st
 
 def test_index_single_file(tmp_db: str, tmp_vault: Path):
     """index_file() parses a .md file and upserts the node into the DB."""
-    from db import GraphDatabase  # noqa: PLC0415
-    from indexer import index_file  # noqa: PLC0415
+    index_file = _indexer_mod.index_file
 
     db = GraphDatabase(tmp_db)
     path = _write_md(tmp_vault, "single.md", "aaaa0001-0000-0000-0000-000000000001", "Single Node")
@@ -52,8 +56,7 @@ def test_index_single_file(tmp_db: str, tmp_vault: Path):
 
 def test_full_scan_indexes_all_files(tmp_db: str, tmp_vault: Path):
     """full_scan_and_index() indexes every .md file in the vault."""
-    from db import GraphDatabase  # noqa: PLC0415
-    from indexer import full_scan_and_index  # noqa: PLC0415
+    full_scan_and_index = _indexer_mod.full_scan_and_index
 
     db = GraphDatabase(tmp_db)
     _write_md(tmp_vault, "node1.md", "bbbb0001-0000-0000-0000-000000000001", "Alpha")
@@ -71,8 +74,7 @@ def test_full_scan_indexes_all_files(tmp_db: str, tmp_vault: Path):
 
 def test_full_scan_skips_hidden_dirs(tmp_db: str, tmp_vault: Path):
     """Files inside hidden directories (e.g. .git/) are not indexed."""
-    from db import GraphDatabase  # noqa: PLC0415
-    from indexer import full_scan_and_index  # noqa: PLC0415
+    full_scan_and_index = _indexer_mod.full_scan_and_index
 
     db = GraphDatabase(tmp_db)
     hidden_dir = tmp_vault / ".git"
@@ -86,8 +88,7 @@ def test_full_scan_skips_hidden_dirs(tmp_db: str, tmp_vault: Path):
 
 def test_full_scan_skips_non_md_files(tmp_db: str, tmp_vault: Path):
     """Non-.md files in the vault directory are silently skipped."""
-    from db import GraphDatabase  # noqa: PLC0415
-    from indexer import full_scan_and_index  # noqa: PLC0415
+    full_scan_and_index = _indexer_mod.full_scan_and_index
 
     db = GraphDatabase(tmp_db)
     txt_file = tmp_vault / "notes.txt"
@@ -103,8 +104,7 @@ def test_full_scan_skips_non_md_files(tmp_db: str, tmp_vault: Path):
 
 def test_full_scan_returns_count(tmp_db: str, tmp_vault: Path):
     """full_scan_and_index() returns the number of nodes successfully indexed."""
-    from db import GraphDatabase  # noqa: PLC0415
-    from indexer import full_scan_and_index  # noqa: PLC0415
+    full_scan_and_index = _indexer_mod.full_scan_and_index
 
     db = GraphDatabase(tmp_db)
     for i in range(3):
@@ -116,8 +116,7 @@ def test_full_scan_returns_count(tmp_db: str, tmp_vault: Path):
 
 def test_reindex_updates_node(tmp_db: str, tmp_vault: Path):
     """Re-indexing a file whose title changed updates the DB record."""
-    from db import GraphDatabase  # noqa: PLC0415
-    from indexer import index_file  # noqa: PLC0415
+    index_file = _indexer_mod.index_file
 
     db = GraphDatabase(tmp_db)
     path = _write_md(tmp_vault, "reindex.md", "ffff0001-0000-0000-0000-000000000001", "Old Title")
@@ -137,8 +136,7 @@ def test_reindex_updates_node(tmp_db: str, tmp_vault: Path):
 
 def test_index_missing_file_raises(tmp_db: str, tmp_vault: Path):
     """index_file() on a non-existent path raises an exception (FileNotFoundError or similar)."""
-    from db import GraphDatabase  # noqa: PLC0415
-    from indexer import index_file  # noqa: PLC0415
+    index_file = _indexer_mod.index_file
 
     db = GraphDatabase(tmp_db)
     missing = str(tmp_vault / "does-not-exist.md")

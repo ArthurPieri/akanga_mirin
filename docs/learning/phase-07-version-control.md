@@ -7,10 +7,10 @@ edit, or delete is tracked automatically. Your knowledge graph has a complete,
 navigable history from day one — without you thinking about it.
 
 **What makes this non-obvious:** The hard part is not the git operations themselves
-(those are one-liners with GitPython). The hard part is *when* to commit and *what*
-to commit. Naive solutions — commit on every save, commit on every navigate-away —
-produce noisy histories that defeat the purpose. The right model is an event log
-with a smart squash step: record everything, clean it up before committing.
+(those are one-liners with GitPython). The hard part is making git truly optional —
+a user without git installed, or with a broken repo, must still be able to use the
+tool. Every git operation must be wrapped so it never raises, never blocks, and never
+takes down the application when it fails.
 
 ---
 
@@ -19,7 +19,7 @@ with a smart squash step: record everything, clean it up before committing.
 By the end of this phase, you will be able to:
 - Implement a GitPython wrapper with non-fatal error handling
 - Understand why git errors must be swallowed (git is optional, not required)
-- Implement debounced auto-commit (5s) that batches rapid file changes
+- Write non-fatal wrapper methods that catch all git exceptions, log them, and return safe defaults so vault use is never interrupted by git failures
 - Distinguish `is_dirty`, `status`, `commit`, and `push` — and when each is needed
 
 ---
@@ -57,137 +57,69 @@ A Python library that wraps git operations without shelling out: `Repo.init()`,
 on failure. Akanga always catches this and logs it as a warning — never re-raises.
 Git failure is non-fatal by design.
 
+Key classes and operations:
+- `Repo(path)` opens an existing repo; raises `InvalidGitRepositoryError` if path is not a repo
+- `Repo.init(path)` creates a new repo
+- `repo.is_dirty(untracked_files=True)` checks whether there are uncommitted changes
+- `str(repo.active_branch)` returns the current branch name
+- `repo.git.status()` returns the status output as a string
+- `repo.index.commit(message)` stages all tracked changes and creates a commit
+- `repo.remote(name).push()` pushes to the named remote
+
+Install: `pip install gitpython` / `uv add gitpython`.
+
 > Akanga node: `GitPython`
 
 → Foundation doc: `docs/foundations/git-basics.md`
 
-### Change Queue
+### Git Commit Model
 
-An append-only in-memory log of write events, populated by the EventBus. Every
-`node_created`, `node_updated`, or `node_deleted` event adds an entry:
+Every change in the vault — creating a node, editing one, deleting one — is tracked
+as a git commit: what changed, when, why. Git provides the version history that makes
+the knowledge graph auditable and recoverable. You can `git log` to see editing
+sessions, `git diff` a specific note to see how your understanding of a topic evolved,
+or `git restore` a node you deleted by accident.
 
-```python
-@dataclass
-class ChangeEntry:
-    type: str        # "create" | "edit" | "delete"
-    node_id: str
-    title: str
-    timestamp: str
-```
+This is why Akanga treats git as a user feature rather than developer infrastructure:
+the vault's git history is the undo system, the audit trail, and the backup — all
+without the user ever running a git command.
 
-Reads never append to the queue. The queue is the raw, unfiltered record of what
-happened in a session — it may contain the same node multiple times if the user
-edited it, left, and returned. The queue does not commit anything by itself; it only
-records. Commits are triggered separately (see Commit Triggers).
+> Akanga node: `Git Commit Model`
 
-> Akanga node: `Change Queue`
+### Non-Fatal Git Integration
 
-### Squash Algorithm
-
-Before committing, the squash step collapses the raw event log into a clean summary:
-
-```python
-def squash(queue: list[ChangeEntry]) -> CommitSummary:
-    creates, edits, deletes = {}, {}, {}
-
-    for entry in queue:
-        if entry.type == "create":
-            creates[entry.node_id] = entry.title
-        elif entry.type == "edit":
-            edits[entry.node_id] = entry.title
-        elif entry.type == "delete":
-            deletes[entry.node_id] = entry.title
-            creates.pop(entry.node_id, None)  # created + deleted → nothing
-
-    # created then edited → just created (no separate edit entry)
-    for nid in creates:
-        edits.pop(nid, None)
-
-    # edited then deleted → just deleted
-    for nid in deletes:
-        edits.pop(nid, None)
-
-    return CommitSummary(
-        created=list(creates.values()),
-        edited=list(edits.values()),
-        deleted=list(deletes.values()),
-    )
-```
-
-Example: `edit A → read B → edit A → read C → edit A` produces queue entries
-`[edit:A, edit:A, edit:A]` → squashed to `{edited: ["Note A"]}` → one commit,
-message: `"update: Note A"`. The user's editing pattern never leaks into git history.
-
-> Akanga node: `Squash Algorithm`
-
-### Queue Persistence
-
-The queue is persisted to `.akanga/commit_queue.json` after every append. On startup,
-Akanga checks for a non-empty persisted queue — if found, it auto-commits it
-immediately before starting the session. This means a previous session's work is
-never lost even if the process was killed, the machine crashed, or the app was
-force-quit. The persistence file is excluded from git tracking (it's internal state,
-not vault content).
-
-> Akanga node: `Queue Persistence`
-
-### Commit Triggers
-
-Three independent triggers decide when to squash and commit. All are configurable
-in `akanga.yaml`:
-
-**Session-end (always on):** When the user quits Akanga cleanly (`q`, SIGINT,
-SIGTERM, or FastAPI lifespan shutdown), the queue is squashed and committed if
-non-empty. This is the safety net — every session ends with a commit. The message
-summarises the whole session: `"session: add BFS; update: Akanga, SQLite"`.
-
-**Periodic (opt-in, default off):** An asyncio timer fires every N minutes (user-
-configured). If the queue is non-empty, squash and commit. Useful for users who keep
-Akanga open for hours. Message prefix: `"auto:"`.
-
-**Manual (`C` keybinding, always available):** Opens a commit overlay in the TUI
-showing the squashed summary and a pre-filled message the user can edit before
-committing. The only trigger that shows the user what they're committing before it
-happens.
-
-> Akanga node: `Commit Triggers`
-
-### Commit Message Generation
-
-Generated messages are human-readable in `git log`:
-
-```
-1 create            →  "add: BFS"
-1 edit              →  "update: Fast Thinking is Unreliable"
-3 edits             →  "update: 3 notes (Fast Thinking, Akanga, SQLite)"
-mixed               →  "add: BFS; update: Akanga; delete: Old Note"
-first commit ever   →  "init: akanga vault"
-periodic trigger    →  "auto: 2 notes updated"
-```
-
-If the node title is too long to fit cleanly, truncate with `…`. The message is
-always overridable when committing manually via `C`.
-
-> Akanga node: `Commit Message Generation`
-
-### Non-Fatal Git Errors
+Git is optional in Akanga. A user without git installed, or with a broken repo,
+should still be able to use the tool. All git operations wrap their bodies in
+`try/except Exception` and log failures rather than raising. This is the "non-fatal"
+contract.
 
 Git can fail for many reasons: no remote configured, network timeout, no commits yet
 (empty repo cannot push), detached HEAD, filesystem permission issues. None of these
-should crash or degrade Akanga's core functionality. All git operations are wrapped
-in `try/except GitCommandError` (and bare `except Exception` for edge cases). Failures
-are logged at WARNING level. The EventBus never receives a git error. The queue is
-NOT cleared on a failed commit — it will be retried at the next trigger.
+should crash or degrade Akanga's core functionality. Failures are logged at WARNING
+level. The EventBus never receives a git error.
 
 > Akanga node: `Non-Fatal Git Errors`
+
+### Idempotent Commit
+
+Committing when nothing has changed creates an empty commit that clutters the git log
+and confuses reviewers. `is_dirty(untracked_files=True)` guards the commit operation:
+if the working tree is clean, skip. This makes `commit()` safe to call repeatedly —
+it is a no-op (returning `None`) when there is nothing to record.
+
+The `untracked_files=True` argument is required. Without it, `repo.is_dirty()` returns
+`False` for newly created files (which are untracked), so a first commit after adding
+nodes to a fresh vault would be silently skipped.
+
+> Akanga node: `Idempotent Commit`
 
 ### .gitignore as Contract
 
 The `.gitignore` written on `--git-init` is a declaration of Akanga's architecture:
 what is vault (tracked) vs what is derived/internal (untracked). Tracked: all `.md`
-files, `akanga.yaml`. Untracked: `.akanga.db` (derived index — expendable), `.venv/`,
-`__pycache__/`, `.akanga/` (internal state including the commit queue). The file
-documents the source-of-truth boundary as clearly as any README.
+files, `akanga.yaml`. Untracked: `.akanga.db` (derived index — expendable), `.akanga.db-wal`,
+`.venv/`, `__pycache__/`. The file documents the source-of-truth boundary as clearly
+as any README.
 
 > Akanga node: `.gitignore as Contract`
 
@@ -197,15 +129,11 @@ documents the source-of-truth boundary as clearly as any README.
 
 | Node | Type | Key Edges |
 |---|---|---|
-| `Git as User Feature` | note | `contrasts_with` → `Git as Dev Tool`; `enables` → `Knowledge History`; `is_applied_in` → `Akanga` |
-| `GitPython` | reference | `implements` → `Git as User Feature`; `is_applied_in` → `GitManager` |
-| `Change Queue` | note | `is_applied_in` → `GitManager`; `uses` → `Event Bus`; `enables` → `Squash Algorithm` |
-| `Squash Algorithm` | note | `consumes` → `Change Queue`; `enables` → `Commit Message Generation`; `is_applied_in` → `GitManager` |
-| `Queue Persistence` | note | `qualifies` → `Change Queue`; `solves` → `Work Loss on Crash`; `is_applied_in` → `Akanga App` |
-| `Commit Triggers` | note | `is_applied_in` → `GitManager`; `uses` → `Change Queue`; `uses` → `asyncio` |
-| `Commit Message Generation` | note | `is_applied_in` → `GitManager`; `enables` → `Readable Git Log` |
-| `Non-Fatal Git Errors` | note | `qualifies` → `GitManager`; `is_applied_in` → `Akanga App` |
-| `.gitignore as Contract` | note | `qualifies` → `Derived Index`; `is_applied_in` → `Akanga Vault` |
+| `Git Commit Model` | note | `enables` → `Version History`; `is_applied_in` → `Akanga Vault` |
+| `GitPython` | reference | `implements` → `Git Integration`; `is_applied_in` → `Akanga GitManager` |
+| `Non-Fatal Error Handling` | note | `is_applied_in` → `Akanga GitManager`; `contrasts_with` → `Fail-Fast Pattern` |
+| `Idempotent Commit` | note | `prevents` → `Empty Commit`; `uses` → `is_dirty Check` |
+| `.gitignore as Contract` | note | `excludes` → `*.db`; `excludes` → `*.db-wal`; `enables` → `Clean Vault History` |
 
 ---
 
@@ -265,6 +193,8 @@ git installed (or whose repo is in a broken state) must still be able to use Aka
 
 **Re-raising git exceptions:** Git is optional. A user without git should still be able to use Akanga. Wrap all GitPython calls in `try/except` and log errors rather than raising.
 
+**Omitting `untracked_files=True` in `is_dirty()`:** `repo.is_dirty()` alone returns `False` for newly created files (untracked). The skeleton explicitly requires `is_dirty(untracked_files=True)` to catch nodes added to the vault before the first commit. Omitting the flag means a fresh vault with new nodes will appear clean and silently skip the commit.
+
 ---
 
 ## Deliverable
@@ -282,12 +212,12 @@ Key behaviors the tests verify:
 - `status` returns a non-empty string without crashing
 - All methods are non-fatal on a broken or non-git directory — errors are caught and logged
 
-Plus 9 vault nodes with typed edges.
+Plus 5 vault nodes with typed edges.
 
 ---
 
 ## Reflect
 
-> **Solo:** The auto-commit debounce is 5 seconds. What are the tradeoffs between 1s, 5s, and 30s debounce windows for vault auto-commits?
+> **Solo:** Your `commit()` method catches all exceptions and returns `None` on failure. What information is silently lost when an exception is swallowed? Where would you look to find out whether a failure occurred?
 
-> **Group:** Should git commit messages be generic ("vault update") or descriptive ("Add note: Cognitive Load")? What would you need to implement to generate descriptive messages?
+> **Group:** The `GitManager` wraps `git add -A` before every commit — it stages ALL changes. Is that the right behavior for a personal knowledge graph vault? What changes would you never want staged, and how would `.gitignore` help? Walk through two edge cases together.

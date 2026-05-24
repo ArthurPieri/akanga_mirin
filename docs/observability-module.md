@@ -202,7 +202,7 @@ Usage:
 
 ```python
 @timed(level=logging.INFO)
-def index_vault(vault: Path, db: GraphDatabase) -> int:
+def full_scan_and_index(vault: Path, db: GraphDatabase) -> int:
     ...
 ```
 
@@ -869,7 +869,7 @@ The Akanga-specific wiring is documented in `docs/learning/phase-04-concurrency-
 | Module loggers (`__name__`) | Every `akanga_core/*.py` module |
 | `configure_logging()` | `cli.py` — called at the start of each command handler |
 | `--verbose` flag | All CLI commands: `serve`, `index`, `tui`, `mcp-server` |
-| `@timed` decorator | `indexer.index_vault`, `db.search`, `rag.context_for_query` |
+| `@timed` decorator | `indexer.full_scan_and_index`, `db.search`, `rag.context_for_query` |
 | EventBus debug subscriber | `app.py` — attached when `verbose=True` |
 | `TimedConnection` | `db.py` — wraps the SQLite connection |
 | `EXPLAIN QUERY PLAN` | Used during development to verify FTS5 and edge indexes |

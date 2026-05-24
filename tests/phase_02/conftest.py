@@ -1,4 +1,5 @@
 """Phase 02 conftest — resolves AKANGA_SRC and provides shared fixtures."""
+import importlib
 from pathlib import Path
 from textwrap import dedent
 
@@ -12,6 +13,65 @@ from tests.conftest import MINIMAL_VAULT_CONFIG, _resolve_akanga_src
 def _setup_akanga_src() -> Path:
     """Insert AKANGA_SRC into sys.path before any test module is imported."""
     return _resolve_akanga_src(2)
+
+
+# ---------------------------------------------------------------------------
+# Dual-try import helpers (flat layout first, then akanga_core.* package)
+# ---------------------------------------------------------------------------
+
+def _load_db():
+    """Import GraphDatabase from 'db' or 'akanga_core.db'."""
+    try:
+        from db import GraphDatabase  # noqa: PLC0415
+        return GraphDatabase
+    except ModuleNotFoundError:
+        try:
+            from akanga_core.db import GraphDatabase  # noqa: PLC0415
+            return GraphDatabase
+        except ModuleNotFoundError:
+            pytest.fail("Cannot import GraphDatabase from 'db' or 'akanga_core.db'")
+
+
+def _load_indexer():
+    """Import the indexer module from 'indexer' or 'akanga_core.indexer'."""
+    try:
+        import indexer as m  # noqa: PLC0415
+        return m
+    except ModuleNotFoundError:
+        try:
+            from akanga_core import indexer as m  # noqa: PLC0415
+            return m
+        except ModuleNotFoundError:
+            pytest.fail("Cannot import 'indexer' or 'akanga_core.indexer'")
+
+
+def _load_links():
+    """Import the links module from 'links' or 'akanga_core.links'."""
+    try:
+        import links as m  # noqa: PLC0415
+        return m
+    except ModuleNotFoundError:
+        try:
+            from akanga_core import links as m  # noqa: PLC0415
+            return m
+        except ModuleNotFoundError:
+            pytest.fail("Cannot import 'links' or 'akanga_core.links'")
+
+
+def _load_parser():
+    """Import the parser module from 'parser' or 'akanga_core.parser'."""
+    try:
+        import parser as m  # noqa: PLC0415
+        # Guard: built-in 'parser' module has no Node class
+        if not hasattr(m, "Node"):
+            raise ModuleNotFoundError
+        return m
+    except (ModuleNotFoundError, AttributeError):
+        try:
+            from akanga_core import parser as m  # noqa: PLC0415
+            return m
+        except ModuleNotFoundError:
+            pytest.fail("Cannot import 'parser' or 'akanga_core.parser'")
 
 
 @pytest.fixture()
@@ -40,8 +100,8 @@ def populated_db(tmp_path: Path, tmp_vault: Path):
       - edge: node_a -> node_b  (relation="supports")
       - edge: node_b -> node_c  (relation="contradicts")
     """
-    from db import GraphDatabase  # noqa: PLC0415
-    from parser import Node  # noqa: PLC0415
+    GraphDatabase = _load_db()
+    Node = _load_parser().Node
 
     db_path = str(tmp_path / "populated.db")
     db = GraphDatabase(db_path)
