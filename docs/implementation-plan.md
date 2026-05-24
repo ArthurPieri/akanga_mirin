@@ -108,6 +108,7 @@ akanga_mirin/
 │   │   └── phase-08-ai-integration.md           [DONE + enhancements TODO]
 │   └── foundations/
 │       ├── makefile-basics.md             [DONE]
+│       ├── design-patterns.md             [DONE]
 │       ├── python-type-annotations.md     [TODO — PED-10]
 │       ├── python-dataclasses.md          [TODO — PED-10]
 │       ├── yaml-and-markdown-frontmatter.md [TODO — PED-10]
@@ -560,26 +561,77 @@ after ARCH-01 completes.
 4. **PED-10** (foundation docs) — blocks PED-11 (examples) and PED-12 (links).
 5. **PED-01..09** (phase doc enhancements) — collectively block PED-13 (facilitator guide).
 
-### The Three Critical Bug Fixes (Fix Before Writing Solutions)
+### The Critical Bug Fixes (Fix Before Writing Solutions)
 
-These contradictions were identified by the technical writer agent. A solution written
-before fixing them will implement the wrong behavior:
+These contradictions were identified by the technical writer agent and the adversarial
+analysis. A solution written before fixing them will implement the wrong behavior.
 
 **Bug 1 (TW-BUG-01): Phase 8 RAG code accesses `node.body` from a DB object.**
 The DB explicitly does NOT store prose body text (established in Phase 2). The RAG
 `context_for_query` example shows `node.body[:120]` — this will be empty or fail.
-Resolution: load body from disk with `parse(node.path).body`, or use `node.description`
-only with an explicit comment. The Phase 8 code example must be corrected before the
-Phase 8 solution (ARCH-18) is written.
+Resolution (strengthened by adversarial analysis):
+- Replace `node.body` with `parse(node.path).body[:500] if node.path.exists() else ""`
+- Add a total character cap: stop adding triples once the running total exceeds 12,000
+  chars regardless of `max_triples`. A 10 MB node body must not produce gigabytes of LLM
+  context.
+- Explicit `desc = node.description or body` — do not chain `.description` and `.body`
+  without a fallback.
+Fix this before writing the Phase 8 solution (ARCH-18).
 
-**Bug 2 (TW-BUG-02): Phase 4 says git auto-commit is "(Phase 8)."**
+**Bug 2 (ADV-BUG-A): Phase 8 `max_triples=200` is incompatible with the `<15,000` char
+assertion in `test_context_for_query`.**
+200 triples × average serialized length ≈ 31,000 characters. The test will always fail.
+These two limits were specified in different places without cross-checking.
+Resolution: reduce `max_triples` default to 80 (yields ~12,000 chars at average length)
+AND add the total character cap from Bug 1. Both constants must be set consistently
+before ARCH-18 or ARCH-27 are written.
+
+**Bug 3 (ADV-BUG-B): Inverse edge direction in Phase 8 `_serialize_triples`.**
+Incoming edges (where the current node is the *target*) must be serialized using the
+`inverse_id` relation name, not the forward relation name. Using the forward name
+produces `B --[contradicts]--> A` from A's perspective, which silently inverts the
+knowledge graph semantics passed to the LLM.
+Resolution: for incoming edges, look up `inverse_id` in the relation registry and use
+that name; if no `inverse_id` is defined, prefix with `<--` to indicate direction. Add
+a directed-edge test that verifies serialized strings from both source and target
+perspectives. Fix before ARCH-18.
+
+**Bug 4 (TW-BUG-02): Phase 4 says git auto-commit is "(Phase 8)."**
 Git integration is Phase 7. Update the cross-reference before writing Phase 4 or
 Phase 7 solutions (ARCH-14, ARCH-17).
 
-**Bug 3 (TW-BUG-03): Phase 6 ego-graph endpoint spec does not clarify return format.**
+**Bug 5 (TW-BUG-03): Phase 6 ego-graph endpoint spec does not clarify return format.**
 The endpoint returns JSON (nodes + edges as dicts), not a rendered image. Renderers
 are TUI-specific. Clarify before writing the Phase 6 solution (ARCH-16) and test
 (ARCH-25).
+
+**Verified OK — EventBus startup race (ADV-BUG-C):**
+The adversarial analysis predicted a race where `watcher.start()` fires before
+`eventbus.set_loop()`. Verified against the reference implementation: `app.py`
+`start_all()` calls `set_loop()` on line 141 before `self.start()` on line 142, which
+calls `start_watcher()`. Startup order is correct. EventBus publish gracefully handles
+missing loop (logs warning, does not crash). No fix required.
+
+**Verified OK — macOS `os.replace()` fires `on_moved` (ADV-BUG-D):**
+The adversarial analysis predicted that macOS atomic writes would be missed by the
+watcher's `on_moved` handler. Verified against the reference implementation: `parser.py`
+uses `tempfile.mkstemp(dir=dir_path, suffix=".md.tmp")` — the temp file has `.md.tmp`
+extension (in `IGNORED_SUFFIXES`) and lives in the same vault directory. The `on_moved`
+handler in `watcher.py` checks `dest_path` independently of `src_path`. Atomic writes
+trigger re-indexing correctly. No fix required.
+
+### Design Decisions (Resolved 2026-05-24)
+
+These five decisions were raised by the adversarial analysis and resolved by the project
+owner before Sprint 1 began.
+
+| Decision | Resolution | Impact |
+|---|---|---|
+| Split Phase 1 into 1A + 1B? | **YES** — split at edge schema / workspace registry boundary | Path becomes 10 phases; all phase numbering shifts after Phase 1A |
+| Move solutions to separate git branch? | **YES** — `solutions` branch, not `solutions/` dir on `main` | `make solution PHASE=N` must check out the branch; no 9× propagation in `main` |
+| Add Solo/Group tracks to Reflect sections? | **YES** — `> **Solo:** …` / `> **Group:** …` callouts | 9 × 2 callout blocks across all phase docs (PED-05) |
+| Replace transcription vault node tables with open-ended prompts? | **YES** — replace half with open-ended "find the connection" prompts | Checkpoint auto-validation harder; deeper learning transfer (PED-04) |
+| Add 2-minute prerequisite self-assessment per phase? | **YES** — checklist at top of each phase doc | 9 checklists to write; surfaces readiness gaps before learners stall mid-phase |
 
 ### Risk Register
 
