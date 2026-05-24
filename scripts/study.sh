@@ -25,7 +25,7 @@ PHASE="${1:-00}"
 PADDED=$(printf "%02d" "$((10#$PHASE))")   # normalise: 3 → 03, 08 → 08
 
 AKANGA_DOCS="${AKANGA_DOCS:-$HOME/code/akanga_mirin}"
-CODE_DIR="${AKANGA_CODE:-$HOME/code/akanga}"
+CODE_DIR="${AKANGA_CODE:-$HOME/code/akanga_mirin}"
 SESSION="akanga-study"
 WINDOW="phase-${PADDED}"
 
