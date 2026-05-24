@@ -163,7 +163,7 @@ Per job type:
 
 on file_changed:
   indexer.index_file(path, db)       → re-index
-  git_manager.stage_and_commit()     → debounced 5s (Phase 8)
+  git_manager.stage_and_commit()     → debounced 5s (Phase 7)
   eventbus.publish('node_updated')   → TUI refreshes (Phase 5)
 ```
 
@@ -377,4 +377,4 @@ This section wires logging into Phase 4 specifically. The full observability mod
 (`docs/observability-module.md`) covers: structured JSON logs, timing decorators for
 sync and async functions, SQLite slow-query detection, in-memory metrics, and
 structured health endpoints. Return to it when you build the REST API (Phase 6) and
-the MCP server (Phase 8).
+the MCP server (Phase 8) — git specifically is Phase 7.

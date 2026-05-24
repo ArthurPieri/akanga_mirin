@@ -8,3 +8,22 @@ wheels/
 
 # Virtual environments
 .venv
+
+# macOS
+.DS_Store
+
+# Claude Code tooling
+.claude-edited-files.log
+.codegraph/
+
+# Runtime artifacts created by learners
+src/
+vault/
+*.db
+*.db-wal
+*.db-shm
+.coverage
+htmlcov/
+
+# Placeholder scaffold
+main.py

@@ -177,7 +177,7 @@ The dual-key pattern applies to both fields:
 
 For custom relation types not in the built-in vocabulary, `relation-id` is a UUID
 generated at first use. Built-in IDs use the category-prefix format (`EP-001`…`TC-004`)
-— see `docs/relation-types-selected.md` for the full table.
+— see `docs/foundations/relation-vocabulary.md` for the full table.
 
 **Inline shorthand in prose:** `[[Target Title | relation]]`
 

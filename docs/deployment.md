@@ -452,16 +452,16 @@ clean: ## Remove caches and runtime artifacts
 make serve
 
 # Start with a custom vault and port
-make serve VAULT=/Users/arthur/notes PORT=9000
+make serve VAULT=/Users/YOUR_USERNAME/notes PORT=9000
 
 # Start with git auto-commit enabled
-make serve-git VAULT=/Users/arthur/notes
+make serve-git VAULT=/Users/YOUR_USERNAME/notes
 
 # Re-index after manually editing files outside Akanga
-make index VAULT=/Users/arthur/notes
+make index VAULT=/Users/YOUR_USERNAME/notes
 
 # Start the TUI pointing at a different vault
-make tui VAULT=/Users/arthur/archive
+make tui VAULT=/Users/YOUR_USERNAME/archive
 ```
 
 ---

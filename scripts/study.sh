@@ -24,13 +24,13 @@ set -euo pipefail
 PHASE="${1:-00}"
 PADDED=$(printf "%02d" "$((10#$PHASE))")   # normalise: 3 → 03, 08 → 08
 
-AKANGA_DOCS="${AKANGA_DOCS:-$HOME/code/akanga_mirin}"
+AKANGA_DOCS="${AKANGA_DOCS:-$HOME/code/akanga_mirin/docs}"
 CODE_DIR="${AKANGA_CODE:-$HOME/code/akanga_mirin}"
 SESSION="akanga-study"
 WINDOW="phase-${PADDED}"
 
 # ── Locate the phase document ─────────────────────────────────────────────────
-PHASE_DOC=$(find "$AKANGA_DOCS/docs/learning" -name "phase-${PADDED}-*.md" 2>/dev/null | head -1)
+PHASE_DOC=$(find "$AKANGA_DOCS/learning" -name "phase-${PADDED}-*.md" 2>/dev/null | head -1)
 if [[ -z "$PHASE_DOC" ]]; then
     echo "error: no phase doc found for phase ${PADDED} in $AKANGA_DOCS/docs/learning"
     exit 1
