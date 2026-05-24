@@ -5,6 +5,9 @@ the 9-phase Akanga learning path. It is a pre-planning artifact: all items here 
 **documented and agreed upon**, but nothing has been implemented yet. An implementation
 plan will be created separately after this document is reviewed.
 
+The **Decisions** section at the bottom records the final agreed resolution for every
+finding. The implementation plan will be derived directly from that table.
+
 ---
 
 ## Critical Gaps (agreed, must fix before the path is usable)
@@ -269,3 +272,106 @@ use case.)
 | B1 | No user stories | Business | P3 |
 | B2 | Version roadmap informal only | Business | P2 |
 | B3 | Demo not robust in tmux | Business | P0 (fixed) |
+
+---
+
+## Decisions
+
+Complete agreed resolution for every finding. This table is the direct input to the
+implementation plan.
+
+| # | Finding | Decision | Artifact |
+|---|---|---|---|
+| G1 | No runnable test files | Create `tests/` directory with one file per phase and shared `conftest.py`. Tests translated from pseudocode in phase docs. | `tests/phase_NN/test_*.py` + `tests/conftest.py` |
+| G2 | No reference implementation | Create `solutions/` directory with cumulative working implementation at each phase checkpoint. Each solution is runnable and passes its test suite. | `solutions/phase_NN/src/akanga_core/...` |
+| G3 | Missing Guided Build | Skeleton code files with full class/method stubs, rich docstrings explaining what each method must do, type annotations, and inline hints. Learner fills in implementations. | `skeletons/phase_NN/src/akanga_core/...` |
+| P1 | Micro-examples missing | New `examples/` directory. One standalone runnable script per phase (~30 lines), demonstrating exactly one concept in isolation. | `examples/phase_NN_*.py` |
+| P2 | No reflection prompts | Add "Reflect" section to the end of each phase doc. 2–3 questions. Combined with W1 (same section, two purposes). | Addition to each `docs/learning/phase-NN-*.md` |
+| P3 | No common mistakes guide | Add "Common Pitfalls" section to each phase doc. | Addition to each `docs/learning/phase-NN-*.md` |
+| P4 | Prerequisite checklist too gatekeeping | New `docs/foundations/` directory with ~9 standalone explainers. Phase docs link to them with estimated read time. Learners choose what to read. Never blocking. | `docs/foundations/*.md` |
+| P5 | No time estimates | Add estimated time one-liner to the top of each phase doc. | Addition to each `docs/learning/phase-NN-*.md` |
+| S1 | SQL injection not explicit | Add "Security" callout section to `phase-02-storage-and-indexing.md` with before/after parameterized query example. | Addition to `docs/learning/phase-02-*.md` |
+| S2 | CORS missing from Phase 6 | Add "Security" section to `phase-06-rest-api.md` covering `CORSMiddleware` and binding defaults. | Addition to `docs/learning/phase-06-*.md` |
+| A1 | Observability coverage | Two artifacts: (1) short "Logging & Debugging" section in Phase 4 for Akanga-specific wiring; (2) comprehensive standalone `docs/observability-module.md` covering structured logging, timing/tracing decorators, EventBus introspection, SQLite slow-query analysis, `--verbose` CLI flag — designed as reusable knowledge applicable beyond Akanga. | Addition to `phase-04` + `docs/observability-module.md` |
+| A2 | No performance characterisation | Add "Scaling Notes" section to Phase 2 (indexer limits) and Phase 3 (BFS limits at large graph sizes). | Additions to `phase-02` and `phase-03` |
+| A3 | No deployment coverage | New `docs/deployment.md` covering: macOS launchd plist (auto-start on login), Linux systemd user service, `make serve` target. **No Docker** — local-first personal tool, containers add no value here. | `docs/deployment.md` |
+| K1 | Ontology evolution not addressed | Add short "Extending the Vocabulary" section to Phase 1 covering safe addition of new relation types and migration of existing edges. | Addition to `phase-01` |
+| K2 | Bidirectional inference tradeoff | Add short "Traversal Tradeoffs" section to Phase 3 documenting the outgoing-only BFS decision and when to add explicit reverse edges. | Addition to `phase-03` |
+| K3 | Graph validation undocumented | Add one paragraph to Phase 1's data model section stating the intentional "no contradiction enforcement" design decision. Graph visualisation enhancements (node sizing by connection count or recency, gravity/force weighting by relation strength) captured in `future-ideas.md` as V3/V4. | Addition to `phase-01` + `future-ideas.md` |
+| S3 | YAML safe loader not verified | Add security callout to Phase 0 verifying `python-frontmatter` uses PyYAML safe loader. | Addition to `phase-00` |
+| S4 | Git remote trust risk | Add security callout to Phase 7 flagging auto-push risk against public/shared remotes. | Addition to `phase-07` |
+| W1 | No session debrief questions | Merged with P2 — "Reflect" section at end of each phase doc serves both purposes. | Addition to each `docs/learning/phase-NN-*.md` |
+| W2 | No checkpoint exercises | Add intermediate checkpoint exercises to the two longest phases only: Phase 5 (TUI) and Phase 6 (REST API). | Additions to `phase-05` and `phase-06` |
+| W3 | No facilitator guide | New `docs/facilitator-guide.md` covering session timing, pairing strategies, common sticking points per phase, how to run reference implementation checks. | `docs/facilitator-guide.md` |
+| B1 | No user stories | New `docs/user-stories.md` covering the **full product vision** — all stories tagged `[MVP]`, `[V1]`, `[V2]`, or `[V4+]`. No artificial cap on count; covers everything discussed across all sessions. | `docs/user-stories.md` |
+| B2 | Version roadmap informal | New `docs/roadmap.md` formally defining MVP, V1, V2, V4+ scope boundaries. | `docs/roadmap.md` |
+| B3 | Demo broken in tmux | Fixed: `demo_tui.py` now detects `$TMUX` env var and falls back to Rich renderer. Sixel escape codes no longer corrupt adjacent panes. | Fixed in `noteapp/demo_tui.py` |
+
+---
+
+## New Repo Structure (post-implementation)
+
+```
+akanga_mirin/
+  docs/
+    learning/
+      phase-00-file-system-as-database.md   ← + Security, Pitfalls, Reflect, Time, Guided skeleton ref
+      phase-01-data-modeling.md             ← + K1 (ontology), K3 (validation), Pitfalls, Reflect
+      phase-02-storage-and-indexing.md      ← + S1 (SQL injection), A2 (scaling), Pitfalls, Reflect
+      phase-03-graph-algorithms.md          ← + K2 (inference tradeoff), A2 (scaling), Pitfalls, Reflect
+      phase-04-concurrency-and-events.md    ← + A1 (logging section), Pitfalls, Reflect
+      phase-05-terminal-ui.md               ← + W2 (checkpoints), Pitfalls, Reflect
+      phase-06-rest-api.md                  ← + S2 (CORS), W2 (checkpoints), Pitfalls, Reflect
+      phase-07-version-control.md           ← + S4 (remote trust), Pitfalls, Reflect
+      phase-08-ai-integration.md            ← + Pitfalls, Reflect
+    foundations/
+      python-type-annotations.md
+      python-dataclasses.md
+      yaml-and-markdown-frontmatter.md
+      git-basics.md
+      sqlite-basics.md
+      python-threading.md
+      asyncio-primer.md
+      terminal-and-tmux-basics.md
+      http-fundamentals.md
+      json-rpc-basics.md
+    observability-module.md
+    deployment.md
+    facilitator-guide.md
+    user-stories.md
+    roadmap.md
+    future-ideas.md                         ← + K3 graph viz, force/gravity
+    analysis-and-enhancements.md            ← this file
+  examples/
+    phase_00_parser_demo.py
+    phase_01_schema_demo.py
+    phase_02_wal_demo.py
+    phase_03_bfs_demo.py
+    phase_04_eventbus_demo.py
+    phase_05_textual_demo.py
+    phase_06_fastapi_demo.py
+    phase_07_queue_demo.py
+    phase_08_rag_demo.py
+  skeletons/
+    phase_00/src/akanga_core/parser.py      ← stubs + docstrings
+    phase_01/src/akanga_core/schema.py
+    phase_02/src/akanga_core/db.py
+    ...
+  solutions/
+    phase_00/src/akanga_core/parser.py      ← complete reference implementation
+    phase_01/src/akanga_core/...
+    ...
+  tests/
+    conftest.py                             ← shared fixtures, AKANGA_SRC env wiring
+    phase_00/test_parser.py
+    phase_01/test_schema.py
+    phase_02/test_db.py
+    phase_03/test_graph.py
+    phase_04/test_eventbus.py
+    phase_05/test_tui.py
+    phase_06/test_api.py
+    phase_07/test_commit_queue.py
+    phase_08/test_rag.py
+  scripts/
+    study.sh
+```

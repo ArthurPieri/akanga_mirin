@@ -54,6 +54,34 @@ A node type that renders a diagram rather than prose. The diagram definition liv
 
 ---
 
+## Graph Visualisation Enhancements
+
+**Status:** Parked. V3 or V4 — requires the two-layer graph renderer (Phase 5) to
+be stable first.
+
+The current graph renderer uses force-directed layout with uniform node sizes and
+unweighted edges. A richer visual encoding would make the graph genuinely informative
+at a glance:
+
+- **Node sizing** — size proportional to connection count (hub nodes appear larger),
+  or to recency (recently edited nodes appear more prominent), or to a user-defined
+  importance score in frontmatter.
+- **Gravity / force weighting** — edges weighted by relation strength or by how
+  recently the relationship was created. Closely related nodes cluster; distantly
+  related ones stay apart.
+- **Visual relation encoding** — edge colour or thickness encodes relation category
+  (epistemic = blue, structural = gray, causal = orange). Requires the renderer to
+  read the relation category prefix (EP-001, SC-001, etc.) from the vocabulary.
+- **Node colour by type** — already partially implemented in `demo_tui.py`; could be
+  extended to encode node age, tag membership, or workspace.
+- **Temporal animation** — replay the graph's evolution over git history. Each commit
+  adds/removes nodes and edges; the graph animates forward in time.
+
+**Minimum prerequisites:** Two-layer renderer stable + sufficient vault size to make
+visual differentiation meaningful (at least ~50 nodes).
+
+---
+
 ## Other Parked Ideas
 
 - **Semantic search / vector embeddings** — `sentence-transformers` over node bodies as a complement to FTS5. Useful for fuzzy/synonym queries. Can be added as a Phase 9+ enhancement without changing any Phase 1–8 architecture. (Research note from AI integration work: FTS5 + BFS is sufficient for MVP; embeddings only improve the seed-node retrieval step.)
