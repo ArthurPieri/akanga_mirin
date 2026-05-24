@@ -82,7 +82,14 @@ def full_scan_and_index(vault_path: str, db: "GraphDatabase") -> int:
     4. Iterate over all nodes returned by `db.list_nodes()` (no limit needed here —
        use a high number or implement a loop, but for simplicity `db.list_nodes(limit=10_000)`
        is fine).
-    5. For each node, call `extract_wikilinks(node.content or "")` (from `links.py`).
+    5. For each node, read its body from disk to extract wikilinks:
+           parsed = parse_node_file(node.path)
+           links = extract_wikilinks(parsed.content or "")
+       Note: The DB does not store body content — must re-read from disk via
+       parse_node_file. `db.list_nodes()` returns SimpleNamespace objects with
+       columns from the `nodes` table only (id, path, title, type, tags,
+       content_hash) — there is NO `content` attribute. Accessing `node.content`
+       would raise AttributeError.
     6. For each wikilink title, call `resolve_wikilink(title, db)` (from `links.py`)
        to get a target UUID.
     7. If the target UUID is not None and is different from the source node's id,
@@ -90,10 +97,12 @@ def full_scan_and_index(vault_path: str, db: "GraphDatabase") -> int:
 
     Return `count` (the number of successfully indexed nodes).
 
-    Hint: import `extract_wikilinks` and `resolve_wikilink` from `.links`.
+    Hint: import `parse_node_file` from `.parser` and `extract_wikilinks`,
+    `resolve_wikilink` from `.links`.
     """
     raise NotImplementedError(
         "Pass 1: for path in scan_vault(vault_path): index_file(...); count edges. "
-        "Pass 2: for node in db.list_nodes(): extract_wikilinks -> resolve_wikilink -> upsert_edge. "
+        "Pass 2: for node in db.list_nodes(): parse_node_file(node.path) to read body from disk, "
+        "then extract_wikilinks(parsed.content or '') -> resolve_wikilink -> upsert_edge. "
         "Return count of indexed nodes."
     )

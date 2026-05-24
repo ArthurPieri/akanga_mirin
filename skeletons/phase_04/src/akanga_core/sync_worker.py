@@ -45,14 +45,20 @@ class SyncWorker:
                from akanga_core.sync_queue import pending_sync_jobs, mark_processed
                jobs = pending_sync_jobs(db, limit)
 
-           Each job dict has at minimum:
+           ``pending_sync_jobs`` filters rows where ``processed = 0`` and
+           returns them ordered by ``created_at ASC``. Each job dict has:
 
            - ``id``          — row primary key
-           - ``job_type``    — e.g. ``"node_title"``
            - ``entity_id``   — UUID of the node that was renamed
            - ``new_name``    — the new display name to propagate
+           - ``processed``   — always ``0`` for rows returned here
+           - ``created_at``  — ISO timestamp set by the column DEFAULT
 
-        2. For each job where ``job_type == "node_title"``:
+           There is no ``job_type`` column in the Phase 02 schema — all
+           rows in ``sync_queue`` are node-title propagation jobs at this
+           phase, so do NOT branch on ``job_type``.
+
+        2. For each job:
 
            a. Walk the vault with ``os.walk(vault)``, skipping hidden
               directories (any dir component starting with ``'.'``).
@@ -61,7 +67,8 @@ class SyncWorker:
               i.  Parse frontmatter with ``parse_node_file(path)``.
               ii. Inspect the parsed edges (frontmatter or body links) for
                   any edge whose ``target_id`` equals ``job["entity_id"]``
-                  (NOT ``job["node_id"]`` — the column is ``entity_id``).
+                  (the column is ``entity_id`` — there is no ``node_id``
+                  column on ``sync_queue``).
               iii.If found, update ``edge["target"] = job["new_name"]``.
               iv. Write the file back atomically with ``write_node_file()``.
 
@@ -69,9 +76,11 @@ class SyncWorker:
 
                mark_processed(db, job["id"])
 
-           Do NOT issue raw SQL against ``title_sync_queue`` — that table
-           does not exist; the queue table is ``sync_queue``, and
-           ``mark_processed`` encapsulates the correct UPDATE.
+           This issues ``UPDATE sync_queue SET processed = 1 WHERE id = ?``
+           under the hood. Do NOT write raw SQL here, and do NOT reference
+           a ``processed_at`` column — the Phase 02 schema uses a 0/1
+           ``processed`` flag, not a timestamp. The queue table is
+           ``sync_queue`` (there is no ``title_sync_queue``).
 
         4. Return the total count of jobs processed.
 

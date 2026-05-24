@@ -7,13 +7,12 @@ Tests the learner's sync_queue module, which must live at AKANGA_SRC/sync_queue.
     pending_sync_jobs(db) -> list[dict]
     mark_processed(db, job_id) -> None
 
-The sync_queue table schema:
+The sync_queue table schema (authoritative from Phase 02 DB_SCHEMA):
     id           TEXT PRIMARY KEY
-    job_type     TEXT NOT NULL
     entity_id    TEXT NOT NULL
     new_name     TEXT NOT NULL
-    enqueued_at  TEXT NOT NULL
-    processed_at TEXT   (NULL = pending)
+    processed    INTEGER NOT NULL DEFAULT 0  (0 = pending, 1 = done)
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 
 All tests receive a ``tmp_db`` fixture (a sqlite3.Connection with the table
 pre-created) from conftest.py.  A separate ``tmp_path``-based test verifies
@@ -54,7 +53,7 @@ def test_enqueue_is_idempotent(tmp_db):
     m.enqueue_title_sync(tmp_db, node_id="node-001", new_title="Title A")
 
     rows = tmp_db.execute(
-        "SELECT * FROM sync_queue WHERE entity_id = ? AND processed_at IS NULL",
+        "SELECT * FROM sync_queue WHERE entity_id = ? AND processed = 0",
         ("node-001",),
     ).fetchall()
     assert len(rows) == 1, (
@@ -64,7 +63,7 @@ def test_enqueue_is_idempotent(tmp_db):
 
 
 def test_pending_jobs_returns_unprocessed(tmp_db):
-    """pending_sync_jobs returns only rows where processed_at IS NULL."""
+    """pending_sync_jobs returns only rows where processed = 0."""
     m = _load_sync_queue()
 
     m.enqueue_title_sync(tmp_db, node_id="node-001", new_title="Alpha")
@@ -72,7 +71,7 @@ def test_pending_jobs_returns_unprocessed(tmp_db):
 
     # Manually mark node-002 as processed so we have one pending and one done.
     tmp_db.execute(
-        "UPDATE sync_queue SET processed_at = datetime('now') WHERE entity_id = ?",
+        "UPDATE sync_queue SET processed = 1 WHERE entity_id = ?",
         ("node-002",),
     )
     tmp_db.commit()
@@ -80,12 +79,12 @@ def test_pending_jobs_returns_unprocessed(tmp_db):
     pending = m.pending_sync_jobs(tmp_db)
     assert len(pending) == 1, (
         f"Expected 1 pending job, got {len(pending)}.\n"
-        "pending_sync_jobs must filter out rows where processed_at IS NOT NULL."
+        "pending_sync_jobs must filter out rows where processed = 1."
     )
 
 
-def test_mark_processed_sets_timestamp(tmp_db):
-    """mark_processed sets processed_at to a non-null value."""
+def test_mark_processed_sets_flag(tmp_db):
+    """mark_processed sets processed to 1."""
     m = _load_sync_queue()
 
     m.enqueue_title_sync(tmp_db, node_id="node-001", new_title="Alpha")
@@ -98,11 +97,11 @@ def test_mark_processed_sets_timestamp(tmp_db):
     m.mark_processed(tmp_db, job_id)
 
     updated = tmp_db.execute(
-        "SELECT processed_at FROM sync_queue WHERE id = ?", (job_id,)
+        "SELECT processed FROM sync_queue WHERE id = ?", (job_id,)
     ).fetchone()
-    assert updated is not None and updated[0] is not None, (
-        f"Expected processed_at to be set after mark_processed, got: {updated}.\n"
-        "mark_processed must update the processed_at column to a non-null timestamp."
+    assert updated is not None and updated[0] == 1, (
+        f"Expected processed=1 after mark_processed, got: {updated}.\n"
+        "mark_processed must UPDATE sync_queue SET processed = 1 WHERE id = ?."
     )
 
 
@@ -117,11 +116,10 @@ def test_sync_queue_survives_restart(tmp_path: Path):
     conn1.execute("""
         CREATE TABLE IF NOT EXISTS sync_queue (
             id TEXT PRIMARY KEY,
-            job_type TEXT NOT NULL,
             entity_id TEXT NOT NULL,
             new_name TEXT NOT NULL,
-            enqueued_at TEXT NOT NULL,
-            processed_at TEXT
+            processed INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
     conn1.commit()

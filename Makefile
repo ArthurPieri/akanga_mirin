@@ -155,7 +155,7 @@ test-solution: ## Run tests for one phase against the reference solution (PHASE=
 	@PHASE_PAD=$$(printf "%02d" $(PHASE)); \
 	SOLUTION_SRC="solutions/phase_$${PHASE_PAD}/src"; \
 	if [ ! -d "$$SOLUTION_SRC" ]; then \
-		echo "WARNING: Solutions for phase $(PHASE) not yet published — 0 tests run." >&2; exit 0; \
+		echo "ERROR: No solution found for phase $(PHASE). Skipping." >&2; exit 1; \
 	fi; \
 	echo "Testing phase $${PHASE_PAD} against reference solution ..."; \
 	AKANGA_SRC="$$SOLUTION_SRC" $(PYTEST) tests/phase_$${PHASE_PAD}/ -v
@@ -175,7 +175,8 @@ test-all: ## Run all phases against their solutions (full suite verification)
 		fi; \
 	done; \
 	if [ $$TESTED -eq 0 ]; then \
-		echo "WARNING: No solution directories found — test-all ran 0 tests." >&2; \
+		echo "ERROR: No solution directories found — test-all ran 0 tests." >&2; \
+		exit 1; \
 	fi; \
 	if [ $$FAILED -gt 0 ]; then \
 		echo ""; \
@@ -212,7 +213,7 @@ verify: ## Verify solution N passes all tests 00..N cumulatively (PHASE=3)
 	@PHASE_PAD=$$(printf "%02d" $(PHASE)); \
 	SOLUTION_SRC="solutions/phase_$${PHASE_PAD}/src"; \
 	if [ ! -d "$$SOLUTION_SRC" ]; then \
-		echo "Solutions for phase $(PHASE) are not yet published. See solutions/README.md."; exit 0; \
+		echo "ERROR: Solutions for phase $(PHASE) are not yet published." >&2; exit 1; \
 	fi; \
 	echo "Verifying phase $${PHASE_PAD} solution against phases 00..$${PHASE_PAD} ..."; \
 	FAILED=0; \

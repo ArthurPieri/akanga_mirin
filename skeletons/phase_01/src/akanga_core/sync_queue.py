@@ -12,22 +12,23 @@ via the `db` handle passed into each function.
 Table schema (added to GraphDatabase.DB_SCHEMA in Phase 2 — see skeletons/phase_02/src/akanga_core/db.py):
 
     CREATE TABLE IF NOT EXISTS sync_queue (
-        id           TEXT PRIMARY KEY,
-        job_type     TEXT NOT NULL,
-        entity_id    TEXT NOT NULL,
-        new_name     TEXT NOT NULL,
-        enqueued_at  TEXT NOT NULL,
-        processed_at TEXT
+        id          TEXT PRIMARY KEY,
+        entity_id   TEXT NOT NULL,
+        new_name    TEXT NOT NULL,
+        processed   INTEGER NOT NULL DEFAULT 0,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-Job types
----------
-"node_title"      — the `target` field in edges that reference `node_id` is stale
-"workspace_name"  — the workspace name field in node frontmatter is stale (Phase 4+)
+Notes on the schema:
+- `processed` is a 0/1 flag (not a timestamp). 0 = pending, 1 = done.
+- `created_at` defaults to the current time at INSERT — no need to set it
+  explicitly from Python.
+- There is no `job_type` column at this phase: all jobs are node-title
+  propagations. Workspace-name jobs (Phase 4+) reuse the same shape and
+  are distinguished by the caller, not by a column.
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from uuid import uuid4
 
 
@@ -41,24 +42,42 @@ def enqueue_title_sync(db, node_id: str, new_title: str) -> None:
     Phase 4.
 
     HOW:
-    1. Generate a fresh UUID string with `str(uuid4())` as the job `id`.
-    2. Set `enqueued_at` to the current UTC timestamp in ISO format:
-       `datetime.now(UTC).isoformat()`.
-    3. Execute an INSERT with these values:
-         id           = new UUID
-         job_type     = "node_title"
-         entity_id    = node_id
-         new_name     = new_title
-         enqueued_at  = timestamp
-         processed_at = NULL
-    4. Use `INSERT OR IGNORE` so that a duplicate job for the same entity_id
-       does not raise an error — the first enqueued job is enough.
-    5. Commit the transaction (or rely on the db handle's autocommit if it
-       provides one).
+    1. Generate a fresh job id: `job_id = str(uuid4())`.
+    2. Check idempotency BEFORE inserting. Execute:
+
+           SELECT COUNT(*) FROM sync_queue
+           WHERE entity_id = ? AND processed = 0
+
+       Bind `node_id` as the parameter. If the count is > 0, a pending
+       job for this entity already exists — return immediately without
+       inserting a duplicate.
+    3. Otherwise INSERT the new job:
+
+           INSERT INTO sync_queue (id, entity_id, new_name, processed)
+           VALUES (?, ?, ?, 0)
+
+       Bind `(job_id, node_id, new_title)`. The `created_at` column is
+       populated automatically by the `DEFAULT (datetime('now'))` clause
+       in the schema — do not pass it.
+    4. Commit the transaction (or rely on the db handle's autocommit if
+       it provides one).
+
+    WHY NOT `INSERT OR IGNORE`:
+    `INSERT OR IGNORE` only suppresses errors from PRIMARY KEY / UNIQUE
+    constraint violations. Each call generates a fresh UUID for `id`, so
+    there is never a PRIMARY KEY collision — every call would insert a
+    new row, defeating idempotency. The SELECT-then-INSERT pattern above
+    is required because the idempotency condition (one pending job per
+    `entity_id`) is not expressible as a UNIQUE constraint on this table.
     """
     raise NotImplementedError(
-        "INSERT OR IGNORE a row into sync_queue with job_type='node_title', "
-        "entity_id=node_id, new_name=new_title, enqueued_at=now ISO, processed_at=NULL"
+        "Generate job_id = str(uuid4()). "
+        "SELECT COUNT(*) FROM sync_queue WHERE entity_id = ? AND processed = 0 — "
+        "if > 0, return without inserting. "
+        "Otherwise INSERT INTO sync_queue (id, entity_id, new_name, processed) "
+        "VALUES (?, ?, ?, 0). created_at is filled by the column DEFAULT. "
+        "Do NOT use INSERT OR IGNORE — each call has a fresh UUID so there is no "
+        "PRIMARY KEY collision to ignore; idempotency must be enforced by the SELECT."
     )
 
 
@@ -71,40 +90,44 @@ def pending_sync_jobs(db, limit: int = 50) -> list[dict]:
 
     HOW:
     1. Execute:
-         SELECT * FROM sync_queue
-         WHERE processed_at IS NULL
-         ORDER BY enqueued_at ASC
-         LIMIT :limit
-    2. Convert each row to a plain `dict` (column name → value).
+
+           SELECT * FROM sync_queue
+           WHERE processed = 0
+           ORDER BY created_at ASC
+           LIMIT :limit
+
+    2. Convert each row to a plain `dict` (column name → value). The
+       returned dicts will contain the keys: `id`, `entity_id`,
+       `new_name`, `processed`, `created_at`.
     3. Return the list of dicts. Return an empty list if there are no
        pending jobs.
     """
     raise NotImplementedError(
-        "SELECT * FROM sync_queue WHERE processed_at IS NULL ORDER BY enqueued_at ASC "
+        "SELECT * FROM sync_queue WHERE processed = 0 ORDER BY created_at ASC "
         "LIMIT limit, then return rows as list[dict]"
     )
 
 
 def mark_processed(db, job_id: str) -> None:
-    """WHAT: Mark a sync job as processed by setting its `processed_at` timestamp.
+    """WHAT: Mark a sync job as processed by flipping its `processed` flag to 1.
 
     WHY: Once `SyncWorker.drain()` has successfully propagated a rename to all
     referencing files, the job must be marked done so that `pending_sync_jobs`
-    no longer returns it. Using a timestamp (rather than deletion) preserves an
+    no longer returns it. Using a 0/1 flag (rather than deletion) preserves an
     audit trail of completed jobs and makes restarts idempotent — if the worker
     crashes mid-drain it can safely re-process already-processed jobs without
     losing data.
 
     HOW:
-    1. Compute the current UTC timestamp:
-         `datetime.now(UTC).isoformat()`
-    2. Execute:
-         UPDATE sync_queue
-         SET processed_at = <timestamp>
-         WHERE id = <job_id>
-    3. Commit the transaction so the change is visible to other connections.
+    1. Execute:
+
+           UPDATE sync_queue
+           SET processed = 1
+           WHERE id = ?
+
+       Bind `job_id` as the parameter.
+    2. Commit the transaction so the change is visible to other connections.
     """
     raise NotImplementedError(
-        "UPDATE sync_queue SET processed_at = datetime.now(UTC).isoformat() "
-        "WHERE id = job_id, then commit"
+        "UPDATE sync_queue SET processed = 1 WHERE id = job_id, then commit"
     )

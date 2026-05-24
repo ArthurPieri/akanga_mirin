@@ -251,7 +251,7 @@ def _serialize_triples(nodes: dict, edges: list) -> str:
             # For incoming edges (current node is the target), prefix with "<-" to show direction:
             #   f"{src.title} <-[{edge.relation}]- {tgt.title}"
             lines.append(
-                f"- {src.title}  --[{edge.relation_id}]-->  {tgt.title}"
+                f"- {src.title}  --[{edge.relation}]-->  {tgt.title}"
             )
     lines.append("\n[/KNOWLEDGE GRAPH CONTEXT]")
     return "\n".join(lines)

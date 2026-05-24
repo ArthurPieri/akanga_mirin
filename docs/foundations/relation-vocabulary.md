@@ -1,6 +1,6 @@
-# Relation Vocabulary — The 70 Built-in Relation Types
+# Relation Vocabulary — The 71 Built-in Relation Types
 
-Akanga ships 70 relation types organized into 11 semantic categories. This is the
+Akanga ships 71 relation types organized into 11 semantic categories. This is the
 vocabulary you build in Phase 1 and query by ID in Phase 8 (`list_relation_types()`).
 
 Custom types are always allowed — assigned a UUID at creation, no pre-registration
@@ -194,11 +194,11 @@ the relation name is a human-readable display cache and can be renamed without b
 | Personal / Associative | `PA` | 3 |
 | Social / Organizational | `SO` | 8 |
 | Topical / Classification | `TC` | 4 |
-| **Total** | | **70** |
+| **Total** | | **71** |
 
 ---
 
-## Symmetric Relations (14)
+## Symmetric Relations (12)
 
 These relations are their own inverse — declaring A→B implies B→A with the same label.
 The ego-graph traversal handles display; no double-entry needed in frontmatter.

@@ -208,8 +208,13 @@ description: Short description of the resource
 The queue is stored in the DB as a `sync_queue` table, added to GraphDatabase.DB_SCHEMA in Phase 2:
 
 ```
-sync_queue — id, job_type, entity_id, new_name, enqueued_at, processed_at (nullable)
+sync_queue — id, entity_id, new_name, processed (0/1, default 0), created_at (default now)
 ```
+
+Note: there is no `job_type` column at this phase — all rows are node-title
+propagation jobs, and `processed` is a 0/1 integer flag rather than a timestamp.
+Workspace-name jobs (Phase 4+) reuse the same row shape and are distinguished by
+the caller, not by a column.
 
 Processing logic — scanning referencing files and updating their `target` fields —
 is implemented in Phase 4 alongside the file watcher and event bus.
@@ -229,7 +234,7 @@ def test_reference_node_create():
         description="Official Python documentation"
     )
     assert node.type == "reference"
-    re_parsed = parse(node.path)
+    re_parsed = parse_node_file(node.path)
     assert re_parsed.title == "Python Docs"
     # url, external_type, description are frontmatter fields, not Node attributes;
     # access via: yaml.safe_load(Path(re_parsed.path).read_text().split("---")[1])
@@ -241,7 +246,7 @@ def test_enqueue_title_sync(tmp_db):
     assert len(jobs) == 1
     assert jobs[0]["entity_id"] == "abc-123"
     assert jobs[0]["new_name"] == "Renamed Title"
-    assert jobs[0]["processed_at"] is None
+    assert jobs[0]["processed"] == 0
 
 def test_sync_queue_survives_restart(tmp_db):
     db = GraphDatabase(tmp_db)
@@ -259,7 +264,7 @@ def test_enqueue_is_idempotent(tmp_db):
     assert len(jobs) == 1   # duplicate enqueue does not create two jobs
 ```
 
-Plus 6 vault nodes with typed edges (including Nhamandu and Akanga with full seed
+Plus 7 vault nodes with typed edges (including Nhamandu and Akanga with full seed
 body content). The vault is the proof of understanding, not just the tests.
 
 ---

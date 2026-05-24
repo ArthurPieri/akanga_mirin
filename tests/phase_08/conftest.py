@@ -41,7 +41,7 @@ def _setup_akanga_src() -> Path:
 
 @pytest.fixture()
 def tmp_vault_with_nodes(tmp_path: Path):
-    """A temporary vault + GraphDatabase pre-loaded with 5 nodes and 3 edges.
+    """A temporary vault + GraphDatabase pre-loaded with 5 nodes and 4 edges.
 
     Nodes:
         Cognition  (id: _ID_COGNITION) — root node for RAG tests
@@ -50,7 +50,7 @@ def tmp_vault_with_nodes(tmp_path: Path):
         Learning   (id: _ID_LEARNING)
         Isolated   (id: _ID_ISOLATED) — no edges, for isolation test
 
-    Edges:
+    Edges (4 total):
         Cognition  -supports->       Attention
         Cognition  -is_related_to->  Memory
         Cognition  -enables->        Learning

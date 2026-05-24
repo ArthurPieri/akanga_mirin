@@ -115,27 +115,37 @@ class GraphDatabase:
            If `tags` is a list, JSON-encode it with `json.dumps`; if already a
            string, use it as-is.
            Hint: `val = node[field] if isinstance(node, dict) else getattr(node, field)`
-        2. Inside `with self._lock, self.conn:`, fetch the old rowid BEFORE the
-           upsert (INSERT OR REPLACE changes the rowid):
-             old = conn.execute("SELECT rowid FROM nodes WHERE id = ?", (node_id,)).fetchone()
+        2. Inside `with self._lock, self.conn:`, fetch the old row BEFORE the
+           upsert. The OLD title and tags values are required for the FTS5
+           'delete' command in step 4 (external-content FTS5 cannot determine
+           which tokens to remove without them):
+             old = conn.execute("SELECT rowid, title, tags FROM nodes WHERE id = ?", (node_id,)).fetchone()
         3. Run the upsert:
              INSERT OR REPLACE INTO nodes (id, path, title, type, tags, content_hash)
              VALUES (?, ?, ?, ?, ?, ?)
-        4. FTS5 content tables do not auto-update on INSERT OR REPLACE; you
-           must maintain them manually. IMPORTANT: INSERT OR REPLACE changes
-           the rowid — delete the old FTS entry BEFORE the INSERT OR REPLACE,
-           then insert the new one AFTER:
-             a. Fetch old rowid BEFORE upsert:
-                    old_rowid = conn.execute("SELECT rowid FROM nodes WHERE id = ?", (node_id,)).fetchone()
-             b. If old_rowid exists: DELETE FROM nodes_fts WHERE rowid = ?  (using old_rowid[0])
-             c. Run the INSERT OR REPLACE on nodes (step 3)
-             d. INSERT INTO nodes_fts(rowid, title, tags) SELECT rowid, title, tags
-                FROM nodes WHERE id = ?
-           All four statements must be in the same `with self._lock, self.conn:` block.
+        4. FTS5 external-content maintenance (MUST run inside the same with self._lock, self.conn: block):
+           a. Before upsert — fetch old row (id AND content for FTS 'delete'):
+                old = conn.execute("SELECT rowid, title, tags FROM nodes WHERE id = ?", (node_id,)).fetchone()
+           b. Run the INSERT OR REPLACE on nodes (step 3)
+           c. If old row existed — remove old FTS tokens using 'delete' command:
+                conn.execute(
+                    "INSERT INTO nodes_fts(nodes_fts, rowid, title, tags) VALUES('delete', ?, ?, ?)",
+                    (old["rowid"], old["title"], old["tags"])
+                )
+           d. Fetch the new rowid (it changed because INSERT OR REPLACE assigned a new one):
+                new_rowid = conn.execute("SELECT rowid FROM nodes WHERE id = ?", (node_id,)).fetchone()[0]
+           e. Insert new FTS tokens:
+                conn.execute(
+                    "INSERT INTO nodes_fts(rowid, title, tags) VALUES(?, ?, ?)",
+                    (new_rowid, title, tags_json)
+                )
+           Note: 'delete' requires ORIGINAL content values. Using the wrong values corrupts the index.
+           All steps a–e must be inside the same with self._lock, self.conn: transaction.
         """
         raise NotImplementedError(
-            "INSERT OR REPLACE INTO nodes ...; then DELETE old FTS row and INSERT new one "
-            "using the node's rowid. Wrap in with self._lock, self.conn:"
+            "SELECT old rowid+title+tags; INSERT OR REPLACE INTO nodes ...; "
+            "if old existed, FTS5 'delete' command with OLD title/tags; "
+            "then INSERT new FTS row with new rowid. Wrap in with self._lock, self.conn:"
         )
 
     def delete_node(self, node_id: str) -> None:
@@ -147,19 +157,25 @@ class GraphDatabase:
         FTS row.
 
         HOW:
-        1. Inside `with self._lock, self.conn:`:
-           a. Look up the node's `rowid`:
-                SELECT rowid FROM nodes WHERE id = ?
-           b. If a row exists, delete its FTS entry:
-                DELETE FROM nodes_fts WHERE rowid = ?
-           c. Delete the node itself:
-                DELETE FROM nodes WHERE id = ?
-           (Edges are removed automatically via ON DELETE CASCADE.)
-        2. If the node does not exist, do nothing — do not raise.
+        1. Inside with self._lock, self.conn::
+           a. Fetch the row (need rowid AND content for FTS 'delete'):
+                old = conn.execute("SELECT rowid, title, tags FROM nodes WHERE id = ?", (node_id,)).fetchone()
+           b. If old row does not exist, return silently (nothing to delete).
+           c. Remove FTS tokens using 'delete' command:
+                conn.execute(
+                    "INSERT INTO nodes_fts(nodes_fts, rowid, title, tags) VALUES('delete', ?, ?, ?)",
+                    (old["rowid"], old["title"], old["tags"])
+                )
+           d. Delete the node row (CASCADE removes outgoing edges — edges where source_id = node_id):
+                conn.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
+           e. WARNING: Edges where target_id = node_id (backlinks) are NOT cascade-deleted.
+              Explicitly clean them up:
+                conn.execute("DELETE FROM edges WHERE target_id = ?", (node_id,))
         """
         raise NotImplementedError(
-            "SELECT rowid FROM nodes WHERE id=?; DELETE FROM nodes_fts WHERE rowid=?; "
-            "DELETE FROM nodes WHERE id=?. If not found, return silently."
+            "SELECT rowid+title+tags FROM nodes WHERE id=?; if missing return; "
+            "FTS5 'delete' command with OLD title/tags; DELETE FROM nodes WHERE id=?; "
+            "DELETE FROM edges WHERE target_id=? to clean backlinks."
         )
 
     def get_node(self, node_id: str) -> Any | None:
@@ -225,9 +241,12 @@ class GraphDatabase:
              SELECT nodes.* FROM nodes
              JOIN nodes_fts ON nodes.rowid = nodes_fts.rowid
              WHERE nodes_fts MATCH ?
-             ORDER BY rank
+             ORDER BY nodes_fts.rank
              LIMIT ?
            with `(fts_query, limit)` as parameters.
+           Note: qualify `rank` as `nodes_fts.rank` — the FTS5 rank column is
+           ambiguous in some SQLite versions when used in a JOIN, and an
+           unqualified `rank` may not sort by relevance.
         5. Convert and return rows as Node-like objects.
 
         CRITICAL: Never interpolate user input directly into the SQL string —
@@ -235,7 +254,7 @@ class GraphDatabase:
         """
         raise NotImplementedError(
             "Split query into terms; double-quote each term to prevent FTS5 operator injection; "
-            "JOIN nodes ON nodes_fts MATCH ?; ORDER BY rank LIMIT ?"
+            "JOIN nodes ON nodes_fts MATCH ?; ORDER BY nodes_fts.rank LIMIT ?"
         )
 
     # ------------------------------------------------------------------

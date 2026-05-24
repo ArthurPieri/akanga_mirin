@@ -47,11 +47,10 @@ def tmp_db(tmp_path: Path):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS sync_queue (
             id TEXT PRIMARY KEY,
-            job_type TEXT NOT NULL,
             entity_id TEXT NOT NULL,
             new_name TEXT NOT NULL,
-            enqueued_at TEXT NOT NULL,
-            processed_at TEXT
+            processed INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
     conn.commit()

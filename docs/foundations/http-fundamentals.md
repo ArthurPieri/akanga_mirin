@@ -239,10 +239,11 @@ class NodeCreate(BaseModel):
 @app.post("/api/v1/nodes", status_code=201)
 async def create_node(payload: NodeCreate):
     # payload is a validated NodeCreate instance
-    # parse_node_file to get a Node, then upsert_node into the DB
-    node = parse_node_file(str(file_path))
-    db.upsert_node(node)
-    return node
+    # 1) Determine file path from payload.title (slugify + join vault path)
+    # 2) write_node_file(str(file_path), {"title": payload.title, "type": payload.type}, payload.content or "")
+    # 3) node = parse_node_file(str(file_path))
+    # 4) db.upsert_node(node)
+    return vars(node)
 ```
 
 ### Returning status codes

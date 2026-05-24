@@ -211,11 +211,19 @@ def create_node(title: str, node_type: str = "note", content: str = "") -> dict:
     HOW:
     1. db = _get_db()
     2. vault = _get_vault()
-    3. Slugify title to generate a filename:
+    3. Slugify title to generate a filename. Strip any path-separator or
+       parent-traversal sequences from the slug BEFORE joining with vault —
+       this makes the intent explicit and adds defense-in-depth on top of
+       the is_relative_to check below:
            slug = title.lower().replace(" ", "_")
+           # Remove any path-separator characters and parent-traversal sequences
+           slug = slug.replace("/", "").replace("\\", "").replace("..", "")
            file_path = vault / f"{slug}.md"
-    4. SECURITY (SEC-02): Before writing the file, verify the resolved path is inside vault:
-           resolved = (vault / file_path).resolve()
+    4. SECURITY (SEC-02): Verify the resolved path stays inside vault.
+       Resolve file_path directly (it is already vault/<slug>.md — do NOT
+       re-join with vault, which is a no-op when the RHS is absolute and
+       only obscures the check):
+           resolved = file_path.resolve()
            if not resolved.is_relative_to(vault.resolve()):
                raise ValueError(f"Path {file_path!r} escapes the vault directory")
     5. Build frontmatter: {"title": title, "type": node_type}

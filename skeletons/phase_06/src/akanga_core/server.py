@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 # ── APIRouter — register handlers on this router, then include it in create_app()
@@ -75,8 +76,10 @@ def create_app(
        c. Yields (server runs here)
        d. Closes the DB on shutdown
     3. Create FastAPI(lifespan=lifespan)
-    4. Register all route functions (defined below)
-    5. Return app
+    4. app.include_router(router)  — wire all @router.* endpoints into the app.
+       Without this, zero routes are registered and every request gets 404.
+    5. Register all route functions (defined below)
+    6. Return app
     """
     raise NotImplementedError(
         "Create FastAPI app with lifespan that opens GraphDatabase and stores it "
@@ -117,7 +120,14 @@ def create_node(body: CreateNodeRequest):
            write_node_file(str(full_path), fm, body.content)
        (prevents UUID churn on re-parse)
     8. db.upsert_node(node)
-    9. Return HTTP 201 with node dict from db.get_node(str(node.id))
+    9. Return HTTP 201 with node dict from db.get_node(str(node.id)).
+       Note: db.get_node() returns a SimpleNamespace (attribute access), NOT a dict.
+       Convert before returning, e.g.:
+           created = db.get_node(str(node.id))
+           return JSONResponse(status_code=201, content=vars(created))
+       Or build the dict explicitly:
+           return {"id": created.id, "title": created.title, "type": created.type,
+                   "tags": created.tags, "path": str(created.path)}
     """
     raise NotImplementedError(
         "Validate path (SEC-02), auto-slug if empty, write_node_file, parse_node_file, "
@@ -144,8 +154,12 @@ def list_nodes(
        nodes = db.search_fts(query, limit=limit)
        (filter further by type/tag in Python if your DB does not support those params)
     3. Else: nodes = db.list_nodes(limit=limit, offset=offset)
-    4. Return JSONResponse(content=nodes)
-       (nodes is already a list of dicts from the DB methods)
+    4. Convert SimpleNamespace objects to dicts before returning — they are NOT
+       JSON-serializable directly. Either:
+           return JSONResponse(content=[vars(n) for n in nodes])
+       Or build explicit dicts:
+           return [{"id": n.id, "title": n.title, "type": n.type,
+                    "tags": n.tags, "path": str(n.path)} for n in nodes]
     """
     raise NotImplementedError(
         "Branch on query/type/tag: call db.search_fts(query, limit=limit) or "
@@ -163,7 +177,11 @@ def get_node(node_id: str):
     HOW:
     1. node = get_db().get_node(node_id)
     2. If node is None: raise HTTPException(status_code=404, detail="Node not found")
-    3. Return JSONResponse(content=node)
+    3. Convert SimpleNamespace to dict before returning (not JSON-serializable):
+           return JSONResponse(content=vars(node))
+       Or build explicitly:
+           return {"id": node.id, "title": node.title, "type": node.type,
+                   "tags": node.tags, "path": str(node.path)}
     """
     raise NotImplementedError(
         "Call db.get_node(node_id). Raise 404 if None. Return JSONResponse."
@@ -178,23 +196,32 @@ def update_node(node_id: str, body: UpdateNodeRequest):
     the vault filesystem directly.
 
     HOW:
-    1. existing = get_db().get_node(node_id)  — raise 404 if None
-    2. path = existing["path"]
+    1. existing = get_db().get_node(node_id)  — raise 404 if None.
+       Note: existing is a SimpleNamespace — use attribute access (existing.path), NOT subscript.
+    2. path = str(existing.path)
     3. SEC-02: Before writing, verify the node's stored path is still within the vault:
        vault_root = Path(_app_state["vault"]).resolve()
        if not Path(path).resolve().is_relative_to(vault_root): raise HTTPException(400)
-    4. current = parse_node_file(path)  — read current frontmatter + content
-    5. Build updated frontmatter dict from Node attributes (Node has no .frontmatter field):
-           fm = {"title": current.title, "type": current.type, "tags": current.tags, "id": str(current.id)}
-       Then apply overrides:
-       - If body.title is not None: fm["title"] = body.title
-       - If body.tags is not None: fm["tags"] = body.tags
-       Always keep fm["id"] = existing["id"]  (don't lose the UUID)
+    4. current = parse_node_file(path)  — read current frontmatter + content from disk.
+       (existing from db.get_node has no .content field — the DB does not store body content.
+       You MUST read from disk to preserve the body when the client did not send new content.)
+    5. Build updated frontmatter dict from the DB record and request body
+       (SimpleNamespace has no .frontmatter field — build the dict explicitly):
+           fm = {
+               "id": str(existing.id),
+               "title": body.title if body.title is not None else existing.title,
+               "type": existing.type,  # type is not updatable via this endpoint
+               "tags": body.tags if body.tags is not None else existing.tags,
+           }
+       Always keep fm["id"] = str(existing.id)  (don't lose the UUID)
     6. new_content = body.content if body.content is not None else current.content
+       (current came from parse_node_file above, which DOES expose .content)
     7. write_node_file(path, fm, new_content)
     8. node = parse_node_file(path)
     9. get_db().upsert_node(node)
-    10. Return JSONResponse with updated node dict
+    10. Return JSONResponse with updated node dict. Convert SimpleNamespace first:
+            updated = get_db().get_node(node_id)
+            return JSONResponse(content=vars(updated))
     """
     raise NotImplementedError(
         "get_node → parse_node_file → update fm fields → write_node_file → "
@@ -209,8 +236,9 @@ def delete_node(node_id: str):
     WHY: Users need to remove outdated knowledge without leaving orphan DB rows.
 
     HOW:
-    1. existing = get_db().get_node(node_id)  — raise 404 if None
-    2. path = existing["path"]
+    1. existing = get_db().get_node(node_id)  — raise 404 if None.
+       Note: existing is a SimpleNamespace — use attribute access (existing.path), NOT subscript.
+    2. path = str(existing.path)
     3. SEC-02: Before removing, verify path:
        vault_root = Path(_app_state["vault"]).resolve()
        if not Path(path).resolve().is_relative_to(vault_root): raise HTTPException(400)
@@ -277,7 +305,12 @@ def get_node_neighbors(node_id: str):
     HOW:
     1. existing = get_db().get_node(node_id)  — raise 404 if None
     2. neighbors = get_db().get_neighbors(node_id)
-    3. Return JSONResponse(content=neighbors)
+       Note: get_neighbors returns a list of SimpleNamespace objects — NOT dicts.
+       Convert before returning (not JSON-serializable):
+           return JSONResponse(content=[vars(n) for n in neighbors])
+       Or build explicit dicts:
+           return [{"id": n.id, "title": n.title, "type": n.type,
+                    "tags": n.tags, "path": str(n.path)} for n in neighbors]
     """
     raise NotImplementedError(
         "Raise 404 if node missing. Call db.get_neighbors(node_id). "
@@ -295,7 +328,12 @@ def get_node_backlinks(node_id: str):
     HOW:
     1. existing = get_db().get_node(node_id)  — raise 404 if None
     2. backlinks = get_db().get_backlinks(node_id)
-    3. Return JSONResponse(content=backlinks)
+       Note: get_backlinks returns a list of SimpleNamespace objects — NOT dicts.
+       Convert before returning (not JSON-serializable):
+           return JSONResponse(content=[vars(n) for n in backlinks])
+       Or build explicit dicts:
+           return [{"id": n.id, "title": n.title, "type": n.type,
+                    "tags": n.tags, "path": str(n.path)} for n in backlinks]
     """
     raise NotImplementedError(
         "Raise 404 if node missing. Call db.get_backlinks(node_id). "

@@ -43,9 +43,18 @@ body = "Cognitive Load Theory states that working memory has limited capacity...
 ctx = build_context("Cognitive Load", "note", body, triples)
 print(ctx)
 print(f"\nContext length: {len(ctx)} chars (cap: {MAX_CONTEXT_CHARS})")
-# Verify the total length is within budget
-assert len(ctx) <= MAX_CONTEXT_CHARS + len(_CLOSE_DELIM) + len(_OPEN_DELIM), (
-    f"Context exceeds MAX_CONTEXT_CHARS ({MAX_CONTEXT_CHARS}): {len(ctx)} chars"
+# Verify the TOTAL output (including delimiters) fits within MAX_CONTEXT_CHARS.
+#
+# The implementation must reserve space for delimiters INSIDE the budget:
+#   body_budget = MAX_CONTEXT_CHARS - len(OPEN_DELIM) - len(CLOSE_DELIM)
+# Then: output = OPEN_DELIM + body[:body_budget] + CLOSE_DELIM
+# Total len = len(OPEN_DELIM) + body_budget + len(CLOSE_DELIM) <= MAX_CONTEXT_CHARS
+#
+# Allowing wrapper overhead ON TOP of the budget would let the final string
+# exceed the cap by 2x the delimiter size — defeating the purpose of the limit.
+assert len(ctx) <= MAX_CONTEXT_CHARS, (
+    f"build_context output ({len(ctx)} chars) exceeds MAX_CONTEXT_CHARS ({MAX_CONTEXT_CHARS}). "
+    "The total output including delimiters must fit within the budget."
 )
 # Verify closing delimiter is at the very END (budget-first truncation)
 assert ctx.endswith("[/KNOWLEDGE GRAPH CONTEXT]"), (

@@ -243,7 +243,7 @@ def test_ascii_render_arrows():
     assert "──" in output or "<·" in output
 ```
 
-Plus 7 vault nodes with typed edges. The `test_cycle_does_not_loop` test is the most
+Plus 8 vault nodes with typed edges. The `test_cycle_does_not_loop` test is the most
 important — it proves the visited-set fix works and reflects a deliberate design
 choice (cycles permitted, traversal safe).
 
