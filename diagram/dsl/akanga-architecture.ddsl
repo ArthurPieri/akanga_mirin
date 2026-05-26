@@ -1,0 +1,42 @@
+title: Akanga — Detailed Architecture
+
+group: Data Model | id: g-model | pos: 60,60 | size: 460,170 | color: teal
+group: Storage | id: g-storage | pos: 60,300 | size: 460,220 | color: blue
+group: Concurrency | id: g-conc | pos: 580,60 | size: 540,280 | color: orange
+group: Frontends | id: g-front | pos: 580,410 | size: 540,250 | color: green
+group: AI Integration | id: g-ai | pos: 60,590 | size: 460,180 | color: purple
+
+node: Node | id: n-node | type: card2 | pos: 100,110 | color: teal | body: id: str\ntitle: str\npath: str | body2: body: str\nfrontmatter: dict | group: g-model
+node: Edge | id: n-edge | type: card2 | pos: 320,110 | color: teal | body: source: str\ntarget: str | body2: relation: str | None | group: g-model
+
+node: Database | id: n-database | type: card2 | pos: 100,360 | color: blue | body: SQLite + WAL\nthreading.Lock\nFTS5 virtual table | body2: upsert_node()\nget_node() / get_all_nodes()\nget_neighbors() / get_backlinks() | group: g-storage
+node: Parser | id: n-parser | type: card2 | pos: 320,360 | color: blue | body: python-frontmatter\nSHA-256 hashing | body2: parse_node_file()\natomic_write()\ncontent_hash() | group: g-storage
+
+node: EventBus | id: n-eventbus | type: card2 | pos: 620,110 | color: orange | body: defaultdict(list)\nthreading.Lock\nasyncio loop ref | body2: subscribe() / unsubscribe()\npublish()\nset_loop() | group: g-conc
+node: VaultWatcher | id: n-watcher | type: card2 | pos: 870,110 | color: orange | body: watchdog Observer\npath filtering | body2: start() / stop()\n_should_ignore()\n_schedule() / _fire() | group: g-conc
+node: Debouncer | id: n-debounce | type: card2 | pos: 620,260 | color: orange | body: pending dict\nstop_event\n500ms default | body2: submit(path)\ncancel(path)\n_run() poll loop | group: g-conc
+node: GitManager | id: n-gitmgr | type: card2 | pos: 870,260 | color: orange | body: GitPython Repo\nvault_path | body2: ensure_repo()\nstage_and_commit() | group: g-conc
+
+node: AkangaApp | id: n-app | type: card2 | pos: 280,480 | color: gray | body: Orchestrator\nWires all components | body2: start_all()\n_on_file_changed()\n_on_file_deleted()
+
+node: REST API | id: n-api | type: card2 | pos: 620,470 | color: green | body: FastAPI app\nWebSocket support | body2: GET /nodes\nGET /nodes/{id}\nGET /graph/{id}\nWS /ws | group: g-front
+node: AkangaTUI | id: n-tui | type: card2 | pos: 870,470 | color: green | body: Textual App\nasyncio event loop | body2: compose()\n_refresh_node_list()\n_show_node() | group: g-front
+
+node: RAG Builder | id: n-rag | type: card2 | pos: 100,640 | color: purple | body: MAX_CONTEXT=12000\nMAX_BODY=500\nmax_triples=80 | body2: build_context()\n→ BFS → triples → wrap | group: g-ai
+node: MCP Server | id: n-mcp | type: card2 | pos: 320,640 | color: purple | body: FastMCP("Akanga")\nstdio transport\n127.0.0.1 only | body2: @tool search_nodes()\n@tool get_graph_context() | group: g-ai
+
+edge: Node -> Database | label: stored in
+edge: Edge -> Database | label: stored in
+edge: Parser -> Node | label: creates
+edge: VaultWatcher -> Debouncer | label: raw events
+edge: Debouncer -> EventBus | label: debounced
+edge: AkangaApp -> EventBus | label: subscribes
+edge: AkangaApp -> Database | label: owns
+edge: AkangaApp -> VaultWatcher | label: owns
+edge: AkangaApp -> GitManager | label: owns
+edge: REST API -> AkangaApp | label: delegates to
+edge: AkangaTUI -> Database | label: queries
+edge: AkangaTUI -> EventBus | label: subscribes
+edge: RAG Builder -> Database | label: BFS query
+edge: MCP Server -> RAG Builder | label: calls
+edge: MCP Server -> Database | label: FTS5 search

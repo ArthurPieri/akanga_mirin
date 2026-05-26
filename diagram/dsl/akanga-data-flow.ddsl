@@ -1,0 +1,43 @@
+title: Akanga — Data Flow
+
+group: File Events | id: g-events | pos: 60,60 | size: 360,350 | color: orange
+group: Processing Pipeline | id: g-pipeline | pos: 480,60 | size: 360,350 | color: teal
+group: Query Path | id: g-query | pos: 900,60 | size: 360,350 | color: green
+group: Consumer Endpoints | id: g-consumers | pos: 480,480 | size: 780,200 | color: purple
+
+node: User edits .md | id: n-user | type: oval | pos: 120,120 | color: orange | group: g-events
+node: OS fires FS events | id: n-fs | type: box | pos: 120,210 | color: orange | group: g-events
+node: VaultWatcher | id: n-watch | type: box | pos: 120,280 | color: orange | group: g-events
+node: Debouncer (500ms) | id: n-debounce | type: hexagon | pos: 120,350 | color: orange | group: g-events
+
+node: EventBus | id: n-bus | type: hexagon | pos: 560,120 | color: teal | group: g-pipeline
+node: Parser | id: n-parse | type: box | pos: 560,210 | color: teal | group: g-pipeline
+node: Node / Edge | id: n-models | type: box | pos: 560,280 | color: teal | group: g-pipeline
+node: DB upsert | id: n-upsert | type: box | pos: 560,350 | color: teal | group: g-pipeline
+
+node: FTS5 Search | id: n-fts | type: box | pos: 980,120 | color: green | group: g-query
+node: BFS Ego-Graph | id: n-bfs | type: box | pos: 980,210 | color: green | group: g-query
+node: RAG Context | id: n-rag | type: box | pos: 980,290 | color: green | group: g-query
+node: Git auto-commit | id: n-git | type: box | pos: 980,370 | color: green | group: g-query
+
+node: TUI (Textual) | id: n-tui | type: card | pos: 540,540 | color: purple | body: Live node list\nMarkdown + ego-graph | group: g-consumers
+node: REST API | id: n-api | type: card | pos: 780,540 | color: purple | body: /nodes /graph\nWebSocket push | group: g-consumers
+node: MCP Server | id: n-mcp | type: card | pos: 1020,540 | color: purple | body: Claude integration\nsearch + context | group: g-consumers
+
+edge: User edits .md -> OS fires FS events | label: save
+edge: OS fires FS events -> VaultWatcher | label: inotify / FSEvents
+edge: VaultWatcher -> Debouncer (500ms) | label: raw events
+edge: Debouncer (500ms) -> EventBus | label: file_changed
+edge: EventBus -> Parser | label: triggers
+edge: Parser -> Node / Edge | label: creates
+edge: Node / Edge -> DB upsert | label: INSERT OR UPDATE
+edge: DB upsert -> FTS5 Search | label: triggers sync
+edge: DB upsert -> BFS Ego-Graph | label: queryable
+edge: BFS Ego-Graph -> RAG Context | label: triples
+edge: EventBus -> Git auto-commit | label: file_changed
+edge: FTS5 Search -> TUI (Textual) | label: search results
+edge: FTS5 Search -> REST API | label: search endpoint
+edge: FTS5 Search -> MCP Server | label: search_nodes tool
+edge: RAG Context -> MCP Server | label: get_graph_context
+edge: EventBus -> TUI (Textual) | label: node_updated | style: dashed
+edge: EventBus -> REST API | label: WebSocket push | style: dashed

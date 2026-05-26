@@ -1,0 +1,28 @@
+title: Akanga — Phase Progression
+
+node: Phase 0 | id: p0 | type: card | pos: 550,60 | color: blue | body: Parser + Atomic Write\nNode / Edge models
+node: Phase 1 | id: p1 | type: card | pos: 550,200 | color: blue | body: Edge schema + [[links]]\nWorkspace registry\nSync queue
+node: Phase 2 | id: p2 | type: card | pos: 550,340 | color: teal | body: SQLite DB (WAL + FTS5)\nIndexer + Links module
+node: Phase 3 | id: p3 | type: card | pos: 550,480 | color: teal | body: Graph algorithms\nBFS ego-graph traversal
+node: Phase 4 | id: p4 | type: card | pos: 550,620 | color: orange | body: EventBus (pub/sub)\nVaultWatcher + Debouncer\nThread-async bridge
+node: Phase 5 | id: p5 | type: card | pos: 300,760 | color: green | body: Terminal UI (Textual)\nSidebar + Markdown viewer
+node: Phase 6 | id: p6 | type: card | pos: 550,760 | color: green | body: REST API (FastAPI)\nWebSocket real-time
+node: Phase 7 | id: p7 | type: card | pos: 800,760 | color: green | body: Git integration\nAuto-commit on change
+node: Phase 8 | id: p8 | type: card | pos: 550,900 | color: purple | body: MCP Server (FastMCP)\nRAG context builder\nClaude integration
+
+node: File System | id: layer-fs | type: note | pos: 150,60 | color: gray | body: Foundation layer
+node: Data Layer | id: layer-data | type: note | pos: 150,340 | color: gray | body: Persistence layer
+node: Concurrency | id: layer-conc | type: note | pos: 150,620 | color: gray | body: Runtime layer
+node: Interfaces | id: layer-iface | type: note | pos: 150,760 | color: gray | body: Presentation layer
+node: AI | id: layer-ai | type: note | pos: 150,900 | color: gray | body: Intelligence layer
+
+edge: Phase 0 -> Phase 1 | label: adds edge schema
+edge: Phase 1 -> Phase 2 | label: adds persistence
+edge: Phase 2 -> Phase 3 | label: adds graph queries
+edge: Phase 3 -> Phase 4 | label: adds concurrency
+edge: Phase 4 -> Phase 5 | label: adds TUI
+edge: Phase 4 -> Phase 6 | label: adds API
+edge: Phase 4 -> Phase 7 | label: adds git
+edge: Phase 5 -> Phase 8 | label: all frontends | style: dashed
+edge: Phase 6 -> Phase 8 | label: converge | style: dashed
+edge: Phase 7 -> Phase 8 | label: into AI | style: dashed
