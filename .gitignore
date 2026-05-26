@@ -25,5 +25,8 @@ vault/
 .coverage
 htmlcov/
 
+# MKDocs build output
+site/
+
 # Placeholder scaffold
 main.py

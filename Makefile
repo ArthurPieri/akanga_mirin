@@ -44,7 +44,8 @@ GLOW         := glow
         setup setup-phase \
         lint typecheck check \
         status where-is-my-src sync-forward \
-        commit-progress push
+        commit-progress push \
+        docs-serve docs-build
 
 # =============================================================================
 # HELP — self-documenting (reads ## comments on target lines)
@@ -77,6 +78,10 @@ help: ## Show this help message
 	@printf '\n'
 	@printf '  \033[1;33mQuality workflow\033[0m\n'
 	@grep -E '^(lint|typecheck|check)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
+		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
+	@printf '\n'
+	@printf '  \033[1;33mDocs workflow\033[0m\n'
+	@grep -E '^(docs-serve|docs-build)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
 		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
 	@printf '\n'
 	@printf '  \033[1;33mFacilitator workflow\033[0m\n'
@@ -132,6 +137,18 @@ foundations: ## Open a foundations doc in glow (TOPIC=sqlite → sqlite-basics.m
 		echo "error: no foundations doc matching '$(TOPIC)'"; exit 1; \
 	fi; \
 	$(GLOW) -p "$$DOC"
+
+# =============================================================================
+# DOCS — serve the learning path as a website
+# =============================================================================
+
+docs-serve: ## Start MKDocs dev server with live reload (localhost:8000)
+	@echo "Starting MKDocs dev server ..."; \
+	uv run mkdocs serve
+
+docs-build: ## Build static site into site/ directory
+	@echo "Building MKDocs site ..."; \
+	uv run mkdocs build
 
 # =============================================================================
 # TESTING — run tests against learner's code or solutions

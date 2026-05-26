@@ -1,0 +1,58 @@
+site_name: "Akanga Mirin — Learning Path"
+site_description: "Build a personal knowledge graph in 9 phases"
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: teal
+    accent: cyan
+  features:
+    - navigation.sections
+    - navigation.expand
+    - search.highlight
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Learning Path:
+    - "Phase 0 — File System as Database": learning/phase-00-file-system-as-database.md
+    - "Phase 1 — Data Modeling": learning/phase-01-data-modeling.md
+    - "Phase 1A — Edge Schema": learning/phase-01a-data-modeling-edge-schema.md
+    - "Phase 1B — Workspace and Sync": learning/phase-01b-workspace-and-sync.md
+    - "Phase 2 — Storage and Indexing": learning/phase-02-storage-and-indexing.md
+    - "Phase 3 — Graph Algorithms": learning/phase-03-graph-algorithms.md
+    - "Phase 4 — Concurrency and Events": learning/phase-04-concurrency-and-events.md
+    - "Phase 5 — Terminal UI": learning/phase-05-terminal-ui.md
+    - "Phase 6 — REST API": learning/phase-06-rest-api.md
+    - "Phase 7 — Version Control": learning/phase-07-version-control.md
+    - "Phase 8 — AI Integration": learning/phase-08-ai-integration.md
+  - Foundations:
+    - "Asyncio Primer": foundations/asyncio-primer.md
+    - "Design Patterns": foundations/design-patterns.md
+    - "Direnv Basics": foundations/direnv-basics.md
+    - "Git Basics": foundations/git-basics.md
+    - "HTTP Fundamentals": foundations/http-fundamentals.md
+    - "JSON-RPC Basics": foundations/json-rpc-basics.md
+    - "Makefile Basics": foundations/makefile-basics.md
+    - "MKDocs Basics": foundations/mkdocs-basics.md
+    - "Python Dataclasses": foundations/python-dataclasses.md
+    - "Python Threading": foundations/python-threading.md
+    - "Python Type Annotations": foundations/python-type-annotations.md
+    - "Relation Vocabulary": foundations/relation-vocabulary.md
+    - "SQLite Basics": foundations/sqlite-basics.md
+    - "Terminal and tmux Basics": foundations/terminal-and-tmux-basics.md
+    - "YAML and Markdown Frontmatter": foundations/yaml-and-markdown-frontmatter.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - toc:
+      permalink: true
+
+plugins:
+  - search

@@ -32,7 +32,7 @@ PYTHON    := uv run python
 PYTEST    := uv run pytest
 RUFF      := uv run ruff
 
-.PHONY: help test run serve index init-vault mcp clean lint setup
+.PHONY: help test run serve index init-vault mcp clean lint setup docs-serve
 
 # =============================================================================
 # HELP
@@ -51,6 +51,7 @@ help:
 	@printf '    \033[36m%-34s\033[0m %s\n' "make serve" "Start the REST API server (127.0.0.1:8000)"
 	@printf '    \033[36m%-34s\033[0m %s\n' "make index" "Re-index the vault"
 	@printf '    \033[36m%-34s\033[0m %s\n' "make mcp" "Start the MCP server"
+	@printf '    \033[36m%-34s\033[0m %s\n' "make docs-serve" "Preview your knowledge graph as a website"
 	@printf '\n'
 	@printf '  \033[1;33mSetup workflow\033[0m\n'
 	@printf '    \033[36m%-34s\033[0m %s\n' "make setup" "Install project dependencies via uv"
@@ -96,6 +97,9 @@ index: ## Re-index the vault (scans vault/ and updates .akanga.db)
 
 mcp: ## Start the MCP server (for Claude Code / Claude Desktop integration)
 	$(PYTHON) -m akanga_core.cli mcp-server --vault $(VAULT) --db $(DB)
+
+docs-serve: ## Preview your knowledge graph as a website (MKDocs)
+	uv run mkdocs serve
 
 # =============================================================================
 # SETUP
