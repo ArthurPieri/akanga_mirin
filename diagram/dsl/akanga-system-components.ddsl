@@ -1,44 +1,40 @@
 title: Akanga — System Components
 
-group: Storage Layer | id: g-storage | pos: 60,60 | size: 520,180 | color: blue
-group: Core Library | id: g-core | pos: 60,310 | size: 520,200 | color: teal
-group: Runtime Services | id: g-runtime | pos: 640,60 | size: 520,180 | color: orange
-group: Interface Layer | id: g-iface | pos: 640,310 | size: 520,200 | color: green
-group: AI Layer | id: g-ai | pos: 300,580 | size: 560,170 | color: purple
+group: Storage Layer | id: g-storage | pos: 872,191 | size: 526,320 | color: blue | autoSize: false
+group: Core Library | id: g-core | pos: -492,601 | size: 620,358 | color: teal | autoSize: false
+group: Runtime Services | id: g-runtime | pos: 128,1034 | size: 695,291 | color: orange | autoSize: false
+group: Interface Layer | id: g-iface | pos: 941,660 | size: 435,197 | color: green | autoSize: false
+group: AI Layer | id: g-ai | pos: -855,612 | size: 292,330 | color: purple | autoSize: false
 
-node: Vault | id: n-vault | type: card | pos: 120,110 | color: blue | body: Markdown files\nYAML frontmatter + body | group: g-storage
-node: SQLite DB | id: n-db | type: card | pos: 370,110 | color: blue | body: WAL mode, FTS5\nnodes + edges tables | group: g-storage
-
-node: Parser | id: n-parser | type: box | pos: 100,370 | color: teal | group: g-core
-node: Models | id: n-models | type: box | pos: 230,370 | color: teal | group: g-core
-node: Links | id: n-links | type: box | pos: 360,370 | color: teal | group: g-core
-node: Indexer | id: n-indexer | type: box | pos: 150,440 | color: teal | group: g-core
-node: Graph | id: n-graph | type: box | pos: 310,440 | color: teal | group: g-core
-
-node: EventBus | id: n-eventbus | type: hexagon | pos: 710,110 | color: orange | group: g-runtime
-node: VaultWatcher | id: n-watcher | type: box | pos: 890,100 | color: orange | group: g-runtime
-node: Debouncer | id: n-debounce | type: box | pos: 890,160 | color: orange | group: g-runtime
-node: GitManager | id: n-git | type: box | pos: 710,170 | color: orange | group: g-runtime
-
-node: REST API | id: n-api | type: card | pos: 700,370 | color: green | body: FastAPI\n/nodes /graph /ws | group: g-iface
-node: Terminal UI | id: n-tui | type: card | pos: 940,370 | color: green | body: Textual App\nSidebar + Markdown | group: g-iface
-
-node: MCP Server | id: n-mcp | type: card | pos: 360,630 | color: purple | body: FastMCP (stdio)\nsearch + context tools | group: g-ai
-node: RAG Builder | id: n-rag | type: card | pos: 620,630 | color: purple | body: BFS ego-graph\n12k char context cap | group: g-ai
+node: Vault | id: n-vault | type: card | pos: 896,399 | color: blue | group: g-storage | body: Markdown files\nYAML frontmatter + body
+node: SQLite DB | id: n-db | type: card | pos: 1068,233 | color: blue | group: g-storage | body: WAL mode, FTS5\nnodes + edges tables
+node: Parser | id: n-parser | type: box | pos: -242,865 | color: teal | group: g-core
+node: Models | id: n-models | type: box | pos: -23,734 | color: teal | group: g-core
+node: Links | id: n-links | type: box | pos: -478,865 | color: teal | group: g-core
+node: Indexer | id: n-indexer | type: box | pos: -242,658 | color: teal | group: g-core
+node: Graph | id: n-graph | type: box | pos: -242,742 | color: teal | group: g-core
+node: EventBus | id: n-eventbus | type: hexagon | pos: 661,1108 | color: orange | group: g-runtime
+node: VaultWatcher | id: n-watcher | type: box | pos: 142,1108 | color: orange | group: g-runtime
+node: Debouncer | id: n-debounce | type: box | pos: 395,1108 | color: orange | group: g-runtime
+node: GitManager | id: n-git | type: box | pos: 661,1227 | color: orange | group: g-runtime
+node: REST API | id: n-api | type: card | pos: 991,734 | color: green | group: g-iface | body: FastAPI\n/nodes /graph /ws
+node: Terminal UI | id: n-tui | type: card | pos: 1180,734 | color: green | group: g-iface | body: Textual App\nSidebar + Markdown
+node: MCP Server | id: n-mcp | type: card | pos: -809,686 | color: purple | group: g-ai | body: FastMCP (stdio)\nsearch + context tools
+node: RAG Builder | id: n-rag | type: card | pos: -801,828 | color: purple | group: g-ai | body: BFS ego-graph\n12k char context cap
 
 edge: Vault -> Parser | label: reads .md
-edge: Parser -> Models | label: Node / Edge
+edge: Parser -> Models | label: Node / Edge | offset: 0.05
 edge: Models -> SQLite DB | label: upsert
 edge: SQLite DB -> Indexer | label: FTS5 search
 edge: SQLite DB -> Graph | label: BFS traversal
 edge: Links -> Parser | label: [[target]] extraction
 edge: VaultWatcher -> Debouncer | label: FS events
 edge: Debouncer -> EventBus | label: file_changed
-edge: EventBus -> Parser | label: triggers reparse
+edge: EventBus -> Parser | label: triggers reparse | waypoints: 725,962; -71,999
 edge: EventBus -> GitManager | label: auto-commit
 edge: SQLite DB -> REST API | label: CRUD queries
 edge: SQLite DB -> Terminal UI | label: node queries
 edge: Graph -> RAG Builder | label: ego-graph
-edge: RAG Builder -> MCP Server | label: context string
+edge: RAG Builder -> MCP Server | label: context string | offset: 0.37
 edge: EventBus -> Terminal UI | label: live updates | style: dashed
 edge: EventBus -> REST API | label: WebSocket push | style: dashed
