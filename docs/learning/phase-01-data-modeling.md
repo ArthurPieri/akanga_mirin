@@ -20,6 +20,17 @@ understanding why those decisions were made and building the code that enforces 
 
 ---
 
+## Quick Start
+
+```bash
+make skeleton PHASE=1    # copy the starting code into ./src/
+make test PHASE=1        # run the tests (they will fail initially)
+make study PHASE=1       # open the tmux study session
+```
+
+> First time here? Run `make setup` first, then `direnv allow` to activate the environment.
+> See `docs/foundations/makefile-basics.md` for a full Makefile walkthrough.
+
 ## Concepts
 
 ### Directed Graph

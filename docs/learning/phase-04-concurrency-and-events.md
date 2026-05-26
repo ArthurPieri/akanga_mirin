@@ -30,6 +30,17 @@ Check each item you can answer confidently. If you can't check 3 or more, review
 
 ---
 
+## Quick Start
+
+```bash
+make skeleton PHASE=4    # copy the starting code into ./src/
+make test PHASE=4        # run the tests (they will fail initially)
+make study PHASE=4       # open the tmux study session
+```
+
+> First time here? Run `make setup` first, then `direnv allow` to activate the environment.
+> See `docs/foundations/makefile-basics.md` for a full Makefile walkthrough.
+
 ## Concepts
 
 ### File Watching

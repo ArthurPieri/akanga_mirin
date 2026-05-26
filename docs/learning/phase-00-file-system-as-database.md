@@ -38,6 +38,26 @@ linked foundation doc before proceeding.
 
 ---
 
+## Quick Start
+
+```bash
+make skeleton PHASE=0    # copy the starting code into ./src/
+make test PHASE=0        # run the tests (they will fail initially)
+make study PHASE=0       # open the tmux study session
+```
+
+> First time here? Run `make setup` first, then `direnv allow` to activate the environment.
+> See `docs/foundations/makefile-basics.md` for a full Makefile walkthrough.
+
+## Toolbox — Foundation Docs
+
+Three tools you will use throughout this learning path. If you have not used them
+before, read these first — each takes 15–20 minutes and you can return here immediately after.
+
+- **Make** — `docs/foundations/makefile-basics.md` — the Makefile is your primary interface to this repo. Every workflow is a `make <target>` call.
+- **Direnv** — `docs/foundations/direnv-basics.md` — auto-activates your Python environment and project variables when you `cd` into the repo.
+- **MKDocs** — `docs/foundations/mkdocs-basics.md` — renders your Markdown docs as a browsable website. Used in Phase 8 to publish your knowledge graph, available anytime via `make docs-serve`.
+
 ## Concepts
 
 ### YAML Frontmatter

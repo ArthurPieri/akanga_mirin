@@ -34,6 +34,17 @@ linked foundation doc before proceeding.
 
 ---
 
+## Quick Start
+
+```bash
+make skeleton PHASE=3    # copy the starting code into ./src/
+make test PHASE=3        # run the tests (they will fail initially)
+make study PHASE=3       # open the tmux study session
+```
+
+> First time here? Run `make setup` first, then `direnv allow` to activate the environment.
+> See `docs/foundations/makefile-basics.md` for a full Makefile walkthrough.
+
 ## Concepts
 
 ### Graph Traversal

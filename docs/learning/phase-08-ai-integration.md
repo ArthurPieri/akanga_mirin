@@ -39,6 +39,19 @@ Check each item you can answer confidently. If you can't check 3 or more, review
 
 ---
 
+## Quick Start
+
+```bash
+make skeleton PHASE=8    # copy the starting code into ./src/
+make test PHASE=8        # run the tests (they will fail initially)
+make study PHASE=8       # open the tmux study session
+make mcp                 # start the MCP server (after implementation)
+make docs-serve          # preview your knowledge graph as a website
+```
+
+> First time here? Run `make setup` first, then `direnv allow` to activate the environment.
+> This phase uses MKDocs to serve your knowledge graph — see `docs/foundations/mkdocs-basics.md`.
+
 ## Concepts
 
 ### Model Context Protocol (MCP)
