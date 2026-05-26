@@ -27,6 +27,9 @@ nav:
     - "Phase 6 — REST API": learning/phase-06-rest-api.md
     - "Phase 7 — Version Control": learning/phase-07-version-control.md
     - "Phase 8 — AI Integration": learning/phase-08-ai-integration.md
+  - Architecture:
+    - "Overview": architecture-overview.md
+    - "Detailed Reference": architecture-detailed.md
   - Foundations:
     - "Asyncio Primer": foundations/asyncio-primer.md
     - "Design Patterns": foundations/design-patterns.md
