@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
+import shutil
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -81,13 +82,18 @@ def write_node_file(path: str, frontmatter_dict: dict, content: str) -> None:
        failure:
          a. Open `fd` with `os.fdopen(fd, "w", encoding="utf-8")` and write
             `frontmatter.dumps(post)` to it.
-         b. Call `os.replace(tmp_path, path)` to atomically swap the file.
-         c. On any `BaseException`, suppress OSError and call `os.unlink(tmp_path)`,
+         b. IMPORTANT: Call `os.fsync(fd)` before closing the file to ensure
+            data is flushed to disk.
+         c. If the original file exists, use `shutil.copymode(path, tmp_path)`
+            to preserve permissions.
+         d. Call `os.replace(tmp_path, path)` to atomically swap the file.
+         e. On any `BaseException`, suppress OSError and call `os.unlink(tmp_path)`,
             then re-raise.
     """
     raise NotImplementedError(
         "Build a frontmatter.Post, write it to a tempfile.mkstemp in the same directory, "
-        "then call os.replace(tmp, path) to atomically swap it into place"
+        "use os.fsync(fd) and shutil.copymode(path, tmp) to ensure durability and "
+        "retain permissions, then call os.replace(tmp, path) to atomically swap it into place"
     )
 
 

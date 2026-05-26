@@ -50,7 +50,7 @@ class VaultWatcher:
         self.eventbus = eventbus
         self.debounce_ms = debounce_ms
         self._observer = None                         # watchdog Observer, set in start()
-        self._timers: dict[str, threading.Timer] = {} # per-path debounce timers
+        self._pending: dict[str, float] = {}          # per-path scheduled fire times (time.time() + offset)
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -90,19 +90,18 @@ class VaultWatcher:
         )
 
     def stop(self) -> None:
-        """WHAT: Stop the watchdog observer and cancel all pending timers.
+        """WHAT: Stop the watchdog observer and cancel all pending events.
 
         WHY: Clean shutdown prevents daemon threads from lingering and
         avoids spurious events firing after the application exits.
 
         HOW:
-        1. Acquire ``self._lock``, cancel every timer in ``self._timers``,
-           and clear the dict.
+        1. Acquire ``self._lock``, clear the ``self._pending`` dict.
         2. If ``self._observer`` is not None:
            call ``self._observer.stop()`` then ``self._observer.join()``.
         """
         raise NotImplementedError(
-            "Cancel all debounce timers (under lock), then stop() and join() the observer"
+            "Clear all pending events (under lock), then stop() and join() the observer"
         )
 
     # ------------------------------------------------------------------
@@ -140,37 +139,37 @@ class VaultWatcher:
         """WHAT: Schedule a debounced ``file_changed`` event for *path*.
 
         WHY: A single editor save can produce 5–10 OS-level events within
-        50 ms (modified, closed, renamed, etc.).  Debouncing coalesces
-        them into one event fired after the burst settles, preventing the
-        indexer from running multiple times for the same logical change.
+        50 ms. Using ``threading.Timer`` for every path is inefficient and
+        can cause thread exhaustion during bulk operations (e.g., git checkout).
+        A better approach uses a single background worker thread.
 
         HOW:
         1. Acquire ``self._lock``.
-        2. If *path* is already in ``self._timers``, cancel the existing
-           timer (this resets the countdown on each new OS event).
-        3. Create a new ``threading.Timer(self.debounce_ms / 1000, self._fire, args=[path])``.
-        4. Set ``timer.daemon = True`` and ``timer.start()``.
-        5. Store the new timer: ``self._timers[path] = timer``.
-        6. Release the lock.
+        2. Record the "next fire time" for this path:
+           ``self._pending[path] = time.time() + (self.debounce_ms / 1000)``.
+        3. If your implementation uses a background worker thread, ensure it
+           is notified or waking up to check for expired timers.
+        4. Release the lock.
 
         Args:
             path: Absolute string path that changed.
         """
         raise NotImplementedError(
-            "Under self._lock: cancel any existing timer for path, "
-            "create threading.Timer(debounce_ms/1000, self._fire, args=[path]), "
-            "set daemon=True, start it, and store in self._timers[path]"
+            "Under self._lock: record path and its scheduled fire time (now + debounce) "
+            "in a pending dict. Use a single background worker thread to poll and "
+            "fire events instead of creating a threading.Timer per path, "
+            "which prevents thread exhaustion."
         )
 
     def _fire(self, path: str) -> None:
-        """WHAT: Called by the debounce timer when the burst has settled.
+        """WHAT: Called when the burst has settled for a path.
 
         WHY: This is the actual event publication step — it runs after
         ``debounce_ms`` milliseconds of silence for *path*, meaning the
         editor has finished writing and the file is stable.
 
         HOW:
-        1. Acquire ``self._lock``, remove *path* from ``self._timers``,
+        1. Acquire ``self._lock``, remove *path* from ``self._pending``,
            release the lock.
         2. Call ``self.eventbus.publish("file_changed", path=Path(path))``.
 
@@ -178,7 +177,7 @@ class VaultWatcher:
             path: Absolute string path whose debounce timer just expired.
         """
         raise NotImplementedError(
-            "Remove path from self._timers (under lock), "
+            "Remove path from self._pending (under lock), "
             "then publish file_changed: self.eventbus.publish('file_changed', path=Path(path))"
         )
 
@@ -191,7 +190,7 @@ class VaultWatcher:
 
         HOW:
         1. If ``self._should_ignore(path)`` returns True, return early.
-        2. Cancel and remove any pending debounce timer for *path*
+        2. Remove any pending debounce record for *path*
            (a deletion supersedes a pending change event).
         3. Call ``self.eventbus.publish("file_deleted", path=Path(path))``.
 
@@ -199,6 +198,6 @@ class VaultWatcher:
             path: Absolute string path that was deleted.
         """
         raise NotImplementedError(
-            "Skip ignored paths, cancel any pending timer for path, "
+            "Skip ignored paths, remove any pending entry for path (under lock), "
             "then publish file_deleted: self.eventbus.publish('file_deleted', path=Path(path))"
         )

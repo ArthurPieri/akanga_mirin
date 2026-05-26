@@ -232,10 +232,12 @@ class GraphDatabase:
         0. If `query.strip()` is empty, return [] immediately — FTS5 raises
            OperationalError on an empty MATCH string.
         1. Split `query` on whitespace into individual terms.
-        2. Double-quote each term to prevent FTS5 operator injection (SEC-06):
+        2. Double-quote each term to prevent FTS5 operator injection (SEC-06).
+           FTS5 operators like `NEAR` or `NOT` can be injected if user input
+           is not escaped. Wrapping each term in double quotes ensures they
+           are treated as literal text:
              safe_term = '"' + term.replace('"', '') + '"'
-           This turns `cognitive load` into `"cognitive" "load"` — a phrase
-           search for both words independently (not as a phrase).
+           This turns `cognitive load` into `"cognitive" "load"`.
         3. Join the quoted terms with spaces to form the FTS5 query string.
         4. Inside `with self._lock:`, execute:
              SELECT nodes.* FROM nodes
@@ -253,8 +255,9 @@ class GraphDatabase:
         always use parameterised queries (`?` placeholders).
         """
         raise NotImplementedError(
-            "Split query into terms; double-quote each term to prevent FTS5 operator injection; "
-            "JOIN nodes ON nodes_fts MATCH ?; ORDER BY nodes_fts.rank LIMIT ?"
+            "Split query into terms; explicitly wrap each term in double-quotes to prevent "
+            "FTS5 operator injection; JOIN nodes ON nodes_fts MATCH ?; "
+            "ORDER BY nodes_fts.rank LIMIT ?"
         )
 
     # ------------------------------------------------------------------

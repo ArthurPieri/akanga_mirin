@@ -45,6 +45,10 @@ class EventBus:
 
             self._loop = loop
 
+        CRITICAL: This MUST be called before starting the filesystem watcher.
+        If the watcher fires events before the loop is registered, async
+        subscribers will be skipped, causing a startup race condition.
+
         The stored reference is later read inside publish() to decide
         whether to use ``asyncio.run_coroutine_threadsafe`` or a direct call.
 

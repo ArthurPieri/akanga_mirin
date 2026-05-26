@@ -129,6 +129,49 @@ class TestBuildEgoGraphStructure:
         assert db.id_a in ego.nodes
         assert db.id_b in ego.nodes
 
+    def test_circular_graph_resolution(self, tmp_path: Path) -> None:
+        """BFS traversal must handle cycles (A→B, B→A) without infinite loops or duplicate edges."""
+        GraphDatabase = _load_db()
+        db_path = tmp_path / "circular.db"
+        db = GraphDatabase(str(db_path))
+
+        id_a = str(uuid.UUID("aaaaaaaa-4444-4444-4444-000000000001"))
+        id_b = str(uuid.UUID("bbbbbbbb-4444-4444-4444-000000000002"))
+
+        for nid, title, fname in [
+            (id_a, "A", "a.md"),
+            (id_b, "B", "b.md"),
+        ]:
+            db.upsert_node(
+                {
+                    "id": nid,
+                    "title": title,
+                    "type": "note",
+                    "tags": [],
+                    "path": str(tmp_path / fname),
+                    "content": "",
+                    "content_hash": f"h{nid[:4]}",
+                }
+            )
+
+        db.upsert_edge(id_a, id_b, relation="links")
+        db.upsert_edge(id_b, id_a, relation="links")
+
+        try:
+            ego = build_ego_graph(id_a, db, max_depth=5)
+            assert id_a in ego.nodes
+            assert id_b in ego.nodes
+            assert len(ego.nodes) == 2
+
+            # Verify no duplicate edges in the EgoGraph
+            edge_signatures = set()
+            for e in ego.edges:
+                sig = (e.source_id, e.target_id, e.relation, e.direction)
+                assert sig not in edge_signatures, f"Duplicate edge found: {sig}"
+                edge_signatures.add(sig)
+        finally:
+            db.close()
+
     def test_build_ego_graph_both_directions(self, tmp_path: Path) -> None:
         """A→B (outgoing) and C→A (incoming): depth=1 from A includes both B and C."""
         GraphDatabase = _load_db()

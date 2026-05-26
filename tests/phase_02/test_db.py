@@ -1,5 +1,7 @@
 """Phase 02 tests — GraphDatabase: upsert, delete, list, FTS5, edges, WAL."""
 import sqlite3
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -250,3 +252,26 @@ def test_delete_nonexistent_node(tmp_db: str):
     db = GraphDatabase(tmp_db)
     # Must complete without raising.
     db.delete_node("nonexistent-id-that-does-not-exist")
+
+
+def test_read_only_database(tmp_db: str, tmp_vault: Path):
+    """Operations on a read-only database file should degrade gracefully."""
+    db = GraphDatabase(tmp_db)
+    # Ensure DB is initialized
+    node = _make_node("00000000-0000-0000-0000-000000000000", "Initial", tmp_vault)
+    db.upsert_node(node)
+
+    # Make DB file read-only
+    mode = os.stat(tmp_db).st_mode
+    os.chmod(tmp_db, stat.S_IREAD)
+    try:
+        # get_node should still work (read)
+        fetched = db.get_node(node.id)
+        assert fetched is not None
+
+        # upsert_node should fail when writing to a read-only file
+        with pytest.raises(sqlite3.Error):
+            db.upsert_node(node)
+    finally:
+        # Restore permissions for cleanup
+        os.chmod(tmp_db, mode)

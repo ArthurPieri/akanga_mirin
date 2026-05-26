@@ -8,14 +8,24 @@ An interrupted write to a temp file leaves the original intact.
 import os
 import tempfile
 import pathlib
+import shutil
 
 
 def write_atomically(path: str, content: str) -> None:
-    dir_path = str(pathlib.Path(path).parent)
-    fd, tmp = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
+    target_path = pathlib.Path(path)
+    dir_path = target_path.parent
+    fd, tmp = tempfile.mkstemp(dir=str(dir_path), suffix=".tmp")
     try:
+        # If the target file exists, preserve its permissions
+        if target_path.exists():
+            shutil.copymode(str(target_path), tmp)
+
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
+            # Ensure data is physically written to disk before closing
+            f.flush()
+            os.fsync(f.fileno())
+        
         os.replace(tmp, path)   # atomic: old or new, never partial
     except BaseException:
         try:

@@ -442,3 +442,24 @@ def test_write_node_file_to_nonexistent_dir_creates_it(tmp_path, parse_fn, write
     assert target_path.exists(), (
         f"Expected file {target_path} to exist after write, but it was not created."
     )
+
+
+def test_malformed_frontmatter(tmp_path, parse_fn):
+    """Parsing a file with malformed frontmatter must be handled (e.g., ScannerError)."""
+    # Malformed YAML: missing closing quote on a multi-line string or invalid indentation
+    content = dedent("""\
+        ---
+        title: "Malformed Title
+        type: note
+        ---
+
+        Body.
+        """)
+    node_file = tmp_path / "malformed.md"
+    node_file.write_text(content, encoding="utf-8")
+
+    # We expect the parser to raise an exception when encountering malformed YAML.
+    # frontmatter.ScannerError is the specific one, but we accept generic Exception
+    # as long as it doesn't crash silently.
+    with pytest.raises(Exception):
+        parse_fn(str(node_file))
