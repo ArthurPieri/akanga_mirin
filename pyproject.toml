@@ -34,3 +34,8 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.uv.workspace]
+members = [
+    "my_implementations",
+]
