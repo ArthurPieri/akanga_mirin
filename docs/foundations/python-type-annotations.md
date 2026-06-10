@@ -254,15 +254,15 @@ If you want runtime type enforcement, you need a separate library like Pydantic 
 
 ---
 
-## In this codebase
+## In your implementation
 
-Places where annotations are doing the most work in akanga:
+Places where annotations will do the most work in the system you build:
 
-| File | What to look for |
+| File (phase where you build it) | What to look for |
 |---|---|
-| `src/akanga_core/models.py` | Every field of `Node`, `Edge`, `ActiveConfig`, `VirtualConfig` is annotated — this is the canonical reference for the data model |
-| `src/akanga_core/eventbus.py` | The `Subscriber` type alias; `dict[str, list[Subscriber]]` showing nested generics |
-| `src/akanga_core/watcher.py` | `Callable[[str], None]` for callback parameters; `dict[str, threading.Timer]` in the handler |
-| `src/akanga_core/parser.py` | Return type annotations on `parse_node_file` (`-> Node`) and `content_hash` (`-> str`) |
+| `models.py` (Phase 1A) | Every field of `Node`, `Edge`, `ActiveConfig`, `VirtualConfig` is annotated — this is the canonical reference for the data model |
+| `eventbus.py` (Phase 4) | The `Subscriber` type alias; `dict[str, list[Subscriber]]` showing nested generics |
+| `watcher.py` (Phase 4) | `Callable[[str], None]` for callback parameters; `dict[str, threading.Timer]` in the handler |
+| `parser.py` (Phase 0) | Return type annotations on `parse_node_file` (`-> Node`) and `content_hash` (`-> str`) |
 
-The `from __future__ import annotations` import appears at line 1 of every source file in `src/akanga_core/`. That is not coincidence — it is a project-wide convention that eliminates forward-reference errors and should be the first thing you add when creating a new module.
+Make `from __future__ import annotations` line 1 of every module you write. It is a project-wide convention in the skeletons — it eliminates forward-reference errors and should be the first thing you add when creating a new module.

@@ -1,6 +1,23 @@
 site_name: "Akanga Mirin — Learning Path"
 site_description: "Build a personal knowledge graph in 10 phases"
 
+# Contributor-facing planning docs are kept in docs/ for the repo but excluded
+# from the published site (mkdocs >= 1.5 gitignore-style globs).
+# deployment.md stays public deliberately.
+exclude_docs: |
+  README.md
+  adversarial-analysis.md
+  adversarial-analysis-v2.md
+  analysis-and-enhancements.md
+  implementation-plan.md
+  plan-*.md
+  user-stories.md
+  future-ideas.md
+  observability-module.md
+  roadmap.md
+  status-remediation.md
+  archive/
+
 theme:
   name: material
   palette:
@@ -15,6 +32,7 @@ theme:
 
 nav:
   - Home: index.md
+  - "Facilitator Guide": facilitator-guide.md
   - Learning Path:
     - "Phase 0 — File System as Database": learning/phase-00-file-system-as-database.md
     - "Phase 1A — Edge Schema": learning/phase-01a-data-modeling-edge-schema.md

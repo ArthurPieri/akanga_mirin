@@ -488,9 +488,9 @@ class GraphDatabase:
 
 ---
 
-## In This Codebase
+## In Your Implementation (Phase 2)
 
-- **`src/akanga_core/db.py`** — `GraphDatabase` implements all of the above. WAL mode and
+- **`db.py`** (which you build in Phase 2) — `GraphDatabase` implements all of the above. WAL mode and
   `threading.Lock` are set up in `__init__`. All public methods acquire `self._lock` before
   touching the connection. `row_factory = sqlite3.Row` is set so callers get name-addressable
   rows. FTS5 sync happens inside `upsert_node` and `delete_node`.
@@ -501,7 +501,7 @@ class GraphDatabase:
   are never blocked by writers at the SQLite level.
 
 - **Parameterized queries everywhere.** Search queries, node titles, and file paths all come from
-  user-controlled data. The codebase never interpolates values into SQL strings.
+  user-controlled data. Never interpolate values into SQL strings anywhere in your implementation.
 
 ---
 

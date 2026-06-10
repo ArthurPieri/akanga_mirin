@@ -309,9 +309,9 @@ Claude sees this as a tool that requires `title` (string) and optionally accepts
 
 ---
 
-## In this codebase
+## In your implementation (Phase 8)
 
-- **Phase 8** of the learning path builds an MCP server in `src/akanga_mcp/`.
+- **Phase 8** of the learning path is where you build the MCP server (`akanga_mcp` in your implementation).
 - The server uses FastMCP. You'll implement tools for `get_node`, `search_nodes`,
   `create_node`, `get_neighbors`, and `get_backlinks`.
 - The protocol under the hood is JSON-RPC 2.0 over stdio.

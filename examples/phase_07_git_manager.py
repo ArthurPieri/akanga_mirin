@@ -7,7 +7,6 @@ A user without git gets a warning, not an exception.
 """
 import logging
 import tempfile
-import os
 import shutil
 import sys
 from pathlib import Path

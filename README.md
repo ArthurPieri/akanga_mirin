@@ -39,7 +39,7 @@ Per-phase estimates above are realistic learner time, not author time. Phase 5
 
 **Individual learners.** Python developers (2+ years) who can build a CRUD app but want practical experience with the systems-level concepts that separate junior from senior work — WAL-mode SQLite, asyncio event bridges, BFS traversal, git internals, the Model Context Protocol.
 
-**Workshop facilitators.** Tech leads, bootcamp instructors, senior devs running a 2–4 day curriculum. The repo ships per-phase learning objectives, checkpoint exercises, and a test suite that evaluates participant code objectively. (A dedicated facilitator guide is planned but not yet written.)
+**Workshop facilitators.** Tech leads, bootcamp instructors, senior devs running a 2–4 day curriculum. The repo ships per-phase learning objectives, checkpoint exercises, and a test suite that evaluates participant code objectively. See [docs/facilitator-guide.md](docs/facilitator-guide.md).
 
 **Engineering teams.** Teams who want to upskill together and end up with a real artifact — a shared knowledge graph of their own architecture, documentation, or projects — rather than slides and notes.
 

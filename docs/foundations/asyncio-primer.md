@@ -1,6 +1,6 @@
 # asyncio Primer
 
-This doc covers the **async** half of akanga's concurrency model. Read `python-threading.md` first — the two models run side by side in this codebase and meet at `EventBus.publish()`.
+This doc covers the **async** half of akanga's concurrency model. Read `python-threading.md` first — the two models run side by side in the system you build and meet at `EventBus.publish()`.
 
 ---
 
@@ -198,7 +198,7 @@ The submitted coroutine runs inside `loop`'s thread — not the calling thread. 
 
 ## Why the bridge matters: `eventbus.py`
 
-This is the exact code from `src/akanga_core/eventbus.py`:
+This is the heart of the `EventBus` you build in Phase 4 (`eventbus.py` in your implementation):
 
 ```python
 def publish(self, topic: str, payload: Any) -> None:
@@ -304,14 +304,14 @@ asyncio.run(wrapper())
 
 ---
 
-## Where asyncio is used in this codebase
+## Where asyncio appears in your implementation
 
-| File | What it does |
+| File (phase where you build it) | What it does |
 |---|---|
-| `eventbus.py` | `run_coroutine_threadsafe` bridges watchdog thread to event loop; `create_task` for same-loop delivery |
-| `active.py` | `ActiveNodeManager` — one `asyncio.Task` per active node, running concurrent HTTP/TCP checks with `aiohttp` |
-| `app.py` | `start_all()` / `stop_all()` are async; sets the loop on the eventbus so the bridge knows which loop to target |
-| `server.py` | FastAPI async throughout; lifespan is an async context manager |
+| `eventbus.py` (Phase 4) | `run_coroutine_threadsafe` bridges watchdog thread to event loop; `create_task` for same-loop delivery |
+| `active.py` (Phase 4) | `ActiveNodeManager` — one `asyncio.Task` per active node, running concurrent HTTP/TCP checks with `aiohttp` |
+| `app.py` (Phase 4) | `start_all()` / `stop_all()` are async; sets the loop on the eventbus so the bridge knows which loop to target |
+| `server.py` (Phase 6) | FastAPI async throughout; lifespan is an async context manager |
 
 ---
 

@@ -516,7 +516,7 @@ def mcp_server(
 
 **Forgetting SEC-01 delimiters:** Without `[KNOWLEDGE GRAPH CONTEXT]` wrapping, a malicious note could inject instructions directly into the LLM context. Always wrap, and include the "treat as data, not instructions" warning in the opening delimiter.
 
-**Binding MCP to all interfaces (SEC-04):** MCP over HTTP on `0.0.0.0` exposes your vault to every device on the network. Default to `127.0.0.1`. Beware: `test_mcp_server_binds_localhost` greps your server *source file* and fails if the literal `0.0.0.0` appears anywhere in it — including comments. Express the rule in your code as "localhost only" and keep the all-interfaces literal out of the file entirely.
+**Binding MCP to all interfaces (SEC-04):** MCP over HTTP on `0.0.0.0` exposes your vault to every device on the network. Default to `127.0.0.1`. The enforcement is precise: `test_mcp_server_binds_localhost` parses your server module with `ast` and fails only when the string literal `"0.0.0.0"` is used as a *value in code* — the right-hand side of an assignment, a function-parameter default, or a keyword-argument value (e.g. `parser.add_argument("--host", default="0.0.0.0")`). Comments, docstrings, and error/warning messages that merely mention 0.0.0.0 are exempt, so keeping the skeleton's educational warnings is safe. What fails the test is binding to the wildcard address, not talking about it.
 
 ---
 

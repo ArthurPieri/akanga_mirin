@@ -226,10 +226,10 @@ Key design decisions visible here:
 
 ---
 
-## In this codebase
+## In your implementation (Phase 7)
 
-- `src/akanga_core/gitmgr.py` — the GitPython wrapper described above.
-- **Phase 7** of the learning path teaches git internals by reading and extending
+- `gitmgr.py` — the GitPython wrapper described above; you build it in Phase 7.
+- **Phase 7** of the learning path teaches git internals as you implement and extend
   `gitmgr.py`. You'll add a `push` method, inspect commit history via the API,
   and wire debounce timing to a config value.
 - The `POST /api/v1/git/push` endpoint in `server.py` calls `gitmgr.push()`.

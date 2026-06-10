@@ -27,9 +27,15 @@ def _quote_fts_query(query: str) -> str:
     SEC-06: FTS5 interprets bare ``*``, ``OR``, ``NEAR``, ``:`` etc. as syntax.
     Wrapping each whitespace-separated term in double quotes (after stripping
     any embedded double quotes) makes every term a literal string token.
+    Terms with no alphanumeric characters (e.g. a lone ``*``) would tokenize
+    to an empty phrase, so they are dropped rather than quoted.
     """
-    terms = query.split()
-    return " ".join('"{}"'.format(term.replace('"', "")) for term in terms)
+    terms = [
+        term.replace('"', "")
+        for term in query.split()
+        if any(ch.isalnum() for ch in term)
+    ]
+    return " ".join(f'"{term}"' for term in terms)
 
 
 def _row_to_node(row: sqlite3.Row) -> Node:

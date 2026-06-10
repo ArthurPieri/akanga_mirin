@@ -41,10 +41,24 @@ _app_state: dict[str, Any] = {}
 
 
 def get_db():
-    """Return the shared GraphDatabase instance. Raise if not initialized."""
-    if "db" not in _app_state:
-        raise RuntimeError("App not initialized. Call init_app() first.")
-    return _app_state["db"]
+    """WHAT: Return the shared GraphDatabase instance, raising if the app
+    has not been initialized yet.
+
+    WHY: Every route handler needs the DB, but FastAPI route functions are
+    plain functions — they cannot see create_app()'s locals. The lifespan
+    stores the open GraphDatabase in `_app_state`; this accessor is the one
+    sanctioned way for handlers to reach it. Failing LOUDLY when the app was
+    never initialized beats a confusing KeyError deep inside a handler.
+
+    HOW:
+    1. If "db" is not a key in `_app_state`, raise
+       `RuntimeError("App not initialized. Call create_app() first.")`.
+    2. Otherwise return `_app_state["db"]`.
+    """
+    raise NotImplementedError(
+        "If 'db' not in _app_state: raise RuntimeError('App not initialized...'). "
+        "Otherwise return _app_state['db']."
+    )
 
 
 # ── App factory ────────────────────────────────────────────────────────────────

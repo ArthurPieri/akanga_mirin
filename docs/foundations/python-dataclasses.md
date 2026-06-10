@@ -198,7 +198,7 @@ One caveat: `asdict` does a deep copy. For large objects or performance-sensitiv
 
 ## Akanga's Node dataclass
 
-`src/akanga_core/models.py` defines the central data structures. The `Node` class represents a single Markdown file in the vault:
+`models.py` — which you build in Phase 1A — defines the central data structures. The `Node` class represents a single Markdown file in the vault:
 
 ```python
 from __future__ import annotations
@@ -275,15 +275,14 @@ class VirtualConfig:
 
 ---
 
-## In this codebase
+## In your implementation
 
-| Class | File | What to notice |
+| Class | File (phase where you build it) | What to notice |
 |---|---|---|
-| `Node` | `src/akanga_core/models.py` | Core vault node; all nine fields annotated; `Node.new()` static factory |
-| `Edge` | `src/akanga_core/models.py` | Minimal graph edge; `relation: str \| None` optional field |
-| `ActiveConfig` | `src/akanga_core/models.py` | `field(default_factory=dict)` for the `params` dict |
-| `VirtualConfig` | `src/akanga_core/models.py` | Mix of required and defaulted string fields |
-| `DemoNode`, `DemoEdge` | `demo_tui.py` | Simplified versions of `Node`/`Edge` for UI demo purposes |
+| `Node` | `models.py` (Phase 1A) | Core vault node; all nine fields annotated; `Node.new()` static factory |
+| `Edge` | `models.py` (Phase 1A) | Minimal graph edge; `relation: str \| None` optional field |
+| `ActiveConfig` | `models.py` (Phase 1A) | `field(default_factory=dict)` for the `params` dict |
+| `VirtualConfig` | `models.py` (Phase 1A) | Mix of required and defaulted string fields |
 
 None of these dataclasses use `__post_init__` — validation happens at the parser layer (`parser.py`) before a `Node` is constructed. That is a design choice: keep the dataclasses as plain data containers, and put logic in the functions that create them.
 

@@ -185,7 +185,7 @@ def write_back(path: str | Path) -> None:
 
 def create(
     title: str,
-    type: str,
+    node_type: str,
     vault: str | Path,
     url: str = "",
     external_type: str = "",

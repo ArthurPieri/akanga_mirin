@@ -39,8 +39,8 @@ ls src/          # list a specific path
 ### cd — change directory
 
 ```bash
-cd /Users/yourname/code/noteapp   # absolute path
-cd src/akanga_core                # relative path
+cd /Users/yourname/code/akanga_mirin   # absolute path
+cd src/akanga_core                     # relative path (your implementation)
 cd ..                             # go up one level
 cd ~                              # go to home directory
 cd -                              # go back to previous directory
@@ -87,9 +87,9 @@ configuration without hardcoding it.
 ### Setting and reading variables
 
 ```bash
-export AKANGA_SRC=/Users/yourname/code/noteapp/src
+export AKANGA_SRC=./src
 echo $AKANGA_SRC
-# /Users/yourname/code/noteapp/src
+# ./src
 ```
 
 The `export` command makes the variable available to child processes (subprocesses
@@ -134,9 +134,10 @@ PYTHONPATH=src   # sets it in shell only
 pytest tests/    # subprocess gets no PYTHONPATH
 ```
 
-The `AKANGA_SRC` variable is critical: test files that import `akanga_core`
-need `PYTHONPATH` pointing at the `src/` directory, or Python can't find the
-package.
+The `AKANGA_SRC` variable is how the test harness finds *your* code: running
+`AKANGA_SRC=./src make test PHASE=2` points pytest at your implementation in
+`./src`. Without it, tests fall back to the reference solutions. (The study
+session uses different variables — `AKANGA_CODE` and `AKANGA_DOCS` — see below.)
 
 ---
 
@@ -235,83 +236,97 @@ the learning path:
 └─────────────────────────────┴───────────────────┘
 ```
 
-- **Left pane (66%)** — neovim opened to the relevant source file for the phase.
-- **Top right** — `glow` rendering the phase's Markdown documentation.
-- **Bottom right** — a shell ready for you to run `claude` or any command.
+- **Left pane (66%)** — neovim opened in your code directory (`nvim .`).
+- **Top right** — `glow -p` rendering the phase's learning doc in a pager.
+- **Bottom right** — Claude Code launched in your code directory.
 
-The layout is created by `scripts/study.sh`:
+The layout is created by `scripts/study.sh`. What it actually does:
 
-```bash
-#!/usr/bin/env bash
-PHASE=${1:-1}
-SESSION="akanga-phase-${PHASE}"
-
-# Create or attach to session
-tmux new-session -d -s "$SESSION" -x 220 -y 50
-
-# Open neovim in left pane (66% width)
-tmux send-keys -t "$SESSION" "nvim $AKANGA_SRC/akanga_core/..." Enter
-
-# Split right: top pane for glow, bottom for claude
-tmux split-window -h -l 34% -t "$SESSION"
-tmux send-keys -t "$SESSION" "glow docs/learning/phase-${PHASE}.md" Enter
-
-tmux split-window -v -t "$SESSION"
-# bottom-right pane is ready for commands
-
-tmux attach-session -t "$SESSION"
-```
-
-The `AKANGA_SRC` environment variable must be set before running `make study` or
-the paths will be wrong. Add it to your shell profile (`~/.zshrc` or `~/.bashrc`):
+- **Session and window names** — the session is always `akanga-study`; each phase
+  gets a *window* named `phase-NN` (zero-padded), or `phase-01a` / `phase-01b`
+  for the split Phase 1. If you are already inside tmux, the script opens a new
+  window in your current session instead of creating `akanga-study`.
+- **Phase argument** — `study 3`, `study 08`, and `study 1b` all work. Bare
+  `study 1` defaults to Phase 1A with a note.
+- **Configuration via two environment variables** (both optional, with defaults):
 
 ```bash
-export AKANGA_SRC=/Users/yourname/code/noteapp/src
+AKANGA_CODE   # path to your code directory   (default: ~/code/akanga_mirin)
+AKANGA_DOCS   # path to the docs/ directory   (default: ~/code/akanga_mirin/docs)
 ```
+
+- **Preflight** — the script exits with install hints if `tmux`, `nvim`, or
+  `glow` is missing, and warns (but continues) if `claude` is not installed.
+- **Doc lookup** — it globs `$AKANGA_DOCS/learning/phase-NN*-*.md` to find the
+  phase doc and errors out if none exists.
+
+No environment variables are *required* — the defaults match the standard
+repository layout. (`AKANGA_SRC` plays no role in the study session; it is only
+used by `make test` to locate your implementation.)
+
+> **Kitty graphics inside tmux**
+>
+> Phase 5 explores terminals that can render pixel graphics (Ghostty, Kitty,
+> WezTerm) via the Kitty graphics protocol. tmux sits between your program and
+> the terminal and **swallows those escape sequences by default**, so images
+> render as garbage or not at all inside the study session. If you want
+> graphics inside tmux you need tmux **3.3 or newer** with passthrough enabled
+> in `~/.tmux.conf`:
+>
+> ```
+> set -g allow-passthrough on
+> ```
+>
+> Even then, support is partial (no damage tracking; images can ghost over
+> pane splits). For the Phase 5 graph-rendering work, the simplest reliable
+> setup is a plain Ghostty or Kitty window *outside* tmux — keep the tmux study
+> session for editing and tests, and run the graphics experiments in a separate
+> terminal window.
 
 ---
 
 ## Practical workflow for a study session
 
-1. Open a terminal and verify your environment:
-
-```bash
-echo $AKANGA_SRC
-# should print the path to noteapp/src
-```
-
-2. Launch the study layout:
+1. Launch the study layout:
 
 ```bash
 cd /Users/yourname/code/akanga_mirin
 make study PHASE=3
 ```
 
-3. In the left pane (neovim), read the source. In the top right, the phase doc is
-   rendered. Use the bottom right for running tests:
+2. In the left pane (neovim), write your implementation. In the top right, the
+   phase doc is rendered. Use the bottom right for Claude Code or for running
+   tests:
 
 ```bash
-PYTHONPATH=$AKANGA_SRC pytest tests/test_server.py -v
+AKANGA_SRC=./src make test PHASE=3
 ```
 
-4. When done, detach (`Ctrl+b d`) — the session keeps running. Reattach later:
+3. When done, detach (`Ctrl+b d`) — the session keeps running. Reattach later:
 
 ```bash
-tmux attach-session -t akanga-phase-3
+tmux attach-session -t akanga-study
 ```
 
-5. When truly done, kill the session:
+   Inside the session, each phase you've opened is its own window
+   (`phase-03`, `phase-01a`, ...) — switch with `Ctrl+b n` / `Ctrl+b p`.
+
+4. When truly done, kill the session:
 
 ```bash
-tmux kill-session -t akanga-phase-3
+tmux kill-session -t akanga-study
 ```
 
 ---
 
-## In this codebase
+## In this repository
 
-- `scripts/study.sh` — creates the three-pane tmux layout described above.
+- `scripts/study.sh` — creates the three-pane tmux layout described above
+  (session `akanga-study`, one window per phase).
 - `Makefile` — the `study` target calls `scripts/study.sh` with the phase number.
-- `AKANGA_SRC` — must point to `noteapp/src/` for imports to resolve in tests.
+- `AKANGA_CODE` / `AKANGA_DOCS` — optional overrides for where study.sh finds
+  your code and the docs; the defaults match the standard layout.
+- `AKANGA_SRC` — used by `make test` only: point it at your implementation
+  (`AKANGA_SRC=./src`) so pytest tests your code instead of the reference solutions.
 - All `make` commands use `uv run python` to ensure the virtualenv is picked up;
   see `Makefile` for the full list of targets.

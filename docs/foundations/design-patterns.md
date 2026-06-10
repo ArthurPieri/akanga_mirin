@@ -68,8 +68,8 @@ def _debounced(self, key: str, fn: Callable, path: str) -> None:
 ```python
 # Callers use domain language
 db.upsert_node(node)
-db.get_neighbors(node_id, direction="both")
-db.full_text_search("asyncio primer", limit=10)
+db.get_neighbors(node_id)
+db.search_fts("asyncio primer", limit=10)
 
 # Not raw SQL scattered across the codebase
 # cursor.execute("SELECT * FROM nodes WHERE ...")
@@ -131,7 +131,7 @@ async def start_all(self) -> None:
 
 **What it is:** Instead of a component creating its own dependencies, the dependencies are passed in by the caller.
 
-**Where:** Every manager in the codebase — `ActiveNodeManager(db, eventbus=...)`, `VaultWatcher(vault_path, on_change, on_delete)`, `AkangaApp(vault, db_path, git_sync)`
+**Where:** Every manager in the codebase — `ActiveNodeManager(db, eventbus=...)`, `VaultWatcher(vault, eventbus, debounce_ms)`, `AkangaApp(vault, db_path, git_sync)`
 
 **Why Akanga uses it:** Unit tests need to substitute a real SQLite database with an in-memory one, or a real EventBus with a mock. If `ActiveNodeManager` created its own `GraphDatabase`, tests could not inject a temporary test database. Passing dependencies in makes components testable in isolation.
 
@@ -168,6 +168,68 @@ app = AkangaApp(vault="./vault", db_path="./.akanga.db")
 
 ---
 
+## 9. Labeled Property Graph
+
+**What it is:** A graph data model with three ingredients: **nodes** that carry properties (key-value pairs), **edges** that carry a type label (the relation), and optionally properties on the edges themselves. This is the model behind Neo4j and most modern graph databases — as opposed to a plain hyperlink graph, where edges are anonymous, or RDF triples, where everything is a flat statement.
+
+**Where:** The entire data model — `Node`, `Edge`, the frontmatter schema, and the 71-type relation vocabulary. Phase 1A is where you build it.
+
+**Why Akanga uses it:** "A links to B" tells you almost nothing. "A *contradicts* B" or "A *depends_on* B" is a queryable fact. The label is what turns a pile of cross-referenced notes into a knowledge graph: you can filter traversals by relation type, ask directed questions ("what does this node refute?"), and compute meaningful neighborhoods.
+
+How Akanga's files map onto the model:
+
+```yaml
+# frontmatter of vault/bfs.md
+title: BFS
+type: note              # node property
+tags: [algorithms]      # node property
+edges:
+  - relation: contrasts_with    # edge label, from the 71-type vocabulary
+    target: "[[DFS]]"
+  - relation: is_applied_in     # second typed edge from the same node
+    target: "[[Ego-Graph Endpoint]]"
+```
+
+- Every Markdown file is a **node**; its frontmatter keys (`title`, `type`, `tags`, `graph`) are the node's properties.
+- Every frontmatter edge entry (and every inline `[[wikilink]]` shorthand) becomes an **edge**; its `relation` field is the label, drawn from the 71-type vocabulary in `relation-vocabulary.md`.
+- The SQLite `edges` table stores `(source_id, target_id, relation)` — the relational projection of the same model. The files are the source of truth; the table is the derived index.
+
+**The design consequence:** because the label lives on the edge, not the node, adding a new way for two notes to relate never requires touching either note's schema — you add one edge entry. That is the property-graph advantage over baking relationships into node fields.
+
+---
+
+## 10. Graph Traversal (BFS for Ego-Graphs)
+
+**What it is:** Visiting the nodes of a graph outward from a starting node. Breadth-First Search (BFS) uses a queue and explores in expanding rings — every node at distance 1, then distance 2, and so on. Depth-First Search (DFS) follows one path as deep as it can before backtracking.
+
+**Where:** `graph.py` — the ego-graph query you build in Phase 3 (`get_ego_graph(node_id, depth)`), which powers the TUI graph view and the `/ego-graph` endpoint.
+
+**Why Akanga uses BFS:** an ego-graph is "everything within N hops of this node" — exactly the shape BFS produces, already grouped by distance. Two details are non-negotiable:
+
+```python
+from collections import deque
+
+def ego_graph(db, root_id: str, max_depth: int = 2) -> set[str]:
+    visited = {root_id}                  # 1. visited-set: break cycles
+    queue = deque([(root_id, 0)])
+    while queue:
+        node_id, depth = queue.popleft()
+        if depth >= max_depth:           # 2. depth limit: bound the result
+            continue
+        for neighbor in db.get_neighbors(node_id):
+            if neighbor.id not in visited:
+                visited.add(neighbor.id)
+                queue.append((neighbor.id, depth + 1))
+    return visited
+```
+
+1. **The visited-set breaks cycles.** Knowledge graphs are full of them (`A supports B`, `B refines A`). Without `visited`, the traversal loops forever.
+2. **The depth limit bounds the result.** A well-connected vault is a small world — at depth 4 the "ego-graph" is usually the whole graph. The limit is what keeps the view local.
+
+**Why not recursive DFS:** the natural recursive implementation puts one stack frame per traversal step on the Python call stack, which is capped (default `sys.getrecursionlimit()` is 1000). A long chain of notes — or a cycle you failed to detect — raises `RecursionError` in production. Iterative BFS with an explicit `deque` uses heap memory instead of stack frames, never hits the recursion limit, and gives you the by-distance ordering for free.
+
+---
+
 ## Summary Table
 
 | Pattern | Where in codebase | Problem it solves |
@@ -180,6 +242,8 @@ app = AkangaApp(vault="./vault", db_path="./.akanga.db")
 | Dependency Injection | All managers | Enable isolated unit tests |
 | Strategy | `active.py` | Swap health-check implementations without changing the manager |
 | Two-Phase Commit | `indexer.py` | Ensure referenced nodes exist before creating edges |
+| Labeled Property Graph | `models.py`, frontmatter schema | Typed, queryable edges instead of anonymous links |
+| Graph Traversal (BFS) | `graph.py` | Bounded ego-graphs with cycle-safe iteration |
 
 ---
 

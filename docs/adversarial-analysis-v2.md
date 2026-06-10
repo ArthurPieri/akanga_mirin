@@ -252,21 +252,21 @@ Raw agent reports preserved in the session transcript. Verification corrections 
 
 ## Resolution Log
 
-*Status as of 2026-06-10. Tier 0 fixes landed first; the remainder are being executed by the remediation batch (agents R1–R8).*
+*Status as of 2026-06-10 (batch 2 complete). Tier 0 → commit `afcaa4b`; batch 1 → `b9db63b`; batch 2 → this commit. Verification gate: phase-8 solution 23/23 green, skeleton_check 9/9, ruff clean, mkdocs builds, doc-contract lint OK.*
 
 | # | Finding | Status | Resolution |
 |---|---------|--------|------------|
 | 1 | `make skeleton` destroys learner work | **Resolved** 2026-06-10 (Tier 0) | Skeleton copy now skip-existing with a "preserved N files" message; `sync_forward.py` refuses marker files and exits non-zero on drift |
-| 2 | Doc↔skeleton↔test divergence | In progress | Remediation batch (R1–R8): skeleton+tests declared normative; doc signature sweep underway |
-| 3 | Flagship deliverables untested | In progress | Remediation batch (R1–R8): porting doc-sketched tests (`create()`, db-expendable, async bridge, drain) |
-| 4 | Vacuous/self-defeating test assertions | In progress | Remediation batch (R1–R8): semantic assertions, AST-based SEC-04, symlink fixture |
-| 5 | BUG-04 codified; bridge taught 3 ways | In progress | Remediation batch (R1–R8): loud `publish()`-before-`set_loop`, canonical startup sequence reconciled |
-| 6 | Relation-ID contract broken | In progress | Remediation batch (R1–R8): vocabulary declared single registry; ID-literal audit; Phase-2 edge API addition |
-| 7 | Solutions strategy 3-way contradiction | **Resolved** 2026-06-10 | Round-1 branch decision formally reversed — solutions live in `solutions/phase_NN/` on `main`; tooling/CI read the working tree; `solutions/phase_08` being brought up to its test suite (R7) |
+| 2 | Doc↔skeleton↔test divergence | **Resolved** 2026-06-10 | Skeleton+tests normative (D2/D3); doc sweep done (R3–R5); monotonic Node landed (R2); `scripts/check_doc_contracts.py` CI lint guards against regrowth (R14) — caught+fixed 2 drifts on first run |
+| 3 | Flagship deliverables untested | **Resolved** 2026-06-10 | R1: 3 `create()` tests, `test_db_is_expendable`, `test_two_pass_edge_resolution`, `test_sync_worker.py`, set_loop/buffering tests, phase-01 error paths (110+ tests collect) |
+| 4 | Vacuous/self-defeating test assertions | **Resolved** 2026-06-10 | R1: AST-based SEC-04, whole-line direction asserts + incoming-edge test, `MAX_CONTEXT_CHARS==12_000` pinned, 71-type floor, semantic SEC-06, absolute-path+symlink SEC-02, monkeypatched read-only test |
+| 5 | BUG-04 codified; bridge taught 3 ways | **Resolved** 2026-06-10 | D6: deque buffering specced in skeleton + doc (R2/R4); startup sequence includes `set_loop`; Future done-callback logging; single-worker debounce; architecture docs corrected (R6) |
+| 6 | Relation-ID contract broken | **Resolved** 2026-06-10 | D5: vocabulary = single registry; ID literals fixed in phase-08/plan docs (R5/R6); `get_edges_from/to` specced (R2/R3); `instance_of` + core-15 tier added (R6); BUG-03 guidance deleted (R2/R5) |
+| 7 | Solutions strategy 3-way contradiction | **Resolved** 2026-06-10 | Branch decision reversed (D1); `solutions/phase_08` now passes its full suite **23/23** (R7c) |
 | 8 | 1A/1B split unexecuted in tooling | **Resolved** 2026-06-10 (Tier 0) | Makefile/study.sh accept `PHASE=1a`/`1b` and glob `phase-01[ab]-*`; superseded doc archived |
 | 9 | Status-layer rot; repo contamination | **Resolved** 2026-06-10 (Tier 0, partial) | CLAUDE.md/README editorial sweep done; git contamination removed; remaining CI-teeth items tracked in the remediation batch |
-| 10 | Security curriculum S1–S4 never inserted | In progress | Remediation batch (R1–R8): executing T2–T5 of `plan-security-and-deployment.md` |
-| 11 | Phase-8 data egress unaddressed | In progress | Remediation batch (R1–R8): egress callout + `private`-tag exclusion as tested deliverable |
-| 12 | tmux/Kitty trap; phantom targets; missing deps | **Resolved** 2026-06-10 (Tier 0, partial) | `run`/`serve`/`mcp` targets added with tmux warning; remaining items (graph dep group, init-vault schema, study.sh preflight) in this batch (R8) |
-| 13 | Vault mechanic unenforced; inverted value curve | In progress | This batch (R8): `make vault-init`/`vault-check` tooling, per-phase node manifests, fast-path (0→1A→1B→2→6) published in README |
-| 14 | KG integrity loops; architecture docs teach wrong system | In progress | Remediation batch (R1–R8): soft relation validation at write-back, architecture-doc regeneration, MkDocs quarantine |
+| 10 | Security curriculum S1–S4 never inserted | **Resolved** 2026-06-10 | S1→phase-02, S2→phase-06, S3→phase-00, S4→phase-07 inserted (R3/R5); CORS objective now backed by teaching + skeleton guidance |
+| 11 | Phase-8 data egress unaddressed | **Resolved** 2026-06-10 | "What leaves your machine" callout + `private`-tag mechanism specced (R5); SECURITY.md threat model gains LLM-egress channel (R16) |
+| 12 | tmux/Kitty trap; phantom targets; missing deps | **Resolved** 2026-06-10 | Targets + tmux warnings in doc and `make run` (R4/Tier 0); `[graph]` extra; init-vault canonical schema; study.sh preflight (R8); tmux foundation doc synced (R6b) |
+| 13 | Vault mechanic unenforced; inverted value curve | **Resolved** 2026-06-10 | `vault-init`/`vault-check` + per-phase manifests + relation validation (R8); fast path in README + phase-02 closer; phase-3 capstone; phase-5 checkpoints 5.1–5.3 (R4); facilitator guide written (R13) |
+| 14 | KG integrity loops; architecture docs teach wrong system | **Resolved** 2026-06-10 (anti-entropy `sync --full` deferred to V1) | Relation-hygiene + convergence contract in 1B, dangling-edge policy in phase-04 (R16); architecture docs subordinated + corrected (R6); foundation docs re-voiced; MkDocs quarantine via `exclude_docs` (R6b) |

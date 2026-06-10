@@ -10,7 +10,6 @@ Each thread acquires the lock before any execute() call.
 import sqlite3
 import tempfile
 import threading
-import time
 import os
 from pathlib import Path
 
@@ -32,8 +31,10 @@ try:
 
     # Write from multiple threads simultaneously
     threads = [threading.Thread(target=safe_upsert, args=(f"id-{i}", f"Note {i}")) for i in range(5)]
-    for t in threads: t.start()
-    for t in threads: t.join()
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
 
     rows = conn.execute("SELECT * FROM notes ORDER BY id").fetchall()
     print(f"All {len(rows)} rows written safely under concurrent writes:")

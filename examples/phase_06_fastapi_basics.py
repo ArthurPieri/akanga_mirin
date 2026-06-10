@@ -1,10 +1,15 @@
 """Phase 6 — Minimal FastAPI knowledge graph API.
 
-Run: uvicorn examples.phase_06_fastapi_basics:app --reload
-     curl http://localhost:8000/nodes
+Run: uvicorn examples.phase_06_fastapi_basics:app --reload --host 127.0.0.1
+     curl http://127.0.0.1:8000/nodes
+
+Binding to 127.0.0.1 keeps the API loopback-only (same rule the Phase 8
+MCP server follows) — never expose a local knowledge graph on 0.0.0.0.
 
 Shows FastAPI route definition, Pydantic validation, and proper HTTP status codes.
 """
+from typing import Literal
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uuid
@@ -15,7 +20,9 @@ _store: dict[str, dict] = {}
 
 class CreateNode(BaseModel):
     title: str
-    type: str = "note"
+    # Node.type is a plain string in the contract (no NodeType enum);
+    # Literal gives validation at the API boundary without an enum class.
+    type: Literal["note", "reference"] = "note"
 
 
 @app.get("/nodes")

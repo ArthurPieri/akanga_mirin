@@ -200,7 +200,7 @@ def get_context(node_id: str) -> str:
 
 
 @mcp.tool()
-def create_node(title: str, node_type: str = "note", content: str = "") -> dict:
+def create_node(title: str, type: str = "note", content: str = "") -> dict:  # noqa: A002 — "type" is the MCP tool's JSON parameter name
     """WHAT: Create a new node in the knowledge graph.
 
     WHY: LLMs can add new knowledge during a conversation — capturing
@@ -225,13 +225,13 @@ def create_node(title: str, node_type: str = "note", content: str = "") -> dict:
            resolved = file_path.resolve()
            if not resolved.is_relative_to(vault.resolve()):
                raise ValueError(f"Path {file_path!r} escapes the vault directory")
-    5. Build frontmatter: {"title": title, "type": node_type}
+    5. Build frontmatter: {"title": title, "type": type}
     6. from akanga_core.parser import write_node_file, parse_node_file
        write_node_file(str(file_path), frontmatter, content)
     7. node = parse_node_file(str(file_path))
     8. Persist UUID: update frontmatter with id=str(node.id), write again
     9. db.upsert_node(node)
-    10. Return dict with at minimum: {"id": str(node.id), "title": title, "type": node_type}
+    10. Return dict with at minimum: {"id": str(node.id), "title": title, "type": type}
 
     SEC note: this tool writes to the vault. In a multi-user deployment you
     would add authentication. For Phase 08, localhost-only is sufficient (SEC-04).

@@ -145,6 +145,29 @@ so startup time stays bounded regardless of queue depth.
 
 > Akanga node: `Sync Queue Drain`
 
+### Dangling Edges
+
+`file_deleted` → `node_deleted` removes a node's row from the DB — but every edge in
+*other* files that points at the deleted UUID is still sitting in frontmatter Akanga
+does not control. Those edges now **dangle**: their `target_id` resolves to nothing.
+
+The policy is **mark, never auto-delete.** The indexer's `node_deleted` handler
+enqueues a `dangling_edge` job into `sync_queue` for the deleted UUID — the first
+real use of the reserved `job_type` column (introducing that column, with existing
+rows defaulting to title-sync semantics, is part of this extension). The job
+triggers no rewrite of the referencing files; it exists to make the dangle
+*visible* — a queryable record that "edges pointing at X have been unresolved since
+`created_at`." Note this is specced policy, not a Phase 4 deliverable: the drain
+worker you build below still handles exactly one job kind (title propagation), and
+nothing in `tests/phase_04/` exercises dangling-edge jobs.
+
+Downstream consumers must tolerate missing targets rather than crash. Phase 8's RAG
+serializer already does: `build_context`'s triple loop skips any edge whose endpoint
+is not in the loaded node set (`if not (src and tgt): continue`). That drop is safe
+but **silent** — the LLM never learns an edge was omitted — which is exactly why the
+`dangling_edge` job row matters: it is the visible ledger of what the serializer
+silently drops.
+
 ---
 
 ## Vault Nodes to Create
@@ -227,13 +250,19 @@ Every job in `sync_queue` has the same semantics — node-title propagation:
 
 - Fetch pending jobs with `pending_sync_jobs(db, limit)` (rows where `processed = 0`,
   oldest first); each job carries `entity_id` (the renamed node's UUID) and `new_name`
+- **Re-read current truth first (the Phase 1B convergence contract):** treat the
+  job's `new_name` as a snapshot, not the value to apply — look up the node's
+  *current* title by `entity_id` in the DB at processing time and write that. In
+  the tests the two are always equal; in a live vault, only the re-read makes
+  out-of-order and stale jobs converge
 - Find all `.md` files where `edges[].target_id == entity_id`, update `target` to
-  `new_name`, write atomically
+  the current title, write atomically
 - Mark each job done with `mark_processed(db, job["id"])` and return the count
 
 There is no `job_type` column in the Phase 2 schema — do not branch on one. The
-single-semantics design is deliberate: workspace and relation renames are future
-extensions, and the column is reserved until they exist.
+single-semantics design is deliberate: workspace renames, relation renames, and
+dangling-edge marking (see the Dangling Edges concept above) are future extensions,
+and the column is reserved until they exist.
 
 **`app.py`** — `AkangaApp` startup sequence:
 
@@ -484,5 +513,7 @@ the MCP server (Phase 8) — git specifically is Phase 7.
 ## Reflect
 
 > **Solo:** Draw a timeline diagram showing: a file save event → OS notification → watchdog callback → deadline updated → debounce worker fires → EventBus publish → indexer subscriber → `node_updated` event. Where do thread boundaries occur?
+
+> **Solo:** When a node is deleted, edges pointing at its UUID dangle. Why is "mark, never auto-delete" the right policy — what goes wrong if the indexer deletes those edges from the referencing files, and the target later comes back (a file restored from the trash, a `git checkout` of an older branch)?
 
 > **Group:** What would happen if two files changed simultaneously during the debounce window? Would both trigger separate events, or could they interfere? Walk through the single-worker design together: the `path → deadline` dict, the ~25ms polling loop, and the `threading.Event` stop signal. Then argue the other side — what would a Timer-per-path design cost during a 200-file git checkout?

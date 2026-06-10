@@ -1,5 +1,8 @@
 # Implementation Plan — Akanga Mirin
 
+> **Audience:** contributors. HISTORICAL snapshot (May 2026) — status and hour
+> totals are stale; trust `make status` and `adversarial-analysis-v2.md` instead.
+
 > **Audience:** Contributors and maintainers executing the post-analysis work.
 > **Status:** Active. Derived from 9 specialist agent outputs. All decisions are agreed
 > (see `docs/analysis-and-enhancements.md`). Tasks are organized into sprints.

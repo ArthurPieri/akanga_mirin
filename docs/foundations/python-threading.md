@@ -177,7 +177,7 @@ The lock is essential: if two filesystem events arrive on different watchdog thr
 
 ## The debounce pattern in akanga: `watcher.py`
 
-This is the real implementation from `src/akanga_core/watcher.py`:
+This is the debounce handler at the heart of the `watcher.py` you build in Phase 4:
 
 ```python
 class _EventHandler(FileSystemEventHandler):

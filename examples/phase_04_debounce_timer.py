@@ -1,15 +1,18 @@
-"""Phase 4 — Debounce pattern using threading.Timer.
+"""Phase 4 — Debounce pattern using a single worker thread.
 
 Run: python examples/phase_04_debounce_timer.py
 
 Shows how rapid events are coalesced into a single action
 after the burst settles. 8 rapid calls across 2 keys → 2 actual executions (1 per key).
 
-WHY PER-KEY TIMERS MATTER (Phase 04 Common Pitfalls):
-A single shared timer means a save to `a.md` resets the debounce
-window for `b.md` — the two files interfere with each other.
-Using a dict[path → Timer] gives each key its own independent
-timer so rapid saves to one file never delay processing of another.
+WHY ONE WORKER + A PER-KEY PENDING MAP (Phase 04 Common Pitfalls):
+Each key needs its OWN debounce window — a save to `a.md` must not
+reset the window for `b.md`. But spawning a threading.Timer per path
+is the wrong way to get that: a burst of saves churns out short-lived
+threads, and cancel/restart races are easy to get wrong.
+The adopted pattern is a dict[path → scheduled fire time] guarded by a
+lock, drained by ONE long-lived worker thread that sleeps on a
+Condition until the earliest deadline. Per-key independence, one thread.
 """
 import threading
 import time

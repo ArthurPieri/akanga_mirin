@@ -230,11 +230,12 @@ automatically parses JSON and validates it; invalid input returns a 422:
 ```python
 from pydantic import BaseModel
 
-class NodeCreate(BaseModel):
-    title: str
-    type: str = "note"
-    tags: list[str] = []
-    content: str = ""
+class NodeCreate(BaseModel):       # the Phase 6 skeleton names this CreateNodeRequest
+    title: str                     # required — omitting it returns HTTP 422
+    type: str = "note"             # optional, defaults to "note"
+    content: str = ""              # optional — the markdown body
+    tags: list[str] = []           # optional
+    path: str = ""                 # optional vault-relative path; validated (see Security considerations)
 
 @app.post("/api/v1/nodes", status_code=201)
 async def create_node(payload: NodeCreate):
@@ -315,12 +316,76 @@ The TUI listens and refreshes its view without polling.
 
 ---
 
-## In this codebase
+## Security considerations
 
-- `src/akanga_core/server.py` — the full REST API. Every endpoint described in
-  this document exists there.
-- The WebSocket endpoint at `GET /ws` is in `server.py`; the client side is in
-  `src/akanga_tui/app.py`.
-- **Phase 6** of the learning path teaches HTTP fundamentals by reading
-  `server.py` and adding a new endpoint from scratch.
-- **Phase 6** covers the WebSocket broadcast mechanism and live TUI updates.
+An HTTP API is a trust boundary: every value in a request — path parameters,
+query strings, JSON fields — is attacker-controlled until proven otherwise. Two
+controls matter for a local-first server like the one you build in Phase 6.
+
+### Path containment: `Path.resolve()` + `is_relative_to()`
+
+The create-node endpoint accepts an optional vault-relative `path` field. A
+client-supplied file path is the classic injection point: it can attempt to
+escape the vault and read or overwrite arbitrary files. The only safe pattern
+is **resolve, then check containment**:
+
+```python
+candidate = (vault_root / payload.path).resolve()
+if not candidate.is_relative_to(vault_root.resolve()):
+    raise HTTPException(status_code=400, detail="Path escapes the vault")
+```
+
+**Why a `".." in path` substring check fails.** It validates the *name*, not the
+*destination*, and misses two of the three real attack shapes:
+
+1. **Relative traversal** — `"../../etc/passwd"`. The substring check catches
+   this one, but `resolve()` handles it more robustly by collapsing the `..`
+   segments before the containment test.
+2. **Absolute paths** — `"/etc/passwd"` contains no `..` at all. Worse,
+   `pathlib` joining with an absolute right-hand side **silently discards the
+   left side**: `vault_root / "/etc/passwd"` is just `/etc/passwd`. A prefix or
+   substring check on the unresolved string never sees this.
+3. **Symlink escapes** — a symlink inside the vault that points outside it. The
+   string looks perfectly vault-relative; only `resolve()`, which follows
+   symlinks, reveals the true target.
+
+All three must be rejected with HTTP 400. This is the SEC-02 check — the Phase 6
+test suite exercises each shape.
+
+### CORS: a localhost-only allowlist
+
+CORS (Cross-Origin Resource Sharing) is a *browser* mechanism: it decides which
+web origins may read responses from your server via JavaScript. For a local
+knowledge-graph server the threat is a malicious page in an open browser tab
+silently calling `http://localhost:8000` — so the allowlist must name only the
+local origins you actually use:
+
+```python
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Content-Type"],
+)
+```
+
+Never use `allow_origins=["*"]` — that lets any website's JavaScript read your
+vault. And remember CORS only constrains browsers: `curl` and other non-browser
+clients ignore it entirely. That is why the server also binds to `127.0.0.1` by
+default — network-level isolation is the first line of defence; CORS is the
+second; path containment is the third. Each control covers a failure of the one
+above it.
+
+---
+
+## In your implementation (Phase 6)
+
+- **Phase 6** is where you build the full REST API (`server.py` in your
+  implementation): every endpoint, status code, and Pydantic model described in
+  this document, plus the SEC-02 path containment check and the CORS allowlist
+  from the section above.
+- The WebSocket `/ws` broadcast (server pushes `node_updated` events; the TUI
+  client refreshes without polling) is a Phase 6 stretch deliverable.
+- The phase doc is `docs/learning/phase-06-rest-api.md`; the skeleton and
+  `tests/phase_06/test_server.py` are the normative contract.

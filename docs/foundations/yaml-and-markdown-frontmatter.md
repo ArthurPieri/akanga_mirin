@@ -404,16 +404,16 @@ types with their inverses — a building block for the full graph model.
 
 ---
 
-## In This Codebase
+## In Your Implementation
 
-- **`src/akanga_core/parser.py`** — `parse_node(path)` calls `frontmatter.load()` and returns a
+- **`parser.py`** (Phase 0) — `parse_node(path)` calls `frontmatter.load()` and returns a
   `Node` dataclass. `write_node(path, node)` calls `frontmatter.dumps()` and writes atomically.
   All metadata access uses `.get()` with safe defaults.
 
 - **Phase 1 work** — introduces `akanga.yaml` vault config. `yaml.safe_load` is the correct parser.
   The config schema includes `owner`, `default_workspace`, `workspaces`, and `relations`.
 
-- **Never use `yaml.load` without `Loader=yaml.SafeLoader`** anywhere in this codebase. The vault
+- **Never use `yaml.load` without `Loader=yaml.SafeLoader`** anywhere in your implementation. The vault
   directory is user-controlled, but it is still good practice to use `safe_load` everywhere.
 
 ---
