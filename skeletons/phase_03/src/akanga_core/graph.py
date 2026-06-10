@@ -26,7 +26,21 @@ class EdgeDirection(Enum):
 @dataclass
 class EgoEdge:
     """A single directed edge in the ego-graph, annotated with its direction
-    relative to the root node."""
+    relative to the root node.
+
+    NATURAL-DIRECTION RULE (mandatory): `source_id` and `target_id` ALWAYS
+    store the edge exactly as it exists in the DB `edges` table — the
+    natural direction — regardless of whether BFS discovered it as outgoing
+    or incoming. `direction` only records which side of the edge the BFS
+    frontier was on (useful for UI emphasis); it must NEVER be used to flip
+    source/target, rename the relation, or render a reversed `<-` arrow.
+    Serialization always reads `src --[rel]--> tgt` straight off this
+    dataclass (see render_ascii and Phase 8's rag._serialize_triples).
+
+    `relation` / `relation_id` are populated from the DB via
+    `db.get_edges_from` / `db.get_edges_to` — an empty relation means the
+    edge genuinely has no label (plain wikilink), not "lookup skipped".
+    """
     source_id: str
     target_id: str
     relation: str
@@ -72,42 +86,51 @@ def build_ego_graph(
     2. Initialise data structures:
          ego_nodes: dict[str, Node] = {root_id: root}
          ego_edges: list[EgoEdge] = []
+         seen_edges: set[tuple[str, str, str]] = set()   # (source_id, target_id, relation)
          visited: set[str] = {root_id}
          queue: deque = deque([(root_id, 0)])   # (node_id, current_depth)
     3. BFS loop — while queue is not empty:
          a. Dequeue `(current_id, depth)`.
          b. If `depth >= max_depth`, skip (do not expand further).
-         c. Fetch outgoing neighbors: `neighbors = db.get_neighbors(current_id)`.
-            For each neighbor node `n`:
+         c. Fetch outgoing edges WITH their relation labels:
+              `for n, relation, relation_id in db.get_edges_from(current_id):`
               - If `n.id` not in visited:
                   - Add to visited, ego_nodes, and queue at `depth + 1`.
-              - Always add an EgoEdge:
+              - Dedup check (see step 4 note), then append:
                   EgoEdge(source_id=current_id, target_id=n.id,
-                          relation=<see below>, relation_id="",
+                          relation=relation, relation_id=relation_id,
                           direction=EdgeDirection.OUTGOING)
-         d. Fetch incoming backlinks: `backlinks = db.get_backlinks(current_id)`.
-            For each backlink node `b`:
+         d. Fetch incoming edges WITH their relation labels:
+              `for b, relation, relation_id in db.get_edges_to(current_id):`
               - If `b.id` not in visited:
                   - Add to visited, ego_nodes, and queue at `depth + 1`.
-              - Always add an EgoEdge:
+              - Dedup check, then append the edge in its NATURAL direction
+                (source is the other node, target is the current node — never
+                swap them; see the EgoEdge docstring):
                   EgoEdge(source_id=b.id, target_id=current_id,
-                          relation=<see below>, relation_id="",
+                          relation=relation, relation_id=relation_id,
                           direction=EdgeDirection.INCOMING)
-    4. Return `EgoGraph(root=root, nodes=ego_nodes, edges=ego_edges)`.
+    4. Edge deduplication (CORE requirement, not an extra): the same logical
+       edge IS discovered twice whenever BFS visits both endpoints — once as
+       OUTGOING from the source, once as INCOMING at the target. Before
+       appending, compute `key = (source_id, target_id, relation)`; if `key`
+       is in `seen_edges`, skip it, otherwise add it to `seen_edges` and
+       append the EgoEdge. (Keying on relation too preserves two DIFFERENT
+       relations between the same pair as two edges.)
+    5. Return `EgoGraph(root=root, nodes=ego_nodes, edges=ego_edges)`.
 
-    Relation field: `db.get_neighbors` / `db.get_backlinks` return Node-like
-    objects. You can set `relation=""` or try to look it up from the edges
-    table — an empty string is acceptable for Phase 03.
-
-    Edge deduplication: the same logical edge may be added multiple times if
-    the BFS visits both endpoints. For Phase 03, duplicates are acceptable.
-    Advanced learners may deduplicate by `(source_id, target_id)`.
+    Relation field: `db.get_edges_from` / `db.get_edges_to` (Phase 2) return
+    `(node, relation, relation_id)` tuples — pass both values through to the
+    EgoEdge. Do NOT hardcode `relation=""`; an unlabeled wikilink edge will
+    naturally arrive as `("" , "")` from the DB.
     """
     raise NotImplementedError(
         "1. db.get_node(root_id) — raise ValueError if None. "
-        "2. BFS with deque([(root_id, 0)]) and a visited set. "
-        "3. At each node: db.get_neighbors (OUTGOING) + db.get_backlinks (INCOMING). "
-        "4. Add unvisited nodes to queue at depth+1; always append EgoEdge. "
+        "2. BFS with deque([(root_id, 0)]), a visited set, and a seen_edges set. "
+        "3. At each node: db.get_edges_from (OUTGOING) + db.get_edges_to (INCOMING) — "
+        "both yield (node, relation, relation_id); keep the natural direction. "
+        "4. Add unvisited nodes to queue at depth+1; dedup edges by "
+        "(source_id, target_id, relation) before appending. "
         "5. Return EgoGraph(root, nodes_dict, edges_list)."
     )
 
@@ -123,14 +146,15 @@ def render_ascii(ego: EgoGraph) -> str:
     Simple approach (sufficient for Phase 03):
     1. Start with a header line: `[ROOT] <root.title>`.
     2. Iterate over `ego.edges`.
-    3. For OUTGOING edges:
-         Append: `  <source_title> -[<relation or 'links'>]-> <target_title>`
-    4. For INCOMING edges:
-         Append: `  <source_title> -[<relation or 'links'>]-> <target_title>`
-       (Incoming edges are already stored with source/target in their natural
-       direction — just render them the same way.)
-    5. If there are no edges, append `  (no connections)`.
-    6. Join all lines with newline characters and return.
+    3. Render EVERY edge — OUTGOING and INCOMING alike — in its natural
+       direction:
+         Append: `  <source_title> --[<relation or 'links'>]--> <target_title>`
+       EgoEdges already store source/target in the edge's natural (DB)
+       direction, so both directions render identically. Never emit a
+       reversed `<-` arrow and never invent an inverse relation name —
+       `edge.direction` is for UI emphasis only, not for serialization.
+    4. If there are no edges, append `  (no connections)`.
+    5. Join all lines with newline characters and return.
 
     The only hard requirement from the tests:
     - The return value must be a non-empty `str`.
@@ -141,6 +165,7 @@ def render_ascii(ego: EgoGraph) -> str:
     """
     raise NotImplementedError(
         "Build a list of strings starting with '[ROOT] <root.title>'; "
-        "for each edge append '<source_title> -[<relation>]-> <target_title>'; "
+        "for each edge append '<source_title> --[<relation>]--> <target_title>' "
+        "(natural direction for both OUTGOING and INCOMING — never '<-'); "
         "join with newlines and return."
     )

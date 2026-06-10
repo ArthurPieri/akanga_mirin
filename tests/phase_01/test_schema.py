@@ -183,6 +183,75 @@ def test_merge_edges_empty_inputs():
 
 
 # ---------------------------------------------------------------------------
+# 3b. Error paths (CCR-9 requirement)
+# ---------------------------------------------------------------------------
+
+def test_merge_edges_conflicting_target_id_keeps_existing():
+    """Same (relation, target) with a DIFFERENT inline target_id: frontmatter wins.
+
+    The skeleton contract: frontmatter is the source of truth for resolved
+    UUIDs. An inline edge must never overwrite an already-resolved target_id —
+    re-resolution is expensive and a conflicting id is a sign of stale prose.
+    """
+    m = _load_module()
+    Edge = m.Edge
+    merge_edges = m.merge_edges
+
+    existing = [Edge(relation="contradicts", relation_id="EP-002", target="Blink", target_id="abc-123")]
+    inline = [Edge(relation="contradicts", relation_id="EP-002", target="Blink", target_id="zzz-999")]
+
+    merged = merge_edges(existing, inline)
+
+    assert len(merged) == 1, (
+        f"Conflicting duplicates of the same (relation, target) must merge to "
+        f"one edge, got {len(merged)}: {merged!r}"
+    )
+    assert merged[0].target_id == "abc-123", (
+        f"merge_edges must keep the EXISTING resolved target_id 'abc-123', "
+        f"got {merged[0].target_id!r}.\n"
+        "When the (relation, target) key already exists, skip the inline edge "
+        "entirely — frontmatter wins."
+    )
+
+
+def test_write_back_malformed_edges_yaml_raises(tmp_vault: Path):
+    """A file whose edges YAML block is malformed must raise — not corrupt the file.
+
+    write_back() starts with parse_node_file(), and the Phase 00 contract says
+    malformed frontmatter YAML raises (frontmatter/yaml ScannerError). Silently
+    'fixing' broken YAML would risk destroying user-authored edges on write.
+    """
+    m = _load_module()
+    write_back = m.write_back
+
+    content = dedent("""\
+        ---
+        id: bbbbbbbb-0000-0000-0000-000000000004
+        title: Malformed Edges Test
+        type: note
+        tags: []
+        edges:
+          - relation: "supports
+            target: Unterminated Quote
+        ---
+
+        Body text.
+        """)
+    node_file = tmp_vault / "malformed-edges.md"
+    node_file.write_text(content, encoding="utf-8")
+    original = node_file.read_text(encoding="utf-8")
+
+    with pytest.raises(Exception):
+        write_back(node_file)
+
+    assert node_file.read_text(encoding="utf-8") == original, (
+        "write_back must NOT modify a file it could not parse.\n"
+        "Parse first; only write after a successful parse + merge — never "
+        "write back partial state from a failed parse."
+    )
+
+
+# ---------------------------------------------------------------------------
 # 4. write_back
 # ---------------------------------------------------------------------------
 

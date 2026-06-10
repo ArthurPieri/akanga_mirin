@@ -1,5 +1,7 @@
 # Phase 1B — Data Modeling: Workspace Registry and Background Sync
 
+**Estimated time: 2–3h**
+
 **Core concept:** Not all mutations can happen on the critical path. When a node is
 renamed, every edge pointing to it has a stale `target` display name. Updating those
 files immediately would make every save proportionally slower as the vault grows.
@@ -14,7 +16,7 @@ a controlled background process.
 By the end of this phase, you will be able to:
 - Explain the dual-key pattern (display name + UUID) as applied to workspace membership and why it tolerates renames without breaking references
 - Describe what the sync queue stores, when jobs are enqueued, and when they are drained
-- Implement `enqueue_title_sync` and `pending_sync_jobs` and explain why the queue is stored in the DB rather than in memory
+- Implement `enqueue_title_sync`, `pending_sync_jobs`, and `mark_processed` and explain why the queue is stored in the DB rather than in memory
 - Extend `create()` to produce `reference` nodes with `url`, `external_type`, and `description` fields
 
 ---
@@ -31,7 +33,7 @@ linked foundation doc before proceeding.
 - [ ] I can explain the difference between a source of truth and a derived index
   → Covered in Phase 1A — Source of Truth concept
 - [ ] I have a basic understanding of what a database queue or work queue is
-  → See `docs/foundations/sqlite-basics.md` (queue table patterns)
+  → See `docs/foundations/sqlite-basics.md`
 
 ---
 
@@ -95,7 +97,8 @@ changes; a sync queue job lazily updates the `name` display field in all node
 frontmatter files that belong to that workspace.
 
 The default workspace is **Nhamandu** (Mbya Guaraní: the primordial being whose
-unfolding thought gave rise to the cosmos). Its UUID is generated at `akanga init`.
+unfolding thought gave rise to the cosmos). Its UUID is generated when the vault
+is scaffolded (`make vault-init` creates `akanga.yaml`).
 The name is configurable in `akanga.yaml` — changing it enqueues a workspace name
 sync job without breaking any node's graph membership.
 
@@ -134,7 +137,7 @@ initialization and save times fast regardless of vault size.
 
 > Akanga node: `Background Sync Queue`
 
-> → Foundation doc: `docs/foundations/sqlite-basics.md` (queue table patterns)
+> → Foundation doc: `docs/foundations/sqlite-basics.md`
 
 > → Foundation doc: `docs/foundations/design-patterns.md` (Debounce / deferred execution section)
 
@@ -193,7 +196,7 @@ New module `sync_queue.py`, plus extensions to `parser.py` from Phase 1A.
 **`create()` extended** to handle reference nodes:
 
 ```python
-def create(title: str, type: str, vault: Path,
+def create(title: str, node_type: str, vault: Path,
            url: str = "",
            external_type: str = "",
            description: str = "") -> Node:
@@ -209,12 +212,24 @@ external_type: webpage   # webpage | github | paper | book | api | file
 description: Short description of the resource
 ```
 
-**`sync_queue.py`** — a new module, two operations at this phase:
+> **Vault-verified exercise.** The reference-node extension has no automated tests
+> in `tests/phase_01/` — the base `create()` contract is covered by Phase 0's
+> create tests, and the extension is verified through your vault: create a real
+> `reference` node (e.g., `os.replace` from the Phase 0 table), open the file,
+> and confirm `url`, `external_type`, and `description` land in frontmatter and
+> survive a `parse → write → parse` roundtrip.
+
+**`sync_queue.py`** — a new module, three operations at this phase:
 
 | Function | What it does |
 |---|---|
-| `enqueue_title_sync(db, node_id, new_title)` | Add a pending job when a title change is detected |
-| `pending_sync_jobs(db) → list[dict]` | Return all unprocessed jobs — consumed by Phase 4 |
+| `enqueue_title_sync(db, node_id, new_title)` | Add a pending job when a title change is detected; idempotent — re-enqueueing the same pending node does not create a duplicate row |
+| `pending_sync_jobs(db) → list[dict]` | Return all unprocessed jobs (`processed = 0`) — consumed by Phase 4 |
+| `mark_processed(db, job_id)` | Set `processed = 1` for one job — how a drained job leaves the queue |
+
+All three take `db` as a plain `sqlite3.Connection` — `GraphDatabase` does not
+exist until Phase 2. Anything that can `execute()` and `commit()` works, which is
+exactly what makes the module testable in isolation.
 
 The queue is stored in the DB as a `sync_queue` table, added to GraphDatabase.DB_SCHEMA in Phase 2:
 
@@ -234,46 +249,46 @@ is implemented in Phase 4 alongside the file watcher and event bus.
 
 ## Deliverable
 
+Passing the 1B half of the Phase 1 suite: `tests/phase_01/test_sync_queue.py`.
+These are the tests, by name:
+
+- `test_enqueue_creates_row` — `enqueue_title_sync` inserts exactly one row into `sync_queue`
+- `test_enqueue_is_idempotent` — enqueueing the same `node_id` twice leaves only one pending row
+- `test_pending_jobs_returns_unprocessed` — `pending_sync_jobs` returns only rows with `processed = 0`
+- `test_mark_processed_sets_flag` — `mark_processed(db, job_id)` sets `processed = 1` for that job
+- `test_sync_queue_survives_restart` — a job enqueued on one connection is visible after closing and reopening the DB file (enqueue must commit)
+
+The contract your functions are tested against — note that `db` is a **raw
+`sqlite3.Connection`**, not a `GraphDatabase` (which doesn't exist until Phase 2).
+The `tmp_db` fixture in `tests/phase_01/conftest.py` pre-creates the table:
+
 ```python
-def test_reference_node_create():
-    node = create(
-        title="Python Docs",
-        type="reference",
-        vault=tmp_path,
-        url="https://docs.python.org",
-        external_type="webpage",
-        description="Official Python documentation"
+# tests/phase_01/conftest.py (excerpt) — what your functions receive as `db`
+conn = sqlite3.connect(str(tmp_path / "test.db"))
+conn.execute("""
+    CREATE TABLE IF NOT EXISTS sync_queue (
+        id TEXT PRIMARY KEY,
+        entity_id TEXT NOT NULL,
+        new_name TEXT NOT NULL,
+        processed INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
-    assert node.type == "reference"
-    re_parsed = parse_node_file(node.path)
-    assert re_parsed.title == "Python Docs"
-    # url, external_type, description are frontmatter fields, not Node attributes;
-    # access via: yaml.safe_load(Path(re_parsed.path).read_text().split("---")[1])
-
-def test_enqueue_title_sync(tmp_db):
-    db = GraphDatabase(tmp_db)
-    enqueue_title_sync(db, node_id="abc-123", new_title="Renamed Title")
-    jobs = pending_sync_jobs(db)
-    assert len(jobs) == 1
-    assert jobs[0]["entity_id"] == "abc-123"
-    assert jobs[0]["new_name"] == "Renamed Title"
-    assert jobs[0]["processed"] == 0
-
-def test_sync_queue_survives_restart(tmp_db):
-    db = GraphDatabase(tmp_db)
-    enqueue_title_sync(db, node_id="abc-123", new_title="Renamed Title")
-    db.close()
-    db2 = GraphDatabase(tmp_db)   # reopen — queue must persist
-    jobs = pending_sync_jobs(db2)
-    assert len(jobs) == 1
-
-def test_enqueue_is_idempotent(tmp_db):
-    db = GraphDatabase(tmp_db)
-    enqueue_title_sync(db, node_id="abc-123", new_title="Renamed Title")
-    enqueue_title_sync(db, node_id="abc-123", new_title="Renamed Title")
-    jobs = pending_sync_jobs(db)
-    assert len(jobs) == 1   # duplicate enqueue does not create two jobs
+""")
+conn.commit()
 ```
+
+And the shape of a typical test (illustrative — the real suite is `tests/phase_01/`):
+
+```python
+def test_enqueue_creates_row(tmp_db):           # tmp_db is a sqlite3.Connection
+    enqueue_title_sync(tmp_db, node_id="node-001", new_title="New Title")
+    rows = tmp_db.execute("SELECT * FROM sync_queue").fetchall()
+    assert len(rows) == 1
+```
+
+The reference-node `create()` extension is the vault-verified half of this phase
+(see the callout in What You Build): create at least one real `reference` node
+and confirm its frontmatter by hand.
 
 Plus 7 vault nodes with typed edges (including Nhamandu and Akanga with full seed
 body content). The vault is the proof of understanding, not just the tests.

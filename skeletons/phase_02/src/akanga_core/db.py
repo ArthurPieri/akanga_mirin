@@ -1,6 +1,6 @@
 """Phase 02 — GraphDatabase skeleton.
 
-Implement the eight methods marked with NotImplementedError below.
+Implement every method marked with NotImplementedError below.
 The DB_SCHEMA constant is provided for reference — do not modify it.
 """
 from __future__ import annotations
@@ -280,18 +280,12 @@ class GraphDatabase:
              VALUES (?, ?, ?, ?, ?)
         3. Return `edge_id`.
 
-        Note: this method also accepts a single dict as its first argument
-        (legacy calling convention used by some tests). If `source_id` is a
-        dict, unpack it:
-            d = source_id
-            source_id = d["source_id"]
-            target_id = d.get("target_id")
-            relation  = d.get("relation")
-            relation_id = d.get("relation_id")
+        Callers always pass the positional/keyword arguments shown in the
+        signature — there is no dict-based calling convention.
         """
         raise NotImplementedError(
             "Generate edge_id = str(uuid4()); INSERT INTO edges VALUES (?, ?, ?, ?, ?); "
-            "return edge_id. Also handle dict-as-first-arg calling convention."
+            "return edge_id."
         )
 
     def get_neighbors(self, node_id: str) -> list[Any]:
@@ -329,4 +323,77 @@ class GraphDatabase:
         """
         raise NotImplementedError(
             "SELECT nodes.* JOIN edges ON nodes.id = edges.source_id WHERE edges.target_id = ?"
+        )
+
+    def get_edges_from(self, node_id: str) -> list[Any]:
+        """WHAT: Return all outgoing edges of `node_id` as
+        `(target_node, relation, relation_id)` tuples.
+
+        WHY: `get_neighbors` returns only the neighbor *nodes* — the relation
+        label is lost. That loss is what forced earlier designs to build
+        ego-graphs with `relation=""`, which degraded every Phase 8 RAG triple
+        to a meaningless `relates_to`. This method keeps the edge's relation
+        name and stable vocabulary ID attached to each neighbor, so Phase 3's
+        `build_ego_graph` (and ultimately the LLM context in Phase 8) gets the
+        full 71-type relation vocabulary for free.
+
+        HOW:
+        1. Inside `with self._lock:`, execute:
+             SELECT nodes.*, edges.relation, edges.relation_id
+             FROM nodes
+             JOIN edges ON nodes.id = edges.target_id
+             WHERE edges.source_id = ?
+           with `(node_id,)` as parameters.
+           (No DISTINCT — two different relations between the same pair are
+           two distinct edges and must both be returned.)
+        2. For each row, build the target node exactly as in `get_node`
+           (SimpleNamespace, tags decoded with `json.loads`) from the
+           `nodes.*` columns, and pull `relation` / `relation_id` from the
+           edge columns. Normalise NULL to `""`:
+             relation = row["relation"] or ""
+             relation_id = row["relation_id"] or ""
+        3. Return `[(node, relation, relation_id), ...]` — a list of 3-tuples.
+
+        Returns:
+            list of (Node-like, relation: str, relation_id: str) tuples for
+            every edge where `node_id` is the source.
+        """
+        raise NotImplementedError(
+            "SELECT nodes.*, edges.relation, edges.relation_id FROM nodes "
+            "JOIN edges ON nodes.id = edges.target_id WHERE edges.source_id = ?; "
+            "return [(node, relation or '', relation_id or ''), ...]"
+        )
+
+    def get_edges_to(self, node_id: str) -> list[Any]:
+        """WHAT: Return all incoming edges of `node_id` as
+        `(source_node, relation, relation_id)` tuples.
+
+        WHY: The incoming counterpart of `get_edges_from` — backlinks with
+        their relation labels intact. Phase 3's ego-graph builder needs this
+        to record incoming edges in their NATURAL direction (source → target
+        as stored in the DB) with the real relation name, instead of an
+        unlabeled backlink.
+
+        HOW:
+        1. Inside `with self._lock:`, execute:
+             SELECT nodes.*, edges.relation, edges.relation_id
+             FROM nodes
+             JOIN edges ON nodes.id = edges.source_id
+             WHERE edges.target_id = ?
+           with `(node_id,)` as parameters.
+           (No DISTINCT — see get_edges_from.)
+        2. Build each source node as in `get_node`; normalise NULL
+           relation/relation_id to `""` (same as get_edges_from step 2).
+        3. Return `[(node, relation, relation_id), ...]` — a list of 3-tuples.
+           Note: the returned node is the edge's SOURCE; `node_id` is the
+           target. The edge's natural direction is `node.id → node_id`.
+
+        Returns:
+            list of (Node-like, relation: str, relation_id: str) tuples for
+            every edge where `node_id` is the target.
+        """
+        raise NotImplementedError(
+            "SELECT nodes.*, edges.relation, edges.relation_id FROM nodes "
+            "JOIN edges ON nodes.id = edges.source_id WHERE edges.target_id = ?; "
+            "return [(node, relation or '', relation_id or ''), ...]"
         )

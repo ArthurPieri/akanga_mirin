@@ -1,4 +1,5 @@
 """Phase 02 tests — indexer: index_file, full_scan_and_index, edge cases."""
+import sqlite3
 from pathlib import Path
 from textwrap import dedent
 
@@ -131,7 +132,93 @@ def test_reindex_updates_node(tmp_db: str, tmp_vault: Path):
 
 
 # ---------------------------------------------------------------------------
-# 3. Error path
+# 3. Two-pass edge resolution + DB expendability (the phase's core promises)
+# ---------------------------------------------------------------------------
+
+def test_two_pass_edge_resolution(tmp_db: str, tmp_vault: Path):
+    """A wikilink [[Beta]] in alpha.md must become a resolved edge A→B in the DB.
+
+    alpha.md sorts before beta.md, so a single-pass indexer would try to
+    resolve the link before Beta exists. The two-pass design (index all nodes
+    first, then extract edges) is what makes this resolve.
+    """
+    full_scan_and_index = _indexer_mod.full_scan_and_index
+
+    db = GraphDatabase(tmp_db)
+    id_alpha = "abab0001-0000-0000-0000-000000000001"
+    id_beta  = "abab0002-0000-0000-0000-000000000002"
+    _write_md(tmp_vault, "a-alpha.md", id_alpha, "Alpha", body="This links to [[Beta]].")
+    _write_md(tmp_vault, "b-beta.md",  id_beta,  "Beta")
+
+    full_scan_and_index(str(tmp_vault), db)
+
+    neighbors = db.get_neighbors(id_alpha)
+    assert any(n.id == id_beta for n in neighbors), (
+        "After full_scan_and_index, the wikilink [[Beta]] in alpha.md must "
+        "exist as an edge Alpha→Beta in the edges table.\n"
+        f"get_neighbors(Alpha) returned: {[getattr(n, 'title', n) for n in neighbors]!r}\n"
+        "Pass 2 must re-read each node's body from disk (parse_node_file), call "
+        "extract_wikilinks, resolve_wikilink, then db.upsert_edge. An indexer "
+        "that extracts zero edges silently breaks Phases 3, 5, and 8."
+    )
+
+
+def test_db_is_expendable(tmp_db: str, tmp_vault: Path):
+    """Delete the DB file, re-index, and get back the identical graph (doc Deliverable).
+
+    This is the core architectural promise of the phase: the DB is a derived
+    index, the .md files are the source of truth.
+    """
+    full_scan_and_index = _indexer_mod.full_scan_and_index
+
+    id_alpha = "cdcd0001-0000-0000-0000-000000000001"
+    id_beta  = "cdcd0002-0000-0000-0000-000000000002"
+    _write_md(tmp_vault, "a-alpha.md", id_alpha, "Alpha", body="This links to [[Beta]].")
+    _write_md(tmp_vault, "b-beta.md",  id_beta,  "Beta")
+
+    def _snapshot(db) -> tuple[set, set]:
+        node_ids = {n.id for n in db.list_nodes(limit=10_000)}
+        conn = sqlite3.connect(tmp_db)
+        edges = set(
+            conn.execute("SELECT source_id, target_id FROM edges").fetchall()
+        )
+        conn.close()
+        return node_ids, edges
+
+    db = GraphDatabase(tmp_db)
+    full_scan_and_index(str(tmp_vault), db)
+    nodes_before, edges_before = _snapshot(db)
+    assert len(nodes_before) == 2, "Precondition: both nodes must be indexed."
+    db.close()
+
+    # Destroy the derived index (including WAL sidecar files).
+    for suffix in ("", "-wal", "-shm"):
+        sidecar = Path(tmp_db + suffix)
+        if sidecar.exists():
+            sidecar.unlink()
+    assert not Path(tmp_db).exists(), "Precondition: DB file must be gone."
+
+    db2 = GraphDatabase(tmp_db)
+    full_scan_and_index(str(tmp_vault), db2)
+    nodes_after, edges_after = _snapshot(db2)
+    db2.close()
+
+    assert nodes_after == nodes_before, (
+        "After deleting the DB and re-indexing, the node set must be identical.\n"
+        f"Before: {sorted(nodes_before)!r}\nAfter:  {sorted(nodes_after)!r}\n"
+        "If this fails, some node state lives only in the DB — the DB must be "
+        "fully derivable from the .md files."
+    )
+    assert edges_after == edges_before, (
+        "After deleting the DB and re-indexing, the edge set must be identical.\n"
+        f"Before: {sorted(edges_before)!r}\nAfter:  {sorted(edges_after)!r}\n"
+        "Edges must be re-derived from wikilinks on every full scan — never "
+        "stored only in the DB."
+    )
+
+
+# ---------------------------------------------------------------------------
+# 4. Error path
 # ---------------------------------------------------------------------------
 
 def test_index_missing_file_raises(tmp_db: str, tmp_vault: Path):

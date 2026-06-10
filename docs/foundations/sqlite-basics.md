@@ -36,12 +36,11 @@ Defines the schema for a table. Run once to set up the database:
 ```sql
 CREATE TABLE IF NOT EXISTS nodes (
     id          TEXT PRIMARY KEY,
+    path        TEXT UNIQUE NOT NULL,
     title       TEXT NOT NULL,
     type        TEXT NOT NULL DEFAULT 'note',
-    file_path   TEXT UNIQUE NOT NULL,
-    content_hash TEXT,
-    created_at  TEXT,
-    updated_at  TEXT
+    tags        TEXT NOT NULL DEFAULT '[]',
+    content_hash TEXT
 );
 ```
 
@@ -55,8 +54,8 @@ these are more like hints than strict constraints.
 Adds a new row:
 
 ```sql
-INSERT INTO nodes (id, title, type, file_path)
-VALUES ('abc-123', 'My Note', 'note', '/vault/my-note.md');
+INSERT INTO nodes (id, path, title, type)
+VALUES ('abc-123', 'my-note.md', 'My Note', 'note');
 ```
 
 ### SELECT

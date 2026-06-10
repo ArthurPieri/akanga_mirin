@@ -72,6 +72,47 @@ def _make_app(tui_cls, vault: str, db_path: str):
             return tui_cls()
 
 
+def _collect_rendered_text(app) -> str:
+    """Collect all visible text across every screen of the app.
+
+    Walks the full screen stack (so modal/overlay content counts) and knows
+    how to extract text from DataTable cells and OptionList prompts in
+    addition to plain renderable/label widgets — a node list built on
+    DataTable or OptionList is just as valid as one built on ListView.
+    """
+    parts: list[str] = []
+
+    try:
+        from textual.widgets import DataTable, OptionList
+    except ImportError:  # pragma: no cover — textual is importorskip'd upstream
+        DataTable = OptionList = ()  # type: ignore[assignment]
+
+    screens = list(getattr(app, "screen_stack", None) or [app.screen])
+    for screen in screens:
+        for w in screen.query("*"):
+            parts.append(str(getattr(w, "renderable", "") or ""))
+            parts.append(str(getattr(w, "label", "") or ""))
+            if DataTable and isinstance(w, DataTable):
+                try:
+                    for row_key in list(w.rows):
+                        parts.extend(str(cell) for cell in w.get_row(row_key))
+                except Exception:
+                    pass
+            if OptionList and isinstance(w, OptionList):
+                try:
+                    for i in range(w.option_count):
+                        parts.append(str(w.get_option_at_index(i).prompt))
+                except Exception:
+                    pass
+            # Last resort: whatever the widget itself renders.
+            try:
+                parts.append(str(w.render()))
+            except Exception:
+                pass
+
+    return " ".join(p for p in parts if p)
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -101,16 +142,14 @@ async def test_tui_shows_node_titles(tmp_vault, tmp_db, tmp_path):
         # Allow the app to finish mounting and loading data.
         await pilot.pause()
 
-        # Collect all text rendered by the application.
-        all_text = " ".join(
-            str(getattr(w, "renderable", "") or getattr(w, "label", "") or "")
-            for w in pilot.app.query("*")
-        )
+        # Collect all text rendered by the application — including DataTable
+        # rows and OptionList options, so any list-widget choice passes.
+        all_text = _collect_rendered_text(pilot.app)
 
         found = {title for title in expected_titles if title in all_text}
         assert found, (
             f"None of the expected node titles {expected_titles!r} were found in the "
-            f"TUI widget tree.\n"
+            f"TUI widget tree (ListView, DataTable, and OptionList were all checked).\n"
             f"Collected text sample (first 400 chars): {all_text[:400]!r}\n"
             "Make sure your node list widget populates with titles from the database "
             "during on_mount()."
@@ -200,6 +239,80 @@ async def test_tui_node_count_matches_db(tmp_vault, tmp_db, tmp_path):
             "Your node list widget must render one item per node returned by the db."
         )
 
+        await pilot.press("q")
+
+
+async def test_delete_requires_confirmation(tmp_vault, tmp_db, tmp_path):
+    """Pressing 'd' ONCE must not delete the selected node — confirmation required.
+
+    The keybinding spec: 'd' = Delete selected node (+ confirm). A single
+    keypress that immediately destroys a file is the lazygit anti-pattern this
+    phase explicitly avoids — push a confirmation screen (or modal) first.
+    """
+    TUI = _load_tui_class()
+    db_path = str(tmp_path / "test.db")
+    app = _make_app(TUI, vault=str(tmp_vault), db_path=db_path)
+
+    count_before = len(tmp_db.list_nodes())
+    assert count_before == 3, f"Precondition: expected 3 nodes in db, got {count_before}"
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # Move selection onto a node, then press 'd' exactly once.
+        await pilot.press("j")
+        await pilot.press("d")
+        await pilot.pause()
+
+        count_after = len(tmp_db.list_nodes())
+        assert count_after == count_before, (
+            f"A single 'd' keypress deleted a node ({count_before} → {count_after}).\n"
+            "Delete must require confirmation: push a confirmation ModalScreen "
+            "(or two-step keypress) and only call db.delete_node / os.remove "
+            "after the user confirms."
+        )
+
+        # Dismiss any confirmation modal so shutdown is clean, then quit.
+        await pilot.press("escape")
+        await pilot.press("q")
+
+    # The vault files must also be untouched.
+    md_files = list(tmp_vault.glob("*.md"))
+    assert len(md_files) == 3, (
+        f"A single 'd' keypress removed a vault file (expected 3 .md files, "
+        f"found {len(md_files)}). Never touch the filesystem before the user confirms."
+    )
+
+
+async def test_help_overlay(tmp_vault, tmp_db, tmp_path):
+    """Pressing '?' must show the keybinding cheatsheet — a pushed screen or new content."""
+    TUI = _load_tui_class()
+    db_path = str(tmp_path / "test.db")
+    app = _make_app(TUI, vault=str(tmp_vault), db_path=db_path)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        stack_before = len(pilot.app.screen_stack)
+        text_before = _collect_rendered_text(pilot.app)
+
+        await pilot.press("question_mark")
+        await pilot.pause()
+
+        stack_after = len(pilot.app.screen_stack)
+        text_after = _collect_rendered_text(pilot.app)
+
+        pushed_screen = stack_after > stack_before
+        new_content = text_after != text_before
+
+        assert pushed_screen or new_content, (
+            "Pressing '?' changed nothing — no screen was pushed and no new "
+            "content appeared.\n"
+            "Implement action_help_cheatsheet: build a table from self.BINDINGS "
+            "and push a ModalScreen showing it "
+            "(Binding('question_mark', 'help_cheatsheet', 'Help', key_display='?'))."
+        )
+
+        await pilot.press("escape")
         await pilot.press("q")
 
 

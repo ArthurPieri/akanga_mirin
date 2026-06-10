@@ -14,7 +14,7 @@ is split into 1A + 1B). Each phase has:
 - A phase doc (`docs/learning/phase-NN-*.md`) — the spec and guide
 - A skeleton (`skeletons/phase_NN/`) — stub code with WHAT/WHY/HOW docstrings
 - A test suite (`tests/phase_NN/`) — pytest tests run against learner code
-- A reference solution (location under review — currently `solutions/phase_08/` on `main`; see decision note below)
+- A reference solution (`solutions/phase_NN/` on `main` — see decision table below)
 
 ---
 
@@ -28,9 +28,9 @@ scripts/                study.sh, skeleton_check.py, sync_forward.py
 templates/              project-makefile template for learners
 tests/                  phase test suites — DONE for all 9 phases (145 tests)
 skeletons/              skeleton code per phase — DONE for all 9 phases
-solutions/              reference implementations — IN PROGRESS (phase_08 only,
-                        currently on main; branch-vs-directory decision pending,
-                        see docs/adversarial-analysis-v2.md #7)
+solutions/              reference implementations — IN PROGRESS (phase_08 only;
+                        live in solutions/phase_NN/ on main — branch decision
+                        formally reversed 2026-06-10, see decision table below)
 examples/               runnable examples per phase — DONE for all 9 phases
 ```
 
@@ -73,6 +73,8 @@ make where-is-my-src    # show what AKANGA_SRC resolves to
 make study PHASE=3      # open three-pane tmux study session
 make docs-phase PHASE=2 # open a phase doc in glow
 make foundations TOPIC=sqlite-basics  # open a foundation doc in glow
+make vault-init         # create ./vault + canonical akanga.yaml
+make vault-check PHASE=2  # validate the vault (per-phase node manifest)
 make lint               # ruff check
 make sync-forward FROM=2 FILE=src/akanga_core/parser.py  # propagate bug fix
 ```
@@ -84,7 +86,7 @@ make sync-forward FROM=2 FILE=src/akanga_core/parser.py  # propagate bug fix
 | Decision | Resolution |
 |---|---|
 | Split Phase 1 into 1A + 1B | YES — edge schema / workspace registry boundary |
-| Solutions on separate branch | DECIDED YES in Round 1, **never implemented** — no `solutions` branch exists; `solutions/phase_08/` sits on `main` and all Makefile/CI tooling reads the working tree. Re-decision pending (adversarial-analysis-v2 #7) |
+| Solutions on separate branch | **REVERSED 2026-06-10** — solutions live in `solutions/phase_NN/` on `main`; tooling and CI read the working tree (adversarial-analysis-v2 #7) |
 | Solo/Group Reflect tracks | YES — `> **Solo:**` / `> **Group:**` callouts |
 | Open-ended vault exercises | YES — replace half of fixed tables with open prompts |
 | Prerequisite self-assessment | YES — checklist at top of each phase doc |
@@ -93,7 +95,7 @@ make sync-forward FROM=2 FILE=src/akanga_core/parser.py  # propagate bug fix
 
 ## Things NOT to do
 
-- Do not modify `solutions/` content without flagging it — the branch-vs-directory decision is unresolved (adversarial-analysis-v2 #7); note that the current `solutions/phase_08/` is known-broken (fails its own phase tests)
+- `solutions/phase_NN/` on `main` is the authoritative home for reference solutions — normal contributions are welcome, but every solution must pass its own phase test suite (`make test-solution PHASE=N`) before merge; `solutions/phase_08` is being brought up to its test suite
 - Do not add SENTINEL comments to non-skeleton files — SENTINEL is a skeleton mechanism
 - Do not create Docker-based workflows — explicitly out of scope
 - Do not add cloud sync, multi-user, or vector embedding features — parked in `docs/future-ideas.md`

@@ -2,7 +2,8 @@
 
 Implement the database layer and vault indexer.
 
-`models.py` is provided (Phase 02 variant — lighter Node with `content_hash`).
+`models.py` is provided — identical to Phase 01's (one monotonic Node from
+Phase 0 onward, plus the 1A `Edge` dataclass; nothing new in this phase).
 `parser.py` and `sync_queue.py` are reference markers — copy your Phase 01
 solution into them, or set `AKANGA_SRC` to your Phase 01 `src/` directory.
 
@@ -10,7 +11,7 @@ solution into them, or set `AKANGA_SRC` to your Phase 01 `src/` directory.
 
 | File | Functions |
 |---|---|
-| `src/akanga_core/db.py` | `GraphDatabase.__init__`, `upsert_node`, `delete_node`, `get_node`, `list_nodes`, `search_fts`, `upsert_edge`, `get_neighbors`, `get_backlinks` |
+| `src/akanga_core/db.py` | `GraphDatabase.__init__`, `upsert_node`, `delete_node`, `get_node`, `list_nodes`, `search_fts`, `upsert_edge`, `get_neighbors`, `get_backlinks`, `get_edges_from`, `get_edges_to` |
 | `src/akanga_core/indexer.py` | `scan_vault`, `index_file`, `full_scan_and_index` |
 | `src/akanga_core/links.py` | `extract_wikilinks`, `resolve_wikilink` |
 

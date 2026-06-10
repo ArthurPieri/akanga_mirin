@@ -1,5 +1,7 @@
 # Phase 0 — File System as Database
 
+**Estimated time: 2–3h**
+
 **Core concept:** The file is the database. Not a cache, not a representation — the
 file *is* the record. Everything downstream (index, TUI, API) is derived from files
 and is expendable. Delete the index: rebuild it from files. The files are never
@@ -72,13 +74,89 @@ git-diffable, and editable in any text editor — no proprietary format, no lock
 
 > → Foundation doc: `docs/foundations/yaml-and-markdown-frontmatter.md`
 
+> **Security: YAML Injection and the Safe Loader**
+
+**What YAML injection is:**
+
+PyYAML's default `Loader` supports a tag system that can instantiate arbitrary
+Python objects from YAML input. A frontmatter file containing:
+
+```yaml
+---
+title: !!python/object/apply:os.system ["rm -rf /"]
+---
+```
+
+would — with the unsafe loader — execute `os.system("rm -rf /")` the moment the
+file is parsed. This is not a theoretical concern: it is a known, documented attack
+against Python applications that parse untrusted YAML. A vault file modified by
+another party (shared storage, cloned from a public repo, received as a file
+attachment) could carry this payload.
+
+**How python-frontmatter handles this:**
+
+`python-frontmatter` uses PyYAML's `SafeLoader` by default. `SafeLoader` only
+permits YAML's built-in types (strings, integers, floats, booleans, lists,
+dictionaries) and raises an error on any `!!python/` tag. You can verify this
+yourself:
+
+```python
+import frontmatter
+
+# This should raise yaml.constructor.ConstructorError, not execute anything:
+malicious = """---
+title: !!python/object/apply:os.system ["echo injected"]
+---
+body text
+"""
+try:
+    post = frontmatter.loads(malicious)
+    print("WARNING: loaded without error — check loader")
+except Exception as e:
+    print(f"Safe: raised {type(e).__name__}: {e}")
+```
+
+Run this in your Phase 0 environment. The expected output is a `ConstructorError`,
+not a print from `os.system`.
+
+**What to do if a library does not use safe loading by default:**
+
+If you replace `python-frontmatter` with a different YAML library, or if a future
+version changes the default, apply the safe loader explicitly:
+
+```python
+import yaml
+
+# Never:
+data = yaml.load(content)           # unsafe — uses FullLoader or Loader depending on version
+
+# Always:
+data = yaml.safe_load(content)      # SafeLoader — built-in types only
+# or, explicitly:
+data = yaml.load(content, Loader=yaml.SafeLoader)
+```
+
+The same rule applies to any YAML that arrives from outside: config files, webhook
+payloads, anything not written by your own `write_node_file()`.
+
+> Akanga node: `YAML Injection` — link it to `[[YAML Frontmatter]]` (you'll type
+> this edge in Phase 1A)
+
 ### UUID (Universally Unique Identifier)
 
 A 128-bit randomly generated identifier (e.g., `a3f7c2be-1234-5678-abcd-ef01`).
 The probability of two colliding is ~10⁻³⁷. In Akanga, the UUID is the stable
-identity of a node: generated once on creation, written into frontmatter, and
-never changed — even if the file is renamed, moved, or its title changes. This
+identity of a node: generated once, written into frontmatter, and never changed
+after that — even if the file is renamed, moved, or its title changes. This
 makes UUID the correct key for edges, not the filename or title.
+
+"Generated once" has two entry points. `create()` stamps a fresh `uuid.uuid4()`
+into every new file. But files can also arrive from outside `create()` — hand-written,
+copied from another vault, or with a mangled `id` after a careless edit. The parser
+is the safety net: if frontmatter has no `id`, or the `id` is not a valid UUID
+string, `parse_node_file()` generates a fresh `uuid4()` for the node. The
+never-changes guarantee applies from the moment a valid UUID lands in the
+frontmatter — parsing a file that already has a valid `id` must always preserve it.
 
 > Akanga node: `UUID`
 
@@ -142,15 +220,15 @@ sync queue handles the lazy display-name update in node files.
 
 The default workspace is **Nhamandu** (Mbya Guaraní: the primordial being whose
 unfolding thought gave rise to the cosmos — the source before all things). Its
-UUID is generated once at `akanga init` and never changes, even if the user
-renames the workspace.
+UUID is generated once when the vault is scaffolded (`make vault-init` creates
+`akanga.yaml`) and never changes, even if the user renames the workspace.
 
 ```yaml
 # akanga.yaml
 owner: Arthur Pieri
 default_workspace:
   name: Nhamandu
-  id: a3f7c2be-1234-5678-abcd-ef0123456789   # generated at init, never changes
+  id: a3f7c2be-1234-5678-abcd-ef0123456789   # generated at vault-init, never changes
 workspaces:
   - name: ProjectX
     id: b2c3d4e5-abcd-ef01-2345-678901234567
@@ -164,19 +242,24 @@ workspaces:
 
 ## Vault Nodes to Create
 
-After completing Phase 0, create these nodes in your Akanga vault with the typed
-edges below. The vault is proof of understanding — not just the tests.
+After completing Phase 0, create these 8 nodes in your Akanga vault. Run
+`make vault-init` first to scaffold the vault directory and `akanga.yaml`.
+The vault is proof of understanding — not just the tests.
 
-| Node | Type | Key Edges |
+At this phase you connect nodes with plain, untyped `[[wikilinks]]` in the prose
+body — typed edges (`solves`, `is_part_of`, …) are exactly what you build in
+Phase 1A. When you reach 1A, come back and type these links.
+
+| Node | Type | Link to (untyped `[[wikilinks]]` in the body) |
 |---|---|---|
-| `YAML Frontmatter` | note | `is_part_of` → `Node File Format` |
-| `UUID` | note | `satisfies` → `Stable Node Identity` |
-| `Idempotence` | note | `qualifies` → `Parser Roundtrip` |
-| `Atomic Write` | note | `solves` → `Partial Write Corruption`; `uses` → `os.replace` |
-| `Content Hash` | note | `uses` → `SHA-256`; `enables` → `Change Detection` |
-| `Python Dataclass` | note | `is_applied_in` → `Node Data Model` |
-| `os.replace` | reference | `implements` → `Atomic Write`; `is_part_of` → `Python Standard Library` |
-| `Vault Configuration` | note | `enables` → `Default Author Stamping`; `is_part_of` → `Vault Structure` |
+| `YAML Frontmatter` | note | `[[Node File Format]]` |
+| `UUID` | note | `[[Stable Node Identity]]` |
+| `Idempotence` | note | `[[Parser Roundtrip]]` |
+| `Atomic Write` | note | `[[Partial Write Corruption]]`; `[[os.replace]]` |
+| `Content Hash` | note | `[[SHA-256]]`; `[[Change Detection]]` |
+| `Python Dataclass` | note | `[[Node Data Model]]` |
+| `os.replace` | reference | `[[Atomic Write]]`; `[[Python Standard Library]]` |
+| `Vault Configuration` | note | `[[Default Author Stamping]]`; `[[Vault Structure]]` |
 
 ---
 
@@ -188,8 +271,23 @@ Single module: `parser.py`
 |---|---|
 | `parse_node_file(path) → Node` | Read `.md` file → `Node` dataclass |
 | `write_node_file(path, frontmatter_dict, content)` | Serialize frontmatter + content to `.md` file, atomically |
-| `create(title, type, vault) → Node` | Generate new node file with fresh UUID |
+| `create(title, node_type, vault) → Node` | Generate new node file with fresh UUID; stamps `author` from `akanga.yaml` |
 | `content_hash(path) → str` | SHA-256 hex digest of file content |
+
+Behaviors the test suite enforces beyond the signatures (don't skip these):
+
+- **`parse_node_file` generates a UUID when `id` is missing or invalid.** A file
+  with no `id`, or an `id` that is not a valid UUID string, gets a fresh
+  `uuid.uuid4()`. A valid existing `id` is always preserved.
+- **`type` defaults to `"note"`.** A file without a `type` field parses as
+  `type == "note"` — use `frontmatter.get("type", "note")`.
+- **`write_node_file` creates missing parent directories.** Writing to
+  `vault/subdir/nested/file.md` when `subdir/` does not exist must succeed —
+  `os.makedirs(dir_path, exist_ok=True)` before the atomic write.
+- **Malformed YAML raises.** A broken frontmatter block (e.g., an unclosed quote)
+  must raise an exception, not silently return a half-parsed node.
+- **Missing files raise.** `parse_node_file` on a nonexistent path raises
+  `FileNotFoundError`/`OSError`.
 
 The canonical frontmatter schema:
 
@@ -222,32 +320,32 @@ with the default workspace (Nhamandu) on first write-back.
 enforcement. It is stored only in the `.md` file; the Phase 02 DB schema does not
 index `meta` as a column (you access it by re-parsing the file).
 
-The `Node` dataclass at this phase:
+The `Node` dataclass — this shape is final. The same dataclass carries you
+unchanged through Phases 0, 1, and 2 (the DB in Phase 2 simply persists a subset
+of these fields):
 
 ```python
 @dataclass
 class Node:
-    id: str             # UUID — generated once, lives in frontmatter
+    id: str                   # UUID string — generated once, lives in frontmatter
     title: str
-    type: str           # "note" | "reference"
+    type: str                 # "note" | "reference"
     tags: list[str]
-    content_hash: str   # SHA-256 hex digest — computed at parse/index time
-    content: str = ""   # raw markdown body (everything below frontmatter)
-    path: str = ""      # runtime only — not written to frontmatter
+    content_hash: str = ""    # SHA-256 hex digest — computed at parse/index time
+    content: str = ""         # raw markdown body (everything below frontmatter)
+    path: str = ""            # runtime only — not written to frontmatter
+    frontmatter: dict = field(default_factory=dict)  # the raw parsed YAML dict
 ```
 
-> **Phase 00 introduces a simplified Node for learning. By Phase 02, the full Node
-> dataclass uses exactly these fields: `id`, `path`, `title`, `type`, `tags`,
-> `content_hash`, `content`. You'll evolve your Node incrementally across phases —
-> fields like `graph`, `author`, `created_at`, `updated_at`, `meta`, and `edges`
-> that appear in Phase 00 concepts are frontmatter keys accessible via
-> `node.frontmatter` (the raw dict). They are not dedicated dataclass fields in
-> the final shape.**
+Fields like `graph`, `author`, `created_at`, `updated_at`, `meta`, and `edges`
+that appear in the canonical frontmatter schema above are not dedicated dataclass
+fields — they are keys in `node.frontmatter` (the raw dict). Only the fields that
+the index and the tests need first-class access to get promoted to dataclass fields.
 
 `create()` reads vault config to stamp author and default workspace:
 
 ```python
-def create(title: str, type: str, vault: Path) -> Node:
+def create(title: str, node_type: str, vault: Path) -> Node:
     config = load_vault_config(vault)  # reads akanga.yaml
     # stamps author, assigns default_workspace as graph[0]
     ...
@@ -257,11 +355,47 @@ def create(title: str, type: str, vault: Path) -> Node:
 
 ## Deliverable
 
-Three tests that prove the contract:
+Passing the Phase 0 suite: `make test PHASE=0` runs `tests/phase_00/test_parser.py`.
+These are the tests, by name:
+
+**Parsing:**
+
+- `test_parse_basic_frontmatter` — a well-formed file returns `id`, `title`, `type`, and `tags` exactly as written
+- `test_parse_generates_uuid_when_missing` — a file without an `id` gets a fresh, valid `uuid4()`
+- `test_parse_invalid_uuid_replaced` — an `id` that is not a valid UUID string is replaced with a generated one
+- `test_parse_tags_as_list` — `tags` comes back as `list[str]`, never a scalar or None
+- `test_parse_default_type_is_note` — a file without a `type` field defaults to `"note"`
+- `test_parse_note_type` — an explicit `type: note` parses as `"note"`
+- `test_parse_body_content` — the markdown body below the frontmatter is preserved on the node
+
+**Hashing:**
+
+- `test_content_hash_matches_sha256` — the hash is the SHA-256 hex digest of the file's raw bytes
+- `test_content_hash_changes_on_edit` — editing the file changes the hash
+
+**Writing:**
+
+- `test_write_node_file_roundtrip` — write → parse preserves `id`, `title`, `type`, and `tags` (idempotence)
+- `test_write_is_atomic` — no `*.tmp` files remain after a successful write
+- `test_write_node_file_to_nonexistent_dir_creates_it` — writing into a missing subdirectory creates it
+
+**Creating:**
+
+- `test_create_writes_file_with_fresh_uuid` — `create()` writes a new `.md` file stamped with a fresh `uuid4()`
+- `test_create_stamps_author_from_vault_config` — `create()` reads `akanga.yaml` and stamps `author`
+- `test_create_roundtrip` — a created node parses back with the same `id`, `title`, and `type`
+
+**Error paths:**
+
+- `test_parse_nonexistent_file_raises` — missing file raises `FileNotFoundError`/`OSError`
+- `test_malformed_frontmatter` — broken YAML raises instead of returning a half-parsed node
+
+To see the shape of the contract at a glance, here are three of those tests in
+miniature (illustrative — the real suite is `tests/phase_00/`):
 
 ```python
 def test_roundtrip():
-    node = create(title="Fast Thinking is Unreliable", type="note", vault=tmp_path)
+    node = create(title="Fast Thinking is Unreliable", node_type="note", vault=tmp_path)
     parsed = parse_node_file(node.path)
     assert parsed.id == node.id
     assert parsed.title == node.title
@@ -271,7 +405,7 @@ def test_roundtrip():
     assert re_parsed == parsed           # write → parse is idempotent
 
 def test_uuid_stability():
-    node = create(title="Test", type="note", vault=tmp_path)
+    node = create(title="Test", node_type="note", vault=tmp_path)
     original_id = node.id
     content = Path(node.path).read_text().replace("Test", "Test Renamed")
     Path(node.path).write_text(content)
@@ -279,14 +413,14 @@ def test_uuid_stability():
     assert re_parsed.id == original_id  # UUID unchanged after external edit
 
 def test_atomic_write_leaves_no_temp_files():
-    node = create(title="Test", type="note", vault=tmp_path)
+    node = create(title="Test", node_type="note", vault=tmp_path)
     write_node_file(node.path, dict(node.frontmatter), node.content)
     temp_files = list(tmp_path.glob("*.tmp"))
     assert temp_files == []
 ```
 
-Plus 7 vault nodes created with typed edges. The vault is the proof of
-understanding, not just the tests.
+Plus the 8 vault nodes from the table above, connected with untyped `[[wikilinks]]`.
+The vault is the proof of understanding, not just the tests.
 
 ---
 

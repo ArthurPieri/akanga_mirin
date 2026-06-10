@@ -23,18 +23,24 @@ def parse_node_file(path: str) -> Node:
        object with `.metadata` (the YAML dict) and `.content` (the Markdown body).
     2. Extract `title` from metadata. If missing, fall back to the filename
        without its extension: `os.path.splitext(os.path.basename(path))[0]`.
-    3. Extract `type` from metadata and wrap it in `NodeType(...)`. Default to
-       `"note"` if the key is absent.
-    4. Use `os.path.getctime(path)` and `os.path.getmtime(path)` (both wrapped
-       with `datetime.fromtimestamp(..., UTC)`) for `created_at` and `updated_at`.
-    5. Read the raw `id` field from metadata. Try to parse it with `UUID(str(raw_id))`.
-       If it is missing or invalid, generate a fresh one with `uuid4()`.
-    6. Construct and return a `Node(...)` with all the fields above, plus
-       `tags=fm.get("tags", [])`, `frontmatter=fm`, and `content=post.content`.
+    3. Extract `type` from metadata as a plain string. Default to `"note"`
+       if the key is absent. Valid values are `"note"` and `"reference"` —
+       there is no enum (see models.py). Phase 1B's reference nodes carry
+       top-level `url` / `external_type` / `description` frontmatter keys;
+       they stay available via `node.frontmatter`.
+    4. Read the raw `id` field from metadata. Validate it with
+       `UUID(str(raw_id))` (inside try/except). If it is missing or invalid,
+       generate a fresh one with `uuid4()`. Either way, store it as a
+       *string*: `node_id = str(...)`.
+    5. Construct and return a `Node(...)` with the fields above, plus
+       `tags=fm.get("tags", [])`, `path=path`, `frontmatter=fm`, and
+       `content=post.content`. Leave `content_hash` at its default `""` —
+       the Phase 2 indexer fills it.
     """
     raise NotImplementedError(
-        "Call frontmatter.load(path), extract title/type/id/tags from .metadata, "
-        "build timestamps with datetime.fromtimestamp, and return a Node dataclass"
+        "Call frontmatter.load(path), extract title/type/id/tags from .metadata "
+        "(id is a str — validate with UUID(...) and fall back to str(uuid4())), "
+        "and return a Node dataclass with path, frontmatter, and content set"
     )
 
 
@@ -174,4 +180,43 @@ def write_back(path: str | Path) -> None:
     raise NotImplementedError(
         "parse_node_file → extract_inline_edges(node.content) → merge_edges → "
         "if changed: write_node_file with updated frontmatter['edges']"
+    )
+
+
+def create(
+    title: str,
+    type: str,
+    vault: str | Path,
+    url: str = "",
+    external_type: str = "",
+    description: str = "",
+) -> Node:
+    """WHAT: Create a new node file in the vault and return the parsed Node.
+    Extends the Phase 0 `create()` to handle `type="reference"` nodes (1B).
+
+    WHY: Provides the single entry point for creating knowledge-graph nodes.
+    Phase 1B introduces reference nodes — nodes that point at an external
+    resource (webpage, paper, repo) via three top-level frontmatter fields.
+
+    HOW:
+    1. Generate a new id with `str(uuid4())`.
+    2. Read vault config: `config_path = Path(vault) / "akanga.yaml"`. If the
+       file exists, load it with `yaml.safe_load(config_path.read_text())`
+       (`import yaml` works — pyyaml is a dependency of python-frontmatter).
+       If absent, use defaults (owner="", default_workspace={}).
+    3. Build the frontmatter dict with `title`, `type` (plain string —
+       "note" or "reference"), `tags=[]`, and `id`.
+       If `type == "reference"`, also set the three top-level keys:
+       `url`, `external_type`, and `description`.
+    4. Convert the title to a filename-safe slug — e.g.
+       `title.lower().replace(" ", "-") + ".md"` (strip remaining special
+       characters as needed). Write the file atomically to
+       `Path(vault) / slug` using `write_node_file`.
+    5. Return `parse_node_file` on the written file to get the final Node.
+    """
+    raise NotImplementedError(
+        "Generate str(uuid4()), read akanga.yaml with yaml.safe_load for defaults, "
+        "build frontmatter (plus url/external_type/description when type='reference'), "
+        "derive slug via title.lower().replace(' ', '-'), write_node_file, "
+        "return parse_node_file result."
     )

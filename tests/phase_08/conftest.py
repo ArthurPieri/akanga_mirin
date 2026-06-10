@@ -173,11 +173,13 @@ def tmp_vault_with_nodes(tmp_path: Path):
             "content_hash": f"hash_{nid[:8]}",
         })
 
-    # Wire up the edges
-    db.upsert_edge(_ID_COGNITION, _ID_ATTENTION, relation="supports")
-    db.upsert_edge(_ID_COGNITION, _ID_MEMORY,    relation="is_related_to")
-    db.upsert_edge(_ID_COGNITION, _ID_LEARNING,  relation="enables")
-    db.upsert_edge(_ID_ATTENTION, _ID_LEARNING,  relation="enables")
+    # Wire up the edges — upsert_edge is positional:
+    # (source_id, target_id, relation, relation_id), ids from the registry
+    # in docs/foundations/relation-vocabulary.md
+    db.upsert_edge(_ID_COGNITION, _ID_ATTENTION, "supports",      "EP-001")
+    db.upsert_edge(_ID_COGNITION, _ID_MEMORY,    "is_related_to", "CC-007")
+    db.upsert_edge(_ID_COGNITION, _ID_LEARNING,  "enables",       "CT-002")
+    db.upsert_edge(_ID_ATTENTION, _ID_LEARNING,  "enables",       "CT-002")
 
     # Expose as a namespace object so tests can access .vault, .db, .id_*
     class Ctx:

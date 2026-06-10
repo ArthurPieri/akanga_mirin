@@ -42,6 +42,45 @@ def _load_watcher():
             pytest.fail("Cannot import VaultWatcher from 'watcher' or 'akanga_core.watcher'")
 
 
+def _load_sync_worker():
+    """Import SyncWorker from 'sync_worker' or 'akanga_core.sync_worker'."""
+    try:
+        from sync_worker import SyncWorker  # noqa: PLC0415
+        return SyncWorker
+    except ModuleNotFoundError:
+        try:
+            from akanga_core.sync_worker import SyncWorker  # noqa: PLC0415
+            return SyncWorker
+        except ModuleNotFoundError:
+            pytest.fail("Cannot import SyncWorker from 'sync_worker' or 'akanga_core.sync_worker'")
+
+
+def _load_db():
+    """Import GraphDatabase from 'db' or 'akanga_core.db' (built in Phase 02)."""
+    try:
+        from db import GraphDatabase  # noqa: PLC0415
+        return GraphDatabase
+    except ModuleNotFoundError:
+        try:
+            from akanga_core.db import GraphDatabase  # noqa: PLC0415
+            return GraphDatabase
+        except ModuleNotFoundError:
+            pytest.fail("Cannot import GraphDatabase from 'db' or 'akanga_core.db'")
+
+
+def _load_sync_queue():
+    """Import the sync_queue module from 'sync_queue' or 'akanga_core.sync_queue'."""
+    try:
+        import sync_queue as m  # noqa: PLC0415
+        return m
+    except ModuleNotFoundError:
+        try:
+            from akanga_core import sync_queue as m  # noqa: PLC0415
+            return m
+        except ModuleNotFoundError:
+            pytest.fail("Cannot import 'sync_queue' or 'akanga_core.sync_queue'")
+
+
 @pytest.fixture()
 def event_bus():
     """A fresh EventBus instance for each test."""

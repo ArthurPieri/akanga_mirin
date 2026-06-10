@@ -18,18 +18,22 @@ def parse_node_file(path: str) -> Node:
        object with `.metadata` (the YAML dict) and `.content` (the Markdown body).
     2. Extract `title` from metadata. If missing, fall back to the filename
        without its extension: `os.path.splitext(os.path.basename(path))[0]`.
-    3. Extract `type` from metadata and wrap it in `NodeType(...)`. Default to
-       `"note"` if the key is absent.
-    4. Use `os.path.getctime(path)` and `os.path.getmtime(path)` (both wrapped
-       with `datetime.fromtimestamp(..., UTC)`) for `created_at` and `updated_at`.
-    5. Read the raw `id` field from metadata. Try to parse it with `UUID(str(raw_id))`.
-       If it is missing or invalid, generate a fresh one with `uuid4()`.
-    6. Construct and return a `Node(...)` with all the fields above, plus
-       `tags=fm.get("tags", [])`, `frontmatter=fm`, and `content=post.content`.
+    3. Extract `type` from metadata as a plain string. Default to `"note"`
+       if the key is absent. Valid values are `"note"` and `"reference"` —
+       there is no enum (see models.py).
+    4. Read the raw `id` field from metadata. Validate it with
+       `UUID(str(raw_id))` (inside try/except). If it is missing or invalid,
+       generate a fresh one with `uuid4()`. Either way, store it as a
+       *string*: `node_id = str(...)`.
+    5. Construct and return a `Node(...)` with the fields above, plus
+       `tags=fm.get("tags", [])`, `path=path`, `frontmatter=fm`, and
+       `content=post.content`. Leave `content_hash` at its default `""` —
+       the Phase 2 indexer fills it.
     """
     raise NotImplementedError(
-        "Call frontmatter.load(path), extract title/type/id/tags from .metadata, "
-        "build timestamps with datetime.fromtimestamp, and return a Node dataclass"
+        "Call frontmatter.load(path), extract title/type/id/tags from .metadata "
+        "(id is a str — validate with UUID(...) and fall back to str(uuid4())), "
+        "and return a Node dataclass with path, frontmatter, and content set"
     )
 
 
@@ -96,7 +100,7 @@ def create(title: str, node_type: str, vault: str) -> Node:
     the vault config (akanga.yaml) to stamp the correct owner and default workspace.
 
     HOW:
-    1. Generate a new UUID with uuid4().
+    1. Generate a new id with str(uuid4()) — Node.id is a string.
     2. Read vault config: config_path = Path(vault) / "akanga.yaml". If the file exists,
        load it with `import yaml; yaml.safe_load(config_path.read_text())` — `pyyaml` is
        installed as a dependency of `python-frontmatter` so `import yaml` works. If the

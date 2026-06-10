@@ -1,24 +1,24 @@
+"""Run the Akanga terminal UI against a vault.
+
+Usage: python run_tui.py <vault_path> <db_path>
+
+The db path is required so the SQLite file never lands in the solution
+directory by accident (e.g. ~/.local/share/akanga/akanga.db).
+"""
 import sys
-import os
 from pathlib import Path
 
-# Add src to path so akanga_core is discoverable
-src_path = str(Path(__file__).parent / "src")
-sys.path.insert(0, src_path)
+# Make akanga_core / akanga_tui importable when running from the solution directory.
+sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from akanga_tui.app import AkangaTUI
-from akanga_core.eventbus import EventBus
+from akanga_core.eventbus import EventBus  # noqa: E402
+from akanga_tui.app import AkangaTUI  # noqa: E402
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python run_tui.py <vault_path> [db_path]")
+    if len(sys.argv) < 3:
+        print("Usage: python run_tui.py <vault_path> <db_path>")
         sys.exit(1)
-    
+
     vault_path = Path(sys.argv[1]).absolute()
-    db_path = sys.argv[2] if len(sys.argv) > 2 else "akanga.db"
-    
-    # We need an event bus for the TUI
-    events = EventBus()
-    
-    app = AkangaTUI(db_path=db_path, vault_path=vault_path, event_bus=events)
+    app = AkangaTUI(db_path=sys.argv[2], vault_path=vault_path, event_bus=EventBus())
     app.run()

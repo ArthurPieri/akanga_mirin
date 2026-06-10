@@ -1,5 +1,7 @@
 # Phase 2 — Storage and Indexing
 
+**Estimated time: 3–4h**
+
 **Core concept:** The DB is not the source of truth — it is an expendable structural
 index derived from the files. Delete it at any time: `akanga index` rebuilds it
 completely. This constraint shapes every decision in this phase: never put anything
@@ -15,7 +17,7 @@ time. The DB makes reads fast. Nothing more.
 ## Learning Objectives
 
 By the end of this phase, you will be able to:
-- Explain why WAL mode is required when multiple threads access the same SQLite DB, and what symptom appears without it
+- Explain why WAL mode is required when multiple threads and processes access the same SQLite DB, and what symptom (`SQLITE_BUSY`) appears without it
 - Implement `upsert_node` with correct FTS5 synchronization and content-hash-based skip logic
 - Explain why a `threading.Lock` is needed even when SQLite is in WAL mode, and give a concrete example of a read-check-write race condition
 - Describe the two-pass indexing strategy and explain why pass 1 must complete before pass 2 begins
@@ -72,8 +74,13 @@ DB file — readers block. In WAL mode, writers append to a separate log file wh
 readers continue reading the last committed snapshot. Readers and writers don't block
 each other (except at checkpoint time, when the log is merged back). Akanga needs WAL
 because three things access the DB concurrently: the file watcher thread, the asyncio
-event loop (active manager, API), and CLI commands. Without WAL, they would deadlock
-under normal use.
+event loop (active manager, API), and CLI commands. Without WAL, a reader that hits
+the DB mid-write gets an `SQLITE_BUSY` error (`database is locked`) — not a deadlock,
+but a hard failure the caller would have to catch and retry. WAL's real payoff is
+**cross-process readers during writes**: a CLI command in another process can read
+the last committed snapshot while the watcher writes. Within a single process,
+WAL is not the whole story — compound operations are serialized by a
+`threading.Lock` (see Thread Safety below).
 
 > Akanga node: `WAL Mode`
 
@@ -145,6 +152,89 @@ it at a time.
 
 ---
 
+> **Security: Parameterized Queries — Never Do This**
+>
+> Every query in `db.py` must use parameterized queries. This is the single most
+> important security rule in any database layer, and it is also the rule beginners
+> most commonly get wrong by accident, not by intent.
+
+**The vulnerable pattern (never write this):**
+
+```python
+# WRONG — string formatting opens a SQL injection vector
+def search(self, query: str) -> list[Node]:
+    cursor = self.conn.execute(
+        f"SELECT * FROM nodes_fts WHERE nodes_fts MATCH '{query}'"
+    )
+    return [self._row_to_node(row) for row in cursor.fetchall()]
+```
+
+If `query` is `' OR 1=1 --`, this executes as:
+
+```sql
+SELECT * FROM nodes_fts WHERE nodes_fts MATCH '' OR 1=1 --'
+```
+
+which bypasses the search entirely and returns every row. Against a personal
+knowledge graph this is not a network attack — but the same mistake in any
+boundary-facing code (API query parameters, filenames, tag filters) produces a
+real vulnerability. The habit must be built here.
+
+**The safe pattern (always do this):**
+
+```python
+# CORRECT — ? placeholder, value passed as a tuple
+def search(self, query: str) -> list[Node]:
+    cursor = self.conn.execute(
+        "SELECT * FROM nodes_fts WHERE nodes_fts MATCH ?",
+        (query,)          # <-- the comma makes this a tuple, not a string
+    )
+    return [self._row_to_node(row) for row in cursor.fetchall()]
+```
+
+The SQLite driver sends the query string and the values to the database engine
+separately. The engine never concatenates them — it cannot misinterpret the value
+as SQL syntax regardless of what it contains.
+
+**Three real examples from Akanga's own queries:**
+
+```python
+# Node lookup by UUID
+cursor = self.conn.execute(
+    "SELECT * FROM nodes WHERE id = ?",
+    (node_id,)
+)
+
+# Tag filter (pass a LIKE pattern, not raw input)
+tag_pattern = f"%{tag}%"
+cursor = self.conn.execute(
+    "SELECT * FROM nodes WHERE tags LIKE ?",
+    (tag_pattern,)
+)
+
+# Edge lookup
+cursor = self.conn.execute(
+    "SELECT * FROM edges WHERE source_id = ? AND relation_id = ?",
+    (source_id, relation_id)
+)
+```
+
+**Why this also prevents logic errors (beyond security):**
+
+A misplaced comma or quote in a hand-formatted query string produces a syntax error
+at runtime — difficult to trace in a test failure. Parameterized queries move
+all value binding to the driver, which means the query string is a constant that
+can be read and reviewed at a glance. Linters and static analysis tools can catch
+typos in constant SQL strings; they cannot catch errors in f-strings that assemble
+SQL dynamically.
+
+> **Common Pitfall:** Forgetting the trailing comma when passing a single value:
+> `(node_id)` is just `node_id` in Python — a string, not a tuple. The driver
+> will try to iterate it character by character and raise an error or silently
+> bind the wrong value. Always write `(node_id,)`.
+
+---
+
 ## The Complete DB Schema
 
 The schema below is the exact `DB_SCHEMA` constant in `skeletons/phase_02/src/akanga_core/db.py`.
@@ -173,9 +263,18 @@ CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
     content='nodes',
     content_rowid='rowid'
 );
+CREATE TABLE IF NOT EXISTS sync_queue (
+    id TEXT PRIMARY KEY,
+    entity_id TEXT NOT NULL,
+    new_name TEXT NOT NULL,
+    processed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 ```
 
-> **Note:** The `sync_queue` table is added to DB_SCHEMA in Phase 2 (it was introduced conceptually in Phase 1B). The `active_results` table is added when building the active node manager
+> **Note:** The `sync_queue` table was introduced conceptually in Phase 1B (where your
+> functions ran against a hand-created table); here it becomes part of `DB_SCHEMA`, so
+> every `GraphDatabase` carries it. The `active_results` table is added when building the active node manager
 > (advanced — not covered in this phase). Fields like `author`, `created_at`, `updated_at`,
 > `meta`, `url`, `external_type`, and `description` that you see in node frontmatter are not
 > columns in the Phase 02 `nodes` table — they are stored only in the `.md` file itself and
@@ -207,19 +306,28 @@ CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
 | `close()` | Close the underlying SQLite connection |
 | `upsert_node(node)` | Insert or replace node row + sync FTS5 |
 | `delete_node(node_id)` | Remove node + cascade edges |
-| `upsert_edge(source_id, target_id, relation, relation_id)` | Insert a new edge row, return its UUID |
+| `upsert_edge(source_id, target_id, relation, relation_id)` | Insert a new edge row, return its UUID — four positional arguments |
 | `get_node(node_id) → Node` | Fetch by UUID |
 | `list_nodes(limit=100, offset=0) → list[Node]` | Paginated list of all nodes |
 | `get_neighbors(node_id) → list[Node]` | Outgoing edges → target nodes |
 | `get_backlinks(node_id) → list[Node]` | Incoming edges → source nodes |
+| `get_edges_from(node_id) → list[tuple[Node, str, str]]` | Outgoing edges as `(target_node, relation, relation_id)` triples |
+| `get_edges_to(node_id) → list[tuple[Node, str, str]]` | Incoming edges as `(source_node, relation, relation_id)` triples |
 | `search_fts(query, limit=20) → list[Node]` | FTS5 over title + tags |
 
-**`indexer.py`** — `VaultIndexer`:
+Why both pairs? `get_neighbors`/`get_backlinks` return bare nodes — enough to
+answer "what is connected to X?". But Phase 3's ego-graph builder must *label*
+every edge it renders ("A —contradicts→ B"), and a bare node list has thrown that
+information away. `get_edges_from`/`get_edges_to` return the relation alongside
+each node so Phase 3 never has to re-query the `edges` table.
 
-| Method | What it does |
+**`indexer.py`** — module-level functions (no class):
+
+| Function | What it does |
 |---|---|
-| `full_scan_and_index(vault, db)` | Full two-pass scan of vault directory |
-| `index_file(path, db)` | Single file upsert — used by file watcher in Phase 4 |
+| `scan_vault(vault_path) → Iterator[str]` | Yield every indexable `.md` path; skips hidden directories (e.g. `.git/`) and non-`.md` files |
+| `index_file(path, db, vault_path) → Node` | Parse + upsert one file — used by the file watcher in Phase 4; skips the upsert when the stored `content_hash` is unchanged |
+| `full_scan_and_index(vault_path, db) → int` | Full two-pass scan: pass 1 upserts all nodes, pass 2 resolves and upserts all edges; returns the count of nodes indexed |
 
 ---
 
@@ -227,7 +335,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
 
 **FTS5 operator injection.** FTS5 MATCH queries accept operators (`AND`, `OR`, `NOT`, `*`) directly in the query string. A user who searches for `fast*` or `cognition OR memory` gets a different query than expected — and a user who types a malformed FTS5 expression triggers a SQLite error. Mitigation: always use parameterized queries (never string-format the term into SQL), AND quote the term using FTS5's `"..."` literal syntax so it is treated as a phrase, not an operator expression. Example: `WHERE nodes_fts MATCH ?` with the parameter `'"cognition"'` (double-quoted inside the FTS5 string).
 
-**Thread safety: read-check-write must be atomic.** WAL mode prevents SQLite-level deadlocks between readers and writers, but it does not prevent application-level races. The sequence "read content_hash → compare → upsert if different" is a compound operation: between the read and the upsert, another thread can write a different hash. Wrap the entire compound in `with self._lock:` — not just the final write.
+**Thread safety: read-check-write must be atomic.** WAL mode stops readers and writers from blocking each other (`SQLITE_BUSY`) at the SQLite level, but it does not prevent application-level races. The sequence "read content_hash → compare → upsert if different" is a compound operation: between the read and the upsert, another thread can write a different hash. Wrap the entire compound in `with self._lock:` — not just the final write.
 
 **Derived index: never store prose body in the DB.** The DB is rebuilt from files on `akanga index`. If you store prose content in the DB, you have two sources of truth that can diverge — and rebuild becomes lossy if the DB row has content that the file doesn't. FTS5 covers `title` and `tags` only. Body search lives at the filesystem level (ripgrep). This is not a performance choice — it is an architectural constraint that keeps the DB expendable.
 
@@ -235,67 +343,66 @@ CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
 
 ## Deliverable
 
+Passing the Phase 2 suite: `make test PHASE=2` runs `tests/phase_02/`. These are
+the tests, by name:
+
+**`test_db.py` — GraphDatabase:**
+
+- `test_upsert_and_get_node` — upsert then `get_node` returns matching `id`, `title`, `type`
+- `test_upsert_is_idempotent` — upserting the same node twice leaves exactly one row
+- `test_upsert_updates_existing` — upserting a changed title overwrites the old one
+- `test_delete_node` — after delete, `get_node` returns `None`
+- `test_list_nodes` / `test_list_nodes_limit_offset` — listing and pagination
+- `test_search_fts_basic` — a node titled "Cognitive Load" matches the query `cognitive`
+- `test_search_fts_no_operator_injection` — operator-like input (`* OR title:*`) must not raise (SEC-06: quote the term)
+- `test_upsert_edge_and_get_neighbors` — after edge A→B, `get_neighbors(A.id)` includes B
+- `test_get_backlinks` — after edge A→B, `get_backlinks(B.id)` includes A
+- `test_delete_node_removes_edges` — deleting the source cascades to its outgoing edges
+- `test_wal_mode` — `PRAGMA journal_mode` is `wal` after `__init__`
+- `test_get_node_not_found` / `test_delete_nonexistent_node` — missing ids return `None` / no-op, never raise
+- `test_read_only_database` — reads still work on a read-only DB file; writes raise `sqlite3.Error`
+
+**`test_indexer.py` — indexer:**
+
+- `test_index_single_file` — `index_file` parses one `.md` and upserts the node
+- `test_full_scan_indexes_all_files` — every `.md` in the vault lands in the DB
+- `test_full_scan_skips_hidden_dirs` — files under `.git/` etc. are not indexed
+- `test_full_scan_skips_non_md_files` — a stray `.txt` is silently skipped
+- `test_full_scan_returns_count` — the scan returns the number of nodes indexed
+- `test_reindex_updates_node` — re-indexing a changed file updates the DB row
+- `test_two_pass_edge_resolution` — A links to B, A is indexed *before* B exists in the DB; after `full_scan_and_index`, the edge's `target_id` is resolved to B's UUID
+- `test_db_is_expendable` — index a vault, delete the `.db` file, re-index: search results are identical
+- `test_index_missing_file_raises` — indexing a nonexistent path raises
+
+**`test_links.py` — wikilinks:**
+
+- `test_extract_wikilinks_basic` / `test_extract_wikilinks_none` — `[[Title]]` extraction
+- `test_extract_wikilinks_skips_inline_edges` — `[[Target | relation]]` never yields the raw piped string
+- `test_resolve_wikilink_found` / `test_resolve_wikilink_case_insensitive` / `test_resolve_wikilink_not_found` — title → UUID resolution against the DB
+
+The two most important tests are `test_db_is_expendable` — it proves the core
+architectural promise of this phase — and `test_two_pass_edge_resolution` — it
+proves your indexer actually builds the graph, not just a node list. Illustrative
+sketch of the first (the real suite is `tests/phase_02/`):
+
 ```python
-def test_upsert_and_get():
-    db = GraphDatabase(tmp_db)
-    node = create(title="Test", type="note", vault=tmp_path)
-    db.upsert_node(node)
-    assert db.get_node(node.id).title == node.title
-
-def test_content_hash_skip(tmp_path, mocker):
-    # Arrange: write a real .md file so the indexer can read and hash it.
-    vault = tmp_path / "vault"
-    vault.mkdir()
-    md_file = vault / "test-node.md"
-    md_file.write_text("---\ntitle: Test\ntype: note\n---\nHello.\n")
-
-    db = GraphDatabase(tmp_path / ".akanga.db")
-
-    # First index — must call upsert_node to populate the DB.
-    indexer.index_file(str(md_file), db, str(vault))
-
-    # Spy AFTER the first index so we start with a clean call count.
-    spy = mocker.spy(db, "upsert_node")
-
-    # Second index of the same file — content hash unchanged, so the indexer
-    # must detect the match and return early WITHOUT calling upsert_node.
-    indexer.index_file(str(md_file), db, str(vault))
-
-    spy.assert_not_called()
-
-# Note: Implement test_content_hash_skip in your test_indexer.py. The skeleton's
-# index_file function should check content_hash before calling upsert_node — see
-# the hash-skip step in the index_file HOW section above.
-
-def test_two_pass_edge_resolution():
-    # Node A contradicts Node B. Index A before B.
-    # After full full_scan_and_index(), edge from A has target_id resolved to B's UUID.
-    ...
-
-def test_backlinks():
-    # After indexing A contradicts B, get_backlinks(B.id) returns [A]
-    ...
-
-def test_fts5_search():
-    db = GraphDatabase(tmp_db)
-    node = create(title="Fast Thinking", type="note", vault=tmp_path)
-    node.tags = ["cognition"]
-    db.upsert_node(node)
-    results = db.search_fts("cognition")
-    assert any(r.id == node.id for r in results)
-
 def test_db_is_expendable(tmp_path):
     vault, db_path = setup_vault_with_nodes(tmp_path)
-    indexer.full_scan_and_index(vault, GraphDatabase(db_path))
-    results_before = GraphDatabase(db_path).search_fts("cognition")
+    indexer.full_scan_and_index(str(vault), GraphDatabase(str(db_path)))
+    results_before = GraphDatabase(str(db_path)).search_fts("cognition")
     db_path.unlink()
-    indexer.full_scan_and_index(vault, GraphDatabase(db_path))
-    results_after = GraphDatabase(db_path).search_fts("cognition")
+    indexer.full_scan_and_index(str(vault), GraphDatabase(str(db_path)))
+    results_after = GraphDatabase(str(db_path)).search_fts("cognition")
     assert {r.id for r in results_before} == {r.id for r in results_after}
 ```
 
-Plus 7 vault nodes with typed edges. The `test_db_is_expendable` test is the most
-important one — it proves the core architectural promise of this phase.
+**Optional self-written test:** the content-hash skip in `index_file` (return
+early without calling `upsert_node` when the stored hash matches) is not covered
+by the shipped suite. Write `test_content_hash_skip` yourself with
+`mocker.spy(db, "upsert_node")`: index the same unchanged file twice and assert
+the spy is not called on the second pass.
+
+Plus 7 vault nodes with typed edges.
 
 ---
 
@@ -304,3 +411,9 @@ important one — it proves the core architectural promise of this phase.
 > **Solo:** The content hash skip means `upsert_node` is effectively idempotent for unchanged nodes. But the FTS5 virtual table must stay in sync with the `nodes` table. If you skip the upsert on hash match, when does FTS5 get updated? Is there a scenario where a hash match causes FTS5 to fall out of sync with the nodes table, and how would you detect it?
 
 > **Group:** WAL mode and `threading.Lock` both address concurrency — but at different layers. Map out the two layers: what does WAL prevent, and what does `Lock` prevent that WAL does not? Can you construct a concrete scenario (with two specific threads doing specific operations) where WAL alone is insufficient and `Lock` is the only thing preventing corruption?
+
+---
+
+> **Fast path:** Phase 6 (REST API) depends only on phases 0–2 — if you want a
+> usable API before committing to the TUI, do 0 → 1 → 2 → 6 and come back for
+> 3–5 afterwards. Nothing in phases 3–5 is a prerequisite for a working server.

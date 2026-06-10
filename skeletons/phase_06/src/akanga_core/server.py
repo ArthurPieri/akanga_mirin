@@ -70,14 +70,30 @@ def create_app(
        c. Yields (server runs here)
        d. Closes the DB on shutdown
     3. Create FastAPI(lifespan=lifespan)
-    4. app.include_router(router)  — wire all @router.* endpoints into the app.
+    4. Add CORS middleware (S2) — restricted to localhost dev origins::
+
+           from fastapi.middleware.cors import CORSMiddleware
+           app.add_middleware(
+               CORSMiddleware,
+               allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+               allow_methods=["*"],
+               allow_headers=["*"],
+           )
+
+       NEVER use allow_origins=["*"]. A wildcard lets ANY website your
+       browser visits issue requests to your personal knowledge graph —
+       the API is unauthenticated, so the origin allowlist is the only
+       thing standing between a malicious page and your vault. List the
+       exact localhost origins of your own front-end and nothing else.
+    5. app.include_router(router)  — wire all @router.* endpoints into the app.
        Without this, zero routes are registered and every request gets 404.
-    5. Register all route functions (defined below)
     6. Return app
     """
     raise NotImplementedError(
         "Create FastAPI app with lifespan that opens GraphDatabase and stores it "
-        "in _app_state. Register all routes and return the app."
+        "in _app_state. Add CORSMiddleware with allow_origins="
+        "['http://localhost:5173', 'http://127.0.0.1:5173'] — NEVER '*'. "
+        "Register all routes (include_router) and return the app."
     )
 
 

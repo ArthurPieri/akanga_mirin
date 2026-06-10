@@ -395,6 +395,126 @@ def test_parse_body_content(tmp_path, parse_fn):
 
 
 # ---------------------------------------------------------------------------
+# create() tests — the flagship deliverable of this phase
+# ---------------------------------------------------------------------------
+
+def _call_create(create_fn, *, title: str, node_type: str, vault):
+    """Call the learner's create() accepting either keyword convention.
+
+    Tries create(title=, type=, vault=) first (doc signature), then
+    create(title=, node_type=, vault=) (skeleton signature), then positional.
+    """
+    try:
+        return create_fn(title=title, type=node_type, vault=vault)
+    except TypeError:
+        pass
+    try:
+        return create_fn(title=title, node_type=node_type, vault=vault)
+    except TypeError:
+        pass
+    return create_fn(title, node_type, vault)
+
+
+def test_create_writes_file_with_fresh_uuid(tmp_vault, create_fn, parse_fn):
+    """create() must write a .md file into the vault and stamp a fresh uuid4."""
+    node = _call_create(
+        create_fn, title="Fast Thinking is Unreliable", node_type="note", vault=tmp_vault
+    )
+
+    md_files = [p for p in tmp_vault.rglob("*.md")]
+    assert md_files, (
+        "create() must write a .md file into the vault directory, but no .md "
+        f"file was found in {tmp_vault}.\n"
+        "Derive a slug from the title (e.g. 'My Note' → 'my-note.md') and "
+        "write it atomically with write_node_file."
+    )
+
+    node_path = _node_field(node, "path")
+    assert node_path and Path(node_path).exists(), (
+        f"create() returned a node whose path {node_path!r} does not exist on disk.\n"
+        "Return parse_node_file(written_path) so node.path points at the real file."
+    )
+
+    parsed = parse_fn(str(node_path))
+    parsed_id = _node_field(parsed, "id")
+    try:
+        parsed_uuid = uuid.UUID(str(parsed_id))
+    except ValueError:
+        pytest.fail(
+            f"The id written by create() is not a valid UUID: {parsed_id!r}.\n"
+            "Generate node ids with uuid.uuid4()."
+        )
+    assert parsed_uuid.version == 4, (
+        f"create() must stamp a version-4 UUID (uuid.uuid4()), got version "
+        f"{parsed_uuid.version} for {parsed_id!r}."
+    )
+    assert _node_field(parsed, "title") == "Fast Thinking is Unreliable", (
+        f"Title written by create() does not survive a parse round-trip.\n"
+        f"Expected 'Fast Thinking is Unreliable', got {_node_field(parsed, 'title')!r}."
+    )
+
+
+def test_create_stamps_author_from_vault_config(tmp_vault, create_fn, parse_fn):
+    """create() must read akanga.yaml and stamp the vault owner as 'author'.
+
+    The tmp_vault fixture writes an akanga.yaml with owner: 'Test User'.
+    """
+    node = _call_create(
+        create_fn, title="Author Stamp Node", node_type="note", vault=tmp_vault
+    )
+
+    node_path = _node_field(node, "path")
+    parsed = parse_fn(str(node_path))
+    fm = _node_field(parsed, "frontmatter")
+    assert isinstance(fm, dict), (
+        f"node.frontmatter must be the raw YAML dict, got {type(fm).__name__!r}."
+    )
+    assert fm.get("author") == "Test User", (
+        f"create() must stamp the vault owner from akanga.yaml as 'author' in "
+        f"frontmatter. Expected author 'Test User', got {fm.get('author')!r}.\n"
+        "Read the config with yaml.safe_load((vault / 'akanga.yaml').read_text()) "
+        "and write config['owner'] into the frontmatter 'author' key."
+    )
+
+
+def test_create_roundtrip(tmp_vault, create_fn, parse_fn, write_fn):
+    """create → parse → write → parse must preserve id, title, and content (doc Deliverable)."""
+    node = _call_create(
+        create_fn, title="Roundtrip via Create", node_type="note", vault=tmp_vault
+    )
+
+    node_path = _node_field(node, "path")
+    parsed = parse_fn(str(node_path))
+
+    assert str(_node_field(parsed, "id")) == str(_node_field(node, "id")), (
+        "id changed between create() and parse(). The UUID written to "
+        "frontmatter must be the one create() returns."
+    )
+    assert _node_field(parsed, "title") == _node_field(node, "title"), (
+        "title changed between create() and parse()."
+    )
+
+    # write accepts either (node, path) or (path, frontmatter_dict, content)
+    try:
+        write_fn(parsed, str(node_path))
+    except TypeError:
+        fm = _node_field(parsed, "frontmatter")
+        body = _node_field(parsed, "body", "content")
+        write_fn(str(node_path), dict(fm), body)
+
+    re_parsed = parse_fn(str(node_path))
+    assert str(_node_field(re_parsed, "id")) == str(_node_field(parsed, "id")), (
+        "id changed after write → parse. write_node_file must not rewrite the UUID."
+    )
+    assert _node_field(re_parsed, "title") == _node_field(parsed, "title"), (
+        "title changed after write → parse — the write → parse cycle must be idempotent."
+    )
+    assert _node_field(re_parsed, "body", "content") == _node_field(parsed, "body", "content"), (
+        "content changed after write → parse — the write → parse cycle must be idempotent."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Error-path tests  (CCR-9 requirement — at least one per phase)
 # ---------------------------------------------------------------------------
 

@@ -312,6 +312,72 @@ def test_create_node_path_traversal_blocked(test_client):
     )
 
 
+def test_create_node_absolute_path_blocked(test_client):
+    """POST with an absolute path must be rejected with 400 (SEC-02).
+
+    A '..'-substring check does not catch this case: '/etc/passwd' contains
+    no '..' at all, yet Path.joinpath with an absolute path REPLACES the
+    vault root entirely. Only resolve() + is_relative_to() defeats it.
+    """
+    resp = test_client.post(
+        "/api/v1/nodes",
+        json={
+            "path": "/etc/passwd",
+            "title": "Absolute Path Node",
+        },
+    )
+    assert resp.status_code == 400, (
+        f"Expected 400 for absolute path '/etc/passwd', got {resp.status_code}.\n"
+        f"Body: {resp.text}\n"
+        "vault_root.joinpath('/etc/passwd') silently DISCARDS the vault root "
+        "(pathlib semantics for absolute paths). The doc-banned '..'-in-path "
+        "check cannot catch this. Implement SEC-02 properly:\n"
+        "  full_path = vault_root.joinpath(body.path).resolve()\n"
+        "  if not full_path.is_relative_to(vault_root.resolve()):\n"
+        "      raise HTTPException(status_code=400, ...)"
+    )
+
+
+def test_create_node_symlink_escape_blocked(test_client, tmp_vault, tmp_path_factory):
+    """POST through a symlink that points outside the vault must return 400 (SEC-02).
+
+    SECURITY.md lists symlink escape as in-scope: a 'link' inside the vault
+    pointing at an outside directory makes 'link/x.md' lexically inside the
+    vault but physically outside it. Only Path.resolve() (which follows
+    symlinks) catches this — string/'..' checks pass it straight through.
+    """
+    import os
+
+    outside_dir = tmp_path_factory.mktemp("outside-vault")
+    link = tmp_vault / "link"
+    try:
+        os.symlink(outside_dir, link, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Platform does not support creating symlinks.")
+
+    resp = test_client.post(
+        "/api/v1/nodes",
+        json={
+            "path": "link/x.md",
+            "title": "Symlink Escape Node",
+        },
+    )
+    assert resp.status_code == 400, (
+        f"Expected 400 for symlink-escape path 'link/x.md', got {resp.status_code}.\n"
+        f"Body: {resp.text}\n"
+        "'link/x.md' contains no '..' and looks vault-relative, but resolves "
+        "outside the vault through the symlink. resolve() follows symlinks:\n"
+        "  full_path = vault_root.joinpath(body.path).resolve()\n"
+        "  if not full_path.is_relative_to(vault_root.resolve()):\n"
+        "      raise HTTPException(status_code=400, ...)"
+    )
+    escaped_file = outside_dir / "x.md"
+    assert not escaped_file.exists(), (
+        f"The server WROTE {escaped_file} outside the vault — the symlink "
+        "escape succeeded. Validate the resolved path BEFORE writing."
+    )
+
+
 def test_create_node_missing_title_returns_422(test_client):
     """POST /api/v1/nodes without a 'title' field must return 422 (FastAPI validation).
 

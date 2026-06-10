@@ -1,5 +1,9 @@
 # Architecture Overview
 
+> **Derived reference.** This document summarizes the system the curriculum builds.
+> On any conflict, the phase docs (`docs/learning/`) and the skeletons
+> (`skeletons/phase_NN/`) are authoritative — fix this document, not your code.
+
 ## Introduction
 
 Akanga is a personal knowledge graph where the file system is the database. Markdown
@@ -70,8 +74,11 @@ EventBus pub/sub mechanism. No layer reaches into the internals of a layer above
 
 - **Thread-async bridge.** The filesystem watcher (watchdog) runs in OS threads, while
   the TUI (Textual) and REST API (FastAPI) run in asyncio event loops. The EventBus
-  bridges these two worlds using `call_soon_threadsafe` to schedule coroutines from
-  thread callbacks without race conditions.
+  bridges these two worlds using `asyncio.run_coroutine_threadsafe(coro, loop)` to
+  submit coroutines from thread callbacks to the registered loop. The loop must be
+  registered via `set_loop()` before the watcher starts; events that arrive for async
+  subscribers before the loop is set are buffered and replayed once it is registered,
+  closing the startup race.
 
 - **Security by default.** FTS5 search queries wrap user-supplied terms in double
   quotes to prevent operator injection. File path operations use
@@ -85,19 +92,27 @@ EventBus pub/sub mechanism. No layer reaches into the internals of a layer above
 ### Node
 
 The fundamental unit of knowledge. A Node represents a single Markdown file parsed
-into structured fields: `id` (a UUID), `title`, `path` (relative to the vault root),
-`body` (the Markdown content), and `frontmatter` (an arbitrary YAML dictionary). The
-UUID is assigned at creation and stored in the frontmatter, giving each node an
-immutable identity that survives file renames and directory moves.
+into structured fields: `id` (a UUID string), `title`, `type` (`"note"` or
+`"reference"`), `tags`, `content_hash` (for change detection), `content` (the
+Markdown prose — kept on disk, never persisted in the database), `path` (relative to
+the vault root), and `frontmatter` (the YAML metadata dictionary). The UUID is
+assigned at creation and stored in the frontmatter, giving each node an immutable
+identity that survives file renames and directory moves.
 
 ### Edge
 
-A typed, directed relationship between two nodes. Edges are extracted from wiki-style
-links embedded in Markdown content using the syntax `[[Target|relation]]`. The system
-ships 71 built-in relation types organized into 11 semantic categories (Epistemic,
-Hierarchical, Structural, Causal/Temporal, Applied, Dialectical, Creative/Composition,
-Evaluative, Parallel/Analogical, Social, and Technical), each with a stable prefix-code
-identifier (e.g., `EP-001` for "supports"). Custom relation types are also permitted
+A typed, directed relationship between two nodes. The **primary edge mechanism is
+the frontmatter `edges:` block** — each entry stores the dual keys `relation` +
+`relation-id` and `target` + `target-id`. The inline wiki-link syntax
+`[[Target|relation]]` is the *capture* shorthand: edges written informally in prose
+are extracted and merged into the frontmatter block, which remains the source of
+truth. The system ships 72 built-in relation types organized into 11 semantic
+categories (Epistemic/Reasoning, Hierarchical/Taxonomic, Structural/Compositional,
+Causal/Temporal, Attribution/Provenance, Documentary/Reference,
+Comparative/Contrastive, Evolutionary/Versioning, Personal/Associative,
+Social/Organizational, and Topical/Classification), each with a stable prefix-code
+identifier (e.g., `EP-001` for "supports"). The full registry is
+`docs/foundations/relation-vocabulary.md`. Custom relation types are also permitted
 and assigned UUIDs at creation.
 
 ### Vault
@@ -110,30 +125,37 @@ relative to the vault root and confined to it.
 
 ### Database
 
-A derived SQLite index operating in WAL (Write-Ahead Logging) mode for concurrent
-read access. It contains three primary structures: a `nodes` table, an `edges` table,
-and a `nodes_fts` virtual table backed by FTS5 for full-text search. Database triggers
-keep the FTS index synchronized with the nodes table automatically. The database is
-entirely expendable -- deleting it and re-indexing the vault produces an identical
-result.
+A derived SQLite index (`class GraphDatabase`, schema created in `__init__`)
+operating in WAL (Write-Ahead Logging) mode for concurrent read access. It contains
+four primary structures: a `nodes` table (metadata only — id, path, title, type,
+tags, content_hash), an `edges` table (TEXT UUID ids, `relation` + `relation_id`),
+a `nodes_fts` external-content FTS5 virtual table indexing **title and tags only**,
+and a `sync_queue` table for deferred background jobs. The node's prose body is
+**never stored in the database** — it stays on disk and is read from the vault when
+needed. The FTS index is maintained explicitly inside `upsert_node` and
+`delete_node` (FTS5 external-content `'delete'` + insert, in the same transaction).
+The database is entirely expendable -- deleting it and re-indexing the vault
+produces an identical result.
 
 ### EventBus
 
 A thread-safe, in-process pub/sub message bus that decouples all components. Backed
 by a `defaultdict(list)` of subscribers protected by a `threading.Lock`, it supports
 three core operations: `subscribe`, `unsubscribe`, and `publish`. When an asyncio
-event loop is registered via `set_loop`, the EventBus can dispatch events into
-coroutines using `call_soon_threadsafe`. Key event types include `file_changed`,
-`file_deleted`, and `node_updated`.
+event loop is registered via `set_loop`, the EventBus dispatches async handlers
+using `asyncio.run_coroutine_threadsafe`; events that arrive for async subscribers
+before `set_loop` is called are buffered and replayed once the loop is registered.
+Key event types include `file_changed`, `file_deleted`, and `node_updated`.
 
 ### AkangaApp
 
 The top-level orchestrator that wires every component together. AkangaApp owns the
 Database, EventBus, VaultWatcher, and GitManager instances. On startup, it subscribes
 to file events and coordinates the core pipeline: a file change triggers a parse, the
-parse produces Node and Edge objects, those objects are upserted into the database, the
-database update triggers FTS sync, and the EventBus notifies downstream consumers (TUI,
-API, git). AkangaApp is the single entry point that interface layers delegate to.
+parse produces Node and Edge objects, those objects are upserted into the database
+(which synchronizes the FTS index inside the same transaction), and the EventBus
+notifies downstream consumers (TUI, API, git). AkangaApp is the single entry point
+that interface layers delegate to.
 
 ---
 
@@ -148,20 +170,24 @@ A user edits a Markdown file in their editor and saves it. The operating system 
 filesystem event (inotify on Linux, FSEvents on macOS). The VaultWatcher captures this
 event and forwards it to the Debouncer, which coalesces rapid successive events into a
 single notification after a 500-millisecond quiet period. The debounced event is
-published to the EventBus as `file_changed`. The Parser subscribes to this event, reads
-the file, extracts the Node and its Edges, and upserts them into the SQLite database.
-The database triggers update the FTS5 index. In parallel, the GitManager subscribes to
-the same event and stages an auto-commit if git integration is enabled.
+published to the EventBus as `file_changed`. The indexing pipeline subscribes to this
+event, reads the file, extracts the Node and its Edges, and upserts them into the
+SQLite database; `upsert_node` synchronizes the FTS5 index in the same transaction.
+In parallel, the GitManager subscribes to the same event and stages an auto-commit if
+git integration is enabled.
 
 ### Read Path
 
 Queries originate from the TUI, REST API, or MCP server. Full-text search hits the
-FTS5 virtual table. Graph traversals (BFS ego-graph) walk the edges table from a seed
-node. The RAG Context Builder composes graph context by running a BFS traversal,
-collecting triples (source, relation, target), and assembling them into a bounded
-context string (capped at 12,000 characters) suitable for LLM consumption. The MCP
-server exposes this as tool calls (`search_nodes`, `get_graph_context`) that Claude can
-invoke during a conversation.
+FTS5 virtual table (title + tags). Graph traversals (BFS ego-graph) walk the edges
+table from a seed node. The RAG Context Builder
+(`build_context(node, db, vault, max_triples=80)`) reads the node's body from disk,
+runs a BFS traversal, collects triples serialized in natural direction
+(`Source --[relation]--> Target`), and assembles them into a bounded context string
+(capped at `MAX_CONTEXT_CHARS = 12_000`) wrapped in `[KNOWLEDGE GRAPH CONTEXT]`
+delimiters. The MCP server exposes this as tool calls (`search_nodes`, `get_node`,
+`list_relation_types`, `get_context`, `create_node`) that Claude can invoke during a
+conversation.
 
 ---
 
@@ -171,8 +197,8 @@ invoke during a conversation.
 arguments are resolved to absolute paths and validated with `Path.resolve().is_relative_to()`
 before any read or write. Symlinks that escape the vault root are rejected.
 
-**Network boundary.** The MCP server binds exclusively to `127.0.0.1`. The REST API
-defaults to localhost. Neither service is intended for network exposure, and there is no
+**Network boundary.** The MCP server uses HTTP transport bound exclusively to
+`127.0.0.1` (default port 8001). The REST API defaults to localhost. Neither service is intended for network exposure, and there is no
 authentication layer -- by design, the threat model assumes a single trusted local user.
 
 **Query boundary.** User-supplied search terms passed to FTS5 are wrapped in double

@@ -7,8 +7,13 @@ event after the burst settles.
 
 Key design decisions:
 - Debounce is per-path so unrelated files fire independently.
+- ONE background worker thread polls the pending fire-times and fires
+  expired entries — never a ``threading.Timer`` per path (a timer per path
+  exhausts threads during bulk operations like a git checkout).
 - Hidden directories (.git/, .obsidian/) and editor temp files are filtered.
-- Observer runs as a daemon thread so it does not block process exit.
+- Observer and worker run as daemon threads so they do not block process
+  exit; ``stop()`` still shuts both down explicitly (set the stop event,
+  join the worker, stop+join the observer).
 
 Reference implementation: akanga_core/watcher.py in the main repo.
 """
@@ -52,6 +57,8 @@ class VaultWatcher:
         self._observer = None                         # watchdog Observer, set in start()
         self._pending: dict[str, float] = {}          # per-path scheduled fire times (time.time() + offset)
         self._lock = threading.Lock()
+        self._stop_event = threading.Event()          # signals _worker_loop to exit
+        self._worker: threading.Thread | None = None  # single debounce worker, set in start()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -82,26 +89,40 @@ class VaultWatcher:
            ``observer.schedule(handler, str(self.vault), recursive=True)``.
         4. Set ``observer.daemon = True`` then ``observer.start()``.
         5. Store the observer in ``self._observer``.
+        6. Start the single debounce worker thread::
+
+               self._stop_event.clear()
+               self._worker = threading.Thread(target=self._worker_loop, daemon=True)
+               self._worker.start()
         """
         raise NotImplementedError(
             "Create a watchdog Observer, schedule a FileSystemEventHandler on self.vault, "
             "set observer.daemon = True, then call observer.start(). "
-            "Store in self._observer."
+            "Store in self._observer. Then clear self._stop_event and start "
+            "self._worker = threading.Thread(target=self._worker_loop, daemon=True)."
         )
 
     def stop(self) -> None:
-        """WHAT: Stop the watchdog observer and cancel all pending events.
+        """WHAT: Stop the debounce worker and the watchdog observer, and
+        cancel all pending events.
 
         WHY: Clean shutdown prevents daemon threads from lingering and
-        avoids spurious events firing after the application exits.
+        avoids spurious events firing after the application exits. The
+        worker MUST be joined — otherwise it can still fire a debounced
+        event onto the bus after the rest of the app has shut down.
 
         HOW:
-        1. Acquire ``self._lock``, clear the ``self._pending`` dict.
-        2. If ``self._observer`` is not None:
+        1. Signal the worker: ``self._stop_event.set()``.
+        2. If ``self._worker`` is not None:
+           ``self._worker.join()`` (use a timeout, e.g. ``join(2.0)``, so a
+           wedged worker cannot hang shutdown forever).
+        3. Acquire ``self._lock``, clear the ``self._pending`` dict.
+        4. If ``self._observer`` is not None:
            call ``self._observer.stop()`` then ``self._observer.join()``.
         """
         raise NotImplementedError(
-            "Clear all pending events (under lock), then stop() and join() the observer"
+            "self._stop_event.set(); join the worker thread; clear self._pending "
+            "(under lock); then stop() and join() the observer"
         )
 
     # ------------------------------------------------------------------
@@ -135,34 +156,72 @@ class VaultWatcher:
             "or the file does not end with '.md'"
         )
 
+    def _worker_loop(self) -> None:
+        """WHAT: The single debounce worker — polls ``self._pending`` and
+        fires entries whose debounce window has expired. Runs until
+        ``self._stop_event`` is set.
+
+        WHY: This is the required debounce design: ONE polling thread for
+        the whole watcher. A ``threading.Timer`` per path would spawn a
+        thread per file event and exhaust threads during bulk operations
+        (git checkout touching hundreds of files). One worker scales to any
+        event rate at the cost of (at most) one poll-interval of latency.
+
+        HOW:
+        1. Loop while ``not self._stop_event.is_set()``.
+        2. Each iteration:
+           a. ``now = time.time()``.
+           b. Under ``self._lock``, collect the expired paths::
+
+                  due = [p for p, t in self._pending.items() if t <= now]
+
+           c. For each due path call ``self._fire(path)`` — OUTSIDE the
+              lock (``_fire`` takes the lock itself, and it publishes onto
+              the eventbus, which must never happen while holding our lock).
+        3. Sleep between polls without blocking shutdown::
+
+               self._stop_event.wait(timeout=poll_interval)
+
+           A poll interval of ``min(0.05, self.debounce_ms / 1000 / 4)`` (or
+           simply 50 ms) is fine. Using ``Event.wait`` instead of
+           ``time.sleep`` makes ``stop()`` take effect immediately.
+        4. Exit the loop (and the thread) when the event is set — ``stop()``
+           joins this thread.
+        """
+        raise NotImplementedError(
+            "while not self._stop_event.is_set(): collect expired paths from "
+            "self._pending under the lock, call self._fire(path) for each outside "
+            "the lock, then self._stop_event.wait(timeout=~0.05)."
+        )
+
     def _schedule(self, path: str) -> None:
         """WHAT: Schedule a debounced ``file_changed`` event for *path*.
 
         WHY: A single editor save can produce 5–10 OS-level events within
-        50 ms. Using ``threading.Timer`` for every path is inefficient and
-        can cause thread exhaustion during bulk operations (e.g., git checkout).
-        A better approach uses a single background worker thread.
+        50 ms. Recording (and re-recording) a fire time is O(1); the single
+        ``_worker_loop`` thread does the actual firing. Never create a
+        ``threading.Timer`` per path — thread exhaustion (see _worker_loop).
 
         HOW:
         1. Acquire ``self._lock``.
         2. Record the "next fire time" for this path:
            ``self._pending[path] = time.time() + (self.debounce_ms / 1000)``.
-        3. If your implementation uses a background worker thread, ensure it
-           is notified or waking up to check for expired timers.
-        4. Release the lock.
+           Re-recording an existing path pushes its fire time back — that IS
+           the debounce: the burst keeps moving the deadline until it stops.
+        3. Release the lock. No notification is needed — ``_worker_loop``
+           polls ``self._pending`` on its own schedule.
 
         Args:
             path: Absolute string path that changed.
         """
         raise NotImplementedError(
-            "Under self._lock: record path and its scheduled fire time (now + debounce) "
-            "in a pending dict. Use a single background worker thread to poll and "
-            "fire events instead of creating a threading.Timer per path, "
-            "which prevents thread exhaustion."
+            "Under self._lock: self._pending[path] = time.time() + debounce_ms/1000. "
+            "Nothing else — the single _worker_loop thread polls and fires; "
+            "do NOT create a threading.Timer per path."
         )
 
     def _fire(self, path: str) -> None:
-        """WHAT: Called when the burst has settled for a path.
+        """WHAT: Called by ``_worker_loop`` when the burst has settled for a path.
 
         WHY: This is the actual event publication step — it runs after
         ``debounce_ms`` milliseconds of silence for *path*, meaning the

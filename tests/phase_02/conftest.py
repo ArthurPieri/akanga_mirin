@@ -133,18 +133,9 @@ def populated_db(tmp_path: Path, tmp_vault: Path):
     db.upsert_node(node_b)
     db.upsert_node(node_c)
 
-    db.upsert_edge({
-        "source_id": node_a.id,
-        "target_id": node_b.id,
-        "relation": "supports",
-        "relation_id": "EP-001",
-    })
-    db.upsert_edge({
-        "source_id": node_b.id,
-        "target_id": node_c.id,
-        "relation": "contradicts",
-        "relation_id": "EP-002",
-    })
+    # upsert_edge is positional: (source_id, target_id, relation, relation_id)
+    db.upsert_edge(node_a.id, node_b.id, "supports", "EP-001")
+    db.upsert_edge(node_b.id, node_c.id, "contradicts", "EP-002")
 
     yield db
     db.close()

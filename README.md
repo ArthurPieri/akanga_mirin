@@ -29,6 +29,10 @@ developer working alone (more with optional foundation-doc study and vault work)
 Per-phase estimates above are realistic learner time, not author time. Phase 5
 (Textual TUI) is the steepest; budget 12–20 hours if you have not used Textual before.
 
+> **Fast path.** Want a usable tool sooner? Phase 6 depends only on phases 0–2:
+> do **0 → 1A → 1B → 2 → 6**, then come back for 3–5. This is the roadmap's MVP cut —
+> roughly 10–14 hours to a working REST API over your own knowledge graph.
+
 ---
 
 ## Who this is for
@@ -98,7 +102,11 @@ The `study` Makefile target opens a three-pane tmux layout:
 make study PHASE=3   # opens Phase 3 in the study layout
 ```
 
-Requires: `tmux`, `nvim`, `glow`, `claude` (Claude Code CLI).
+Requires: `tmux`, `nvim`, `glow`, `claude` (Claude Code CLI). The script checks for
+these and tells you what to install if anything is missing.
+
+For the Phase 5 stretch-goal graph renderer (Kitty graphics + canvas), install the
+optional dependency group: `uv sync --extra graph`.
 
 ---
 
@@ -135,6 +143,8 @@ akanga_mirin/
 make help                    # full target list
 
 make study PHASE=3           # open study session for Phase 3
+make vault-init              # create ./vault + canonical akanga.yaml
+make vault-check PHASE=2     # validate your vault (per-phase expected nodes)
 make test PHASE=2            # test your code (set AKANGA_SRC first)
 make test-solution PHASE=2   # test reference solution
 make skeleton PHASE=1        # copy Phase 1 skeleton into ./src/

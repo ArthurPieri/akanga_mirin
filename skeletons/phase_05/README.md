@@ -25,16 +25,40 @@ knowledge graph using the [Textual](https://textual.textualize.io/) framework.
 | `src/akanga_tui/__init__.py` | Package marker |
 | `src/akanga_tui/app.py` | Main `AkangaTUI` app — layout, bindings, actions |
 
+## Carry-forward: akanga_core
+
+This skeleton intentionally ships NO `akanga_core/` directory — an empty
+placeholder package could shadow your real one on `PYTHONPATH`. The TUI
+imports your cumulative implementation from earlier phases (point
+`AKANGA_SRC` / `PYTHONPATH` at your own `src/`). Required modules:
+
+| Module | Used for |
+|---|---|
+| `akanga_core/models.py` | `Node` (monotonic since Phase 0) + `Edge` (1A) |
+| `akanga_core/parser.py` | `parse_node_file`, `write_node_file`, `create`, write-back set |
+| `akanga_core/db.py` | `GraphDatabase` incl. `get_edges_from` / `get_edges_to` |
+| `akanga_core/indexer.py` | `full_scan_and_index` (the `r` refresh action) |
+| `akanga_core/links.py` | wikilink extraction/resolution |
+| `akanga_core/graph.py` | `build_ego_graph` (the `g` ego-graph screen) |
+| `akanga_core/eventbus.py` | live updates from the watcher |
+| `akanga_core/watcher.py` | `VaultWatcher` (optional live re-index) |
+| `akanga_core/sync_queue.py` | rename-propagation queue |
+
 ## Key bindings
+
+Canonical keymap (matches the phase doc — vim/ranger conventions):
 
 | Key | Action |
 |---|---|
 | `/` | Search nodes |
 | `n` | Create new note |
-| `e` | Edit in `$EDITOR` |
-| `d` | Delete selected node |
-| `g` | Ego-graph of selected node |
-| `G` | Vault-wide graph overview |
+| `e` | Edit inline in a `TextArea` (`Ctrl+S` saves) |
+| `d` | Delete selected node (ModalScreen confirmation) |
+| `g` | Ego-graph screen for selected node |
+| `Ctrl+g` | Vault-wide graph screen |
+| `G` | Jump to bottom of node list |
+| `j` / `k` | Next / previous node |
+| `o` | Open URL (reference nodes only) |
 | `?` | Keyboard shortcut cheatsheet |
 | `r` | Full re-index and refresh |
 | `q` | Quit |
@@ -58,10 +82,13 @@ call Textual widget methods directly from a non-Textual thread.
 Use fractional widths (`1fr`, `2fr`) rather than fixed pixel/character
 counts — they adapt to any terminal width.
 
-### `$EDITOR` integration
-Suspend Textual with `with self.suspend():`, run the editor via
-`subprocess.run([editor, path])`, then resume.  Re-parse and re-index
-the file after the editor exits.
+### Inline editing
+`e` swaps the center `Markdown` widget for a `TextArea` pre-loaded with the
+node body; `Ctrl+S` writes the file (atomic `write_node_file`), re-parses,
+re-indexes, and restores the `Markdown` view.  Suspending to `$EDITOR`
+(`with self.suspend(): subprocess.run([editor, path])`) is an optional
+extra once inline editing works — it does not survive every terminal/tmux
+combination, so it must not be the default.
 
 ## Running the TUI
 

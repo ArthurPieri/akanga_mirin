@@ -8,10 +8,11 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Header, Input, ListItem, ListView, Markdown, Static, Label
 
-from akanga_core.db import Database
+from akanga_core.db import GraphDatabase
 from akanga_core.eventbus import EventBus
 from akanga_core.graph import build_ego_graph
 from akanga_core.models import Node
+from akanga_core.parser import parse_node_file
 
 class NodeItem(ListItem):
     """Custom ListItem to store node metadata."""
@@ -47,7 +48,7 @@ class AkangaTUI(App):
 
     def __init__(self, db_path: str, vault_path: Path, event_bus: EventBus) -> None:
         super().__init__()
-        self.db = Database(db_path)
+        self.db = GraphDatabase(db_path)
         self.vault_path = vault_path
         self.event_bus = event_bus
         self._all_nodes: list[Node] = []
@@ -97,9 +98,14 @@ class AkangaTUI(App):
         """Display node content and ego-graph."""
         node = self.db.get_node(node_id)
         if node:
-            self.query_one("#node-markdown", Markdown).update(node.body)
             try:
-                ego = build_ego_graph(node_id, self.db)
+                # BUG-01: prose lives on disk, not in the database.
+                body = parse_node_file(node.path).content
+            except OSError:
+                body = "*(file missing on disk)*"
+            self.query_one("#node-markdown", Markdown).update(body)
+            try:
+                build_ego_graph(node_id, self.db)
                 # Simplified display
                 lines = [f"Ego-graph for: [bold]{node.title}[/bold]"]
                 # ... graph rendering logic ...

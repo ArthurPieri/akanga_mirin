@@ -50,6 +50,18 @@ make run                 # launch the Textual TUI (after implementation)
 > First time here? Run `make setup` first, then `direnv allow` to activate the environment.
 > See `docs/foundations/makefile-basics.md` for a full Makefile walkthrough.
 
+> **WARNING — tmux will break the graph renderer; run the TUI in a plain terminal window.**
+> The Kitty graphics protocol (the stretch-goal pixel renderer below) degrades or
+> silently fails inside tmux: passthrough must be explicitly enabled
+> (`set -g allow-passthrough on`), it requires tmux ≥ 3.3, and terminal-capability
+> detection *from inside* tmux is unreliable even then — the renderer may wrongly
+> conclude your terminal can't do graphics. This is a known trap the author lost
+> hours to. For all graph-rendering work, run the TUI in a plain Ghostty or Kitty
+> window — **not** inside the `make study` tmux pane. Keep tmux for the docs/tests
+> panes; launch the app itself with `make run` from a separate terminal (`make run`
+> prints this reminder). Everything else in this phase (list, detail, edit, search)
+> works fine inside tmux.
+
 ## Concepts
 
 ### Reactive TUI
@@ -101,15 +113,23 @@ the graph view also works. Neither is the fallback — both are first-class.
 
 > Akanga node: `Keyboard-First Mouse-Aware`
 
-### Two-Layer Graph Renderer
+### Two-Layer Graph Renderer (STRETCH GOAL)
 
-The ego-graph is not rendered as ASCII art. Two layers, chosen at runtime based on
-terminal capability:
+**This renderer is a stretch goal, not a deliverable.** The baseline graph view in
+this phase is the `render_ascii()` ego-graph you already built in Phase 3, displayed
+in a Textual screen. It is tested, dependency-free, and good enough up to ~12 nodes.
+The two-layer renderer is what you build *after* checkpoints 5.1 and 5.2 are green,
+if you want to push further. Be honest with yourself about the costs: it needs extra
+dependencies (`uv sync --extra graph` installs the optional `[graph]` group —
+textual-kitty, textual-canvas, NetworkX, matplotlib), and Layer 1 works best **outside
+tmux** (see the warning at the top of this doc).
+
+Two layers, chosen at runtime based on terminal capability:
 
 **Layer 1 — Pixel-perfect (Kitty, Ghostty, WezTerm, iTerm2):** `textual-kitty` renders
 the graph as a PNG image inside a Textual widget using the Kitty Terminal Graphics
 Protocol. NetworkX computes a force-directed layout; matplotlib renders it (dark
-background, colored nodes by type, styled edges by direction). The result is
+background, node shape + color by type, styled edges by direction). The result is
 indistinguishable from a desktop graph view. Falls back to Layer 2 if the protocol
 is unsupported.
 
@@ -118,19 +138,18 @@ Unicode characters (`▀ ▄ █`) to simulate a pixel grid at 2x vertical resol
 Nodes are colored rounded boxes; edges are Bresenham lines terminated with Unicode
 arrow characters (`→`, `⟵`). Significantly better than ASCII art and works anywhere.
 
-The ASCII-art approach is not used — it has a hard ~12-node ceiling and is not worth
-building as an end state.
-
 > Akanga node: `Two-Layer Graph Renderer`
 
-### Suspend / Resume
+### Suspend / Resume (optional upgrade)
 
-When a user presses `e` (edit), the TUI can optionally hand the terminal to an
-external editor (v1 feature). Textual provides `app.suspend()` as a context manager:
-the TUI pauses all rendering and input handling, the OS terminal is restored, the
-external editor runs, and on exit Textual reclaims the terminal and resumes. During
-suspension, the file watcher continues running — any changes the user makes in the
-editor will be detected and indexed when the TUI resumes, triggering a live refresh.
+The **deliverable** edit model is inline: pressing `e` swaps the content panel to a
+`TextArea`, and `Ctrl+S` saves. Suspend/resume is the *optional upgrade* on top:
+the TUI hands the terminal to an external `$EDITOR`. Textual provides `app.suspend()`
+as a context manager: the TUI pauses all rendering and input handling, the OS terminal
+is restored, the external editor runs, and on exit Textual reclaims the terminal and
+resumes. During suspension, the file watcher continues running — any changes the user
+makes in the editor will be detected and indexed when the TUI resumes, triggering a
+live refresh.
 
 > Akanga node: `Suspend/Resume`
 
@@ -166,10 +185,10 @@ editor will be detected and indexed when the TUI resumes, triggering a live refr
 │   Blink Gladwell│ Prose body here...     │        ProjectX          │
 │                 │                        │                          │
 │ ▸ reference     │                        │ Edges ──────────────     │
-│   Thinking Fast │ [[Blink | contradicts]]│ ──[EP-002]──> Blink      │
+│   Thinking Fast │ [[Blink | contradicts]]│ this ─[EP-002]→ Blink    │
 │                 │                        │                          │
-│                 │                        │ Backlinks ···────────    │
-│                 │                        │ <··[EP-001]··· Kahneman  │
+│                 │                        │ Backlinks ──────────     │
+│                 │                        │ Kahneman ─[EP-001]→ this │
 │ [/] filter...   │                        │                          │
 └─────────────────┴────────────────────────┴──────────────────────────┘
   j/k:nav  Enter:open  n:new  e:edit  d:del  g:graph  /:search  ?:help
@@ -180,6 +199,14 @@ editor will be detected and indexed when the TUI resumes, triggering a live refr
 ## Keybindings
 
 Following vim and ranger conventions. Domain wins where vim and Akanga conflict.
+
+> **This table is canonical.** Earlier versions of the skeleton bound keys differently
+> (`shift+g` for the vault graph, `e` suspending to `$EDITOR`); the skeleton's
+> `BINDINGS` now match this table. The two historically contested keys, settled:
+> `G` is **jump to bottom of list** (universal vim — never the graph), and the vault
+> graph lives on `Ctrl+g`. `e` opens the **inline TextArea** editor saved with
+> `Ctrl+S`; suspending to `$EDITOR` is an optional upgrade, not the binding's
+> deliverable behavior.
 
 | Key | Action | Convention |
 |---|---|---|
@@ -205,9 +232,12 @@ Following vim and ranger conventions. Domain wins where vim and Akanga conflict.
 
 ---
 
-## Graph View Design
+## Graph View Design (checkpoint 5.3 — stretch)
 
-The ego-graph screen is a separate Textual `Screen` pushed onto the stack:
+The ego-graph screen is a separate Textual `Screen` pushed onto the stack. The
+**baseline** version renders `render_ascii(build_ego_graph(...))` from Phase 3 inside
+a `Static` widget — build that first. The pixel/canvas version sketched below is the
+stretch goal (requires `uv sync --extra graph`; run outside tmux):
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -245,15 +275,34 @@ main screen with that node focused).
 
 ## What You Build
 
-**`tui.py`** — `AkangaTUI(App)`:
+**`akanga_tui/app.py`** — `AkangaTUI(App)` (constructor takes `vault` and `db_path`):
 
-Three main widgets:
+Three main panels:
 
-| Widget | Responsibility |
+| Panel | Responsibility |
 |---|---|
-| `NodeTree` | Nodes grouped by type, sorted by title. Tag hint. Workspace filter. Responds to `/` search. |
-| `ContentView` | Renders selected node's markdown body. Switches to `TextArea` in edit mode (Ctrl+S saves). |
-| `DetailPanel` | Type, tags, graph memberships, edges (outgoing with relation ID), backlinks (incoming), last 5 active results. |
+| `NodeTree` (left) | Nodes grouped by type, sorted by title. Tag hint. Workspace filter. Responds to `/` search. |
+| `ContentView` (center) | Renders selected node's markdown body. Switches to `TextArea` in edit mode (Ctrl+S saves). |
+| `DetailPanel` (right) | Type, tags, graph memberships, edges (outgoing with relation ID), backlinks (incoming), last 5 active results. |
+
+The skeleton starts you with stock Textual widgets behind stable IDs —
+`ListView(id="left-panel")`, `Markdown(id="center-panel")`, `Label(id="right-panel")` —
+and the tests only require ListView-compatible behavior. Growing them into the custom
+`NodeTree` / `ContentView` / `DetailPanel` widgets described here is the intended
+trajectory, not the starting requirement.
+
+> **Optional upgrade — `$EDITOR` suspend.** Once the inline TextArea editor works
+> (that is the deliverable the tests certify), you can add a second edit path that
+> suspends the TUI and opens the file in `$EDITOR`:
+>
+> ```python
+> with self.suspend():
+>     subprocess.run([os.environ.get("EDITOR", "nano"), node.path])
+> # re-parse, upsert, refresh panels on resume
+> ```
+>
+> Bind it to a *different* key (e.g. `E`) so `e` keeps its canonical inline meaning.
+> This is a v1 extra — skip it entirely and lose nothing this phase depends on.
 
 Key reactive variables:
 ```python
@@ -263,27 +312,29 @@ edit_mode:        reactive[bool]        = reactive(False)
 active_workspace: reactive[str]         = reactive("nhamandu-uuid")
 ```
 
-**`graph_screen.py`** — `EgoGraphScreen(Screen)`:
+**`graph_screen.py`** — `EgoGraphScreen(Screen)` (checkpoint 5.3 — baseline part):
 ```python
 class EgoGraphScreen(Screen):
     depth: reactive[int] = reactive(1)
     # calls build_ego_graph() from Phase 3
-    # detects terminal capability → Layer 1 or Layer 2 renderer
+    # baseline: render_ascii(ego) in a Static widget
+    # stretch:  detects terminal capability → Layer 1 or Layer 2 renderer
     # +/- keys adjust depth and re-render
     # click on node → navigate_to(node_id)
     # Esc → app.pop_screen()
 ```
 
-**`graph_renderer.py`** — two render paths:
+**`graph_renderer.py`** — two render paths (**STRETCH GOAL** — requires
+`uv sync --extra graph`; Layer 1 works best outside tmux):
 ```python
 def render_graph_kitty(ego: EgoGraph) -> Image:
     # NetworkX spring layout → matplotlib figure → PIL Image
-    # Nodes: colored circles by type, labeled
+    # Nodes: shape + color by type, labeled  (never color alone)
     # Edges: solid for outgoing, dashed for incoming, labeled with relation
 
 def render_graph_canvas(ego: EgoGraph, canvas: Canvas):
     # textual-canvas Bresenham lines for edges
-    # Half-block colored rounded boxes for nodes
+    # Half-block colored rounded boxes for nodes (shape varies by type)
     # Unicode arrows at edge endpoints
     # Falls back to simple list if > 30 nodes
 ```
@@ -304,6 +355,86 @@ async def _handle_node_updated(self, node_id: str):
 
 ---
 
+## Interaction States
+
+A TUI is a state machine, and most "it feels broken" bugs are unhandled states.
+Specify these before writing widget code:
+
+**Initial focus.** On mount, focus the node list (`self.query_one("#left-panel").focus()`)
+and highlight the first item if one exists. An app that starts with nothing focused
+silently eats every keypress — the most common "my bindings don't work" report.
+
+**Binding priority vs Input focus — the j/k-vs-typing problem.** Textual routes a key
+to the focused widget first; app-level `BINDINGS` see it only if nothing focused
+consumed it. Two failure modes, one per wrong choice:
+
+- If letter keys (`j`, `k`, `n`, `e`...) are plain app bindings, they work — until the
+  search `Input` is focused, at which point the Input rightly consumes them as text.
+  That is *correct*: while typing a query, `j` must insert "j", not move the cursor.
+- If you "fix" navigation by marking letter bindings `Binding(..., priority=True)`,
+  they now fire *while the user is typing in the Input* — typing "node" creates a new
+  node. Never give priority to printable-character bindings.
+
+The solution is focus discipline, not priority: keep letter bindings non-priority;
+let the focused list handle j/k (or forward via `action_focus_next_node`); `escape`
+in the search Input returns focus to the list; reserve `priority=True` for chords
+that must work everywhere (`ctrl+s` to save in edit mode, `ctrl+g`).
+
+**Per-panel empty / loading / error states.**
+
+| Panel | Empty | Loading | Error |
+|---|---|---|---|
+| Node list | "No nodes — press n to create one" | populate in `on_mount`; show "Loading…" placeholder if you defer to a worker | DB unreadable → notify + empty list, never a traceback |
+| Content | "Select a node" | n/a (reads are fast) | file missing on disk → "File not found: <path>" in the panel, app stays up |
+| Detail | "Select a node" | n/a | node with zero edges shows "(no connections)", not a blank panel |
+
+The empty-vault case is a tested deliverable (`test_tui_empty_vault_starts_without_crash`):
+guard every `on_mount` query and `list[0]` access against zero nodes.
+
+**Minimum terminal size: 100×28.** The three panels have CSS `min-width`s of
+20 + 30 + 20 cells, plus borders, header, and footer — below roughly 100 columns by
+28 rows the layout degrades into unusable slivers. Check `self.size` on mount and on
+`Resize`, and overlay a "Terminal too small (need 100×28)" message rather than
+rendering garbage. (`make study`'s side panes make this easy to hit — another reason
+to run the app in its own window.)
+
+**Delete confirmation.** `d` must never delete directly. Push a `ModalScreen[bool]`
+("Delete '<title>'? y/n"), and only on a `True` dismissal remove the file, the DB row,
+and the incoming edges. Escape or `n` cancels. The confirmation modal is a tested
+deliverable, not a nicety.
+
+---
+
+## Checkpoints — 5.1 / 5.2 / 5.3
+
+12–20 hours is too long to fly without landmarks. Mirror the Phase 1A/1B precedent
+and treat this phase as three internal checkpoints, each with its own green bar:
+
+**Checkpoint 5.1 — List + detail panels (the current test suite).** App mounts with
+the three-panel layout, node list populated from the DB, selection updates the
+content/detail panels, `/` opens search, `q` quits, empty vault doesn't crash.
+Certified by: `test_tui_app_starts_without_crash`, `test_tui_shows_node_titles`,
+`test_tui_quit_on_q`, `test_tui_search_mode_on_slash`, `test_tui_node_count_matches_db`,
+`test_tui_empty_vault_starts_without_crash`. (~4–6h)
+
+**Checkpoint 5.2 — Edit + mutations + live updates.** Inline TextArea editing with
+`Ctrl+S`, `n` creates, `d` deletes behind the ModalScreen confirmation, `?` shows the
+help overlay, and the Phase 4 EventBus pipeline refreshes the list when a file changes
+on disk. Certified by: the delete-confirmation and help-overlay tests, plus manual
+verification of the live-update pipeline (edit a vault file in another terminal and
+watch the list refresh). (~4–7h)
+
+**Checkpoint 5.3 — Graph screen (baseline), then stretch.** `g` pushes
+`EgoGraphScreen` rendering Phase 3's `render_ascii` output; `+`/`-` adjust depth;
+`Esc` pops back. Stretch: the two-layer pixel/canvas renderer (`uv sync --extra graph`,
+outside tmux). No automated tests certify this checkpoint — it is verified by use.
+(~4–7h, stretch open-ended)
+
+Stop and commit at every checkpoint. A learner who finishes only 5.1 still has a
+working, navigable knowledge-graph browser.
+
+---
+
 ## Common Pitfalls
 
 **Loading data in compose() instead of on_mount():** `compose()` runs before widgets exist — database queries here can cause errors. Always load data in `on_mount()`.
@@ -318,56 +449,58 @@ async def _handle_node_updated(self, node_id: str):
 
 ## Deliverable
 
-```python
-async def test_node_tree_populated(app):
-    async with app.run_test() as pilot:
-        tree = app.query_one(NodeTree)
-        assert len(tree._nodes) > 0
+The test suite is in `tests/phase_05/test_tui.py`, driven by Textual's headless
+`Pilot`. Your app class must be importable as `akanga_tui.app.AkangaTUI` (or
+`AkangaApp`) and accept `vault` and `db_path` constructor arguments.
 
-async def test_search_filters_tree(app):
-    async with app.run_test() as pilot:
-        await pilot.press("/")
-        await pilot.type("cognition")
-        await pilot.pause()
-        visible = app.query_one(NodeTree).visible_nodes
-        assert all("cognition" in n.tags for n in visible)
+**Checkpoint 5.1 tests (shipped):**
 
-async def test_j_k_navigation(app):
-    async with app.run_test() as pilot:
-        await pilot.press("j")
-        first = app.selected_node_id
-        await pilot.press("j")
-        second = app.selected_node_id
-        assert first != second
+- `test_tui_app_starts_without_crash` — mounts, accepts `q`, exits cleanly
+- `test_tui_shows_node_titles` — the db's node titles appear in the widget tree after mount
+- `test_tui_quit_on_q` — `q` actually stops the app (`app.is_running` is False after)
+- `test_tui_search_mode_on_slash` — `/` makes a visible `Input` widget appear
+- `test_tui_node_count_matches_db` — one list item per node in the db (ListView/ListItem)
+- `test_tui_empty_vault_starts_without_crash` — zero-node vault must not raise
+  IndexError/KeyError/AttributeError
 
-async def test_edit_save_roundtrip(app, tmp_vault):
-    async with app.run_test() as pilot:
-        await pilot.press("enter")
-        await pilot.press("e")
-        await pilot.type(" appended")
-        await pilot.press("ctrl+s")
-        content = app.selected_node_path.read_text()
-        assert "appended" in content
+**Checkpoint 5.2 tests (new in this suite):**
 
-async def test_live_update_adds_node(app, tmp_vault):
-    async with app.run_test() as pilot:
-        initial = len(app.query_one(NodeTree)._nodes)
-        create(title="External Note", type="note", vault=tmp_vault)
-        await asyncio.sleep(0.6)   # debounce + re-index
-        assert len(app.query_one(NodeTree)._nodes) == initial + 1
+- the delete-confirmation tests — `d` pushes a confirmation `ModalScreen`; the node is
+  removed only after confirming, and escape cancels with nothing deleted
+- the help-overlay test — `?` shows the keybinding cheatsheet overlay and any key
+  dismisses it
 
-async def test_graph_screen_opens(app):
-    async with app.run_test() as pilot:
-        await pilot.press("enter")
-        await pilot.press("g")
-        assert isinstance(app.screen, EgoGraphScreen)
-        await pilot.press("escape")
-        assert isinstance(app.screen, AkangaTUI)
-```
+**Aspirational (doc sketches, not in the suite — verify manually):** earlier versions
+of this doc sketched `test_node_tree_populated`, `test_search_filters_tree`,
+`test_j_k_navigation`, `test_edit_save_roundtrip`, `test_live_update_adds_node`, and
+`test_graph_screen_opens` as if they shipped. They do not (yet). The behaviors are
+still part of the deliverable — j/k navigation, the edit/save round-trip, and the
+live-update pipeline in particular — but you certify them by hand: edit a vault file
+in a second terminal and watch the list refresh; that is the full Phase 4 → Phase 5
+pipeline in action. The graph screen (checkpoint 5.3) has no automated tests at all.
 
-Plus 9 vault nodes with typed edges. The `test_live_update_adds_node` test proves
-the full pipeline from file change to TUI refresh. The graph screen tests prove
-navigation works end-to-end.
+Plus 9 vault nodes with typed edges.
+
+---
+
+## Accessibility Note
+
+**Encode node types with shape + color, never color alone.** In every place a node's
+type is signaled — the list's type groups, the detail panel, and especially the graph
+renderers — pair the color with a redundant channel: a distinct shape (circle/square/
+diamond in the stretch renderer), a glyph prefix (`●` note, `▸` reference), or the
+type name as text. Roughly 1 in 12 men cannot reliably distinguish the red/green
+pairs that "obvious" palettes lean on, and a monochrome or low-color terminal strips
+color entirely.
+
+**TUIs and screen readers do not mix.** Textual paints a character grid, not an
+accessibility tree — screen readers generally cannot navigate it. That is a real
+limitation of this phase's artifact, not something to patch around in the TUI. The
+programmatic alternative is Phase 6: the REST API exposes every operation the TUI
+performs (list, read, search, create, delete) as plain JSON over HTTP, which is
+scriptable and assistive-technology-friendly. If accessibility is a requirement for
+your context, treat the Phase 6 API as the primary interface and this TUI as one
+client of it.
 
 ---
 

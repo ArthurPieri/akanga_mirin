@@ -1,5 +1,7 @@
 # Phase 3 — Graph Algorithms
 
+**Estimated time:** 2–3 hours
+
 **Core concept:** This is the phase where you actually write graph code. Every previous
 phase built the data — files, edges, DB rows. Phase 3 asks: given a node, what does
 its neighborhood look like? The answer requires implementing a real traversal
@@ -14,7 +16,7 @@ By the end of this phase, you will be able to:
 - Explain the structural difference between BFS and DFS and state concretely why BFS is the right choice for ego-graphs
 - Implement BFS using `collections.deque` with a depth limit and a visited set for cycle detection
 - Explain why cycle detection is mandatory in Akanga specifically (cycles are permitted by design, not forbidden)
-- Describe the ego-graph concept: what it includes, what the `direction` flag on `EgoEdge` enables, and why both incoming and outgoing edges are traversed
+- Describe the ego-graph concept: what it includes, why both incoming and outgoing edges are traversed, and why the `direction` flag on `EgoEdge` is presentation metadata — not a change to how the edge is stored
 
 ---
 
@@ -23,7 +25,7 @@ By the end of this phase, you will be able to:
 Check each item you can answer confidently. If you can't check 3 or more, review the
 linked foundation doc before proceeding.
 
-- [ ] Phase 2 is complete: I have a working `GraphDatabase` with `upsert_node`, `get_neighbors`, `get_backlinks`, and FTS5 search
+- [ ] Phase 2 is complete: I have a working `GraphDatabase` with `upsert_node`, `get_edges_from`, `get_edges_to`, and FTS5 search
   → Required: complete Phase 2 deliverable tests first
 - [ ] I know what `collections.deque` is and the difference between `append` / `appendleft` and `pop` / `popleft`
   → Prerequisite: core Python `collections` module knowledge
@@ -97,11 +99,22 @@ neighbors of neighbors; and so on.
 ### Directed Edge Traversal
 
 In a directed graph, edges have a source and a target. When building an ego-graph, you
-must decide which direction to follow. Akanga shows both: outgoing edges (this node
-makes a claim about something else — rendered with a solid arrow) and incoming edges
-(something else makes a claim about this node — rendered with a dotted arrow). Both
-directions are explored in BFS. Each edge in the result carries a `direction` flag so
-the TUI and ASCII renderer can distinguish them visually.
+must decide which direction to follow. Akanga explores both in BFS: outgoing edges
+(this node makes a claim about something else) and incoming edges (something else
+makes a claim about this node).
+
+**The natural-direction rule.** An `EgoEdge` *always* stores the edge in its natural
+direction: `source_id` is the node that makes the claim, `target_id` is the node it
+points at — regardless of which side of the edge the root sits on. Rendering is
+therefore uniform in both cases: `source --[relation]--> target`. The `direction`
+flag records only how the edge relates to the root (`OUTGOING` = root is the source,
+`INCOMING` = root is the target) so the TUI can group edges under "Edges" vs
+"Backlinks" headings. It is **presentation metadata** — it never flips the stored
+source/target and never changes how the triple is serialized.
+
+Every `EgoEdge` also carries the **real** `relation` and `relation_id` from the edges
+table — Phase 2's `get_edges_from(node_id)` / `get_edges_to(node_id)` return full edge
+rows, so the relation comes for free during traversal. Do not settle for `relation=""`.
 
 > Akanga node: `Directed Edge Traversal`
 
@@ -159,54 +172,89 @@ class EgoGraph:
     root:  Node
     nodes: dict[str, Node]   # UUID → Node (includes root)
     edges: list[EgoEdge]
-    depth: int               # max hops requested
 ```
+
+(No `depth` field — the requested depth is an argument to `build_ego_graph`, not part
+of the result. The skeleton and tests agree on this shape.)
 
 **The traversal — written out explicitly, because this is the learning (`build_ego_graph`):**
 
 ```python
-def build_ego_graph(root_id: str, db: GraphDatabase, depth: int = 1) -> EgoGraph:
-    queue   = deque([(root_id, 0)])
-    visited = {root_id}
-    nodes   = {root_id: db.get_node(root_id)}
-    edges   = []
+def build_ego_graph(root_id: str, db: GraphDatabase, max_depth: int = 2) -> EgoGraph:
+    root = db.get_node(root_id)
+    if root is None:
+        raise ValueError(f"Node {root_id!r} not found")
+
+    queue      = deque([(root_id, 0)])
+    visited    = {root_id}
+    nodes      = {root_id: root}
+    edges      = []
+    seen_edges = set()   # dedup key: (source_id, target_id, relation)
+
+    def add_edge(source_id, target_id, relation, relation_id, direction):
+        key = (source_id, target_id, relation)
+        if key in seen_edges:
+            return       # BFS reaches both endpoints — add each logical edge once
+        seen_edges.add(key)
+        edges.append(EgoEdge(source_id=source_id, target_id=target_id,
+                             relation=relation, relation_id=relation_id,
+                             direction=direction))
 
     while queue:
         node_id, current_depth = queue.popleft()
 
-        if current_depth >= depth:
+        if current_depth >= max_depth:
             continue   # include the node but don't expand further
 
-        # Note: `get_neighbors` and `get_backlinks` return Node objects, not Edge
-        # objects. To get the relation name, you must query the edges table directly
-        # or use `ego.edges` after building.
-        for neighbor in db.get_neighbors(node_id):
-            if neighbor.id and neighbor.id not in visited:
-                visited.add(neighbor.id)
-                nodes[neighbor.id] = neighbor
-                queue.append((neighbor.id, current_depth + 1))
-            edges.append(EgoEdge(..., direction=EdgeDirection.OUTGOING))
+        # Outgoing — get_edges_from returns real edge rows, so relation and
+        # relation_id come for free (Phase 2 API).
+        for edge in db.get_edges_from(node_id):
+            if edge.target_id not in visited:
+                visited.add(edge.target_id)
+                nodes[edge.target_id] = db.get_node(edge.target_id)
+                queue.append((edge.target_id, current_depth + 1))
+            add_edge(edge.source_id, edge.target_id, edge.relation,
+                     edge.relation_id, EdgeDirection.OUTGOING)
 
-        for backlink in db.get_backlinks(node_id):
-            if backlink.id not in visited:
-                visited.add(backlink.id)
-                nodes[backlink.id] = backlink
-                queue.append((backlink.id, current_depth + 1))
-            edges.append(EgoEdge(..., direction=EdgeDirection.INCOMING))
+        # Incoming — same natural direction (source → target); only the
+        # direction flag differs.
+        for edge in db.get_edges_to(node_id):
+            if edge.source_id not in visited:
+                visited.add(edge.source_id)
+                nodes[edge.source_id] = db.get_node(edge.source_id)
+                queue.append((edge.source_id, current_depth + 1))
+            add_edge(edge.source_id, edge.target_id, edge.relation,
+                     edge.relation_id, EdgeDirection.INCOMING)
 
-    return EgoGraph(root=nodes[root_id], nodes=nodes, edges=edges, depth=depth)
+    return EgoGraph(root=root, nodes=nodes, edges=edges)
 ```
+
+Edge deduplication is a **core deliverable**, not an advanced extra: when BFS visits
+both endpoints of an edge, the same logical edge is encountered twice. Deduplicate by
+`(source_id, target_id, relation)` — the relation belongs in the key because two nodes
+may legitimately be connected by more than one relation type.
+
+> **Why relations are required here (forward reference):** Phase 8 serializes these
+> edges as `src --[rel]--> tgt` triples for an LLM. If you take the shortcut of
+> `relation=""`, every triple degrades to a generic `relates_to` and the entire
+> 71-type relation vocabulary never reaches the model. The relation you store in
+> Phase 3 is the relation the LLM sees in Phase 8.
 
 **ASCII renderer:**
 
 ```python
 def render_ascii(ego: EgoGraph) -> str:
     """
-    Outgoing: root ──[relation]──> neighbor
-    Incoming: root <·····[relation]···· neighbor
+    Header:     [ROOT] <root.title>
+    Each edge:    <source_title> -[<relation or 'links'>]-> <target_title>
+    No edges:     (no connections)
     Degrades gracefully beyond ~12 nodes (truncates with count).
     """
 ```
+
+Both directions render identically — edges are already stored in natural direction,
+so there is no separate "incoming" arrow style. The format is `-[relation]->`, the
+same serialization Phase 8 will use.
 
 ---
 
@@ -214,7 +262,9 @@ def render_ascii(ego: EgoGraph) -> str:
 
 **Missing cycle detection causes an infinite loop.** Akanga explicitly permits cycles (A supports B, B supports A is valid and meaningful). If you forget the `visited` set, BFS will enqueue A → B → A → B → … until memory is exhausted. This is not a theoretical edge case — any two nodes the user connects bidirectionally will trigger it. The fix is one line: check `if node_id not in visited` before enqueuing.
 
-**Forgetting incoming edges in the ego-graph.** The ego-graph is supposed to show "what does this node connect to, and what connects to it." If you only traverse `get_neighbors` (outgoing), you miss all nodes that point *to* the ego node. The ego-graph must traverse both directions in BFS — outgoing via `get_neighbors` and incoming via `get_backlinks` — with the `direction` flag on `EgoEdge` distinguishing them for the renderer.
+**Forgetting incoming edges in the ego-graph.** The ego-graph is supposed to show "what does this node connect to, and what connects to it." If you only traverse `get_edges_from` (outgoing), you miss all nodes that point *to* the ego node. The ego-graph must traverse both directions in BFS — outgoing via `get_edges_from` and incoming via `get_edges_to` — with the `direction` flag on `EgoEdge` recording each edge's relationship to the root. Remember: the flag is presentation metadata; the stored `source_id`/`target_id` stay in natural direction either way.
+
+**Skipping edge deduplication.** When both endpoints of an edge are inside the ego-graph, BFS encounters the edge twice — once expanding each endpoint. Without a `seen_edges` set keyed by `(source_id, target_id, relation)`, the renderer shows every connection twice and the tests fail on duplicate signatures. Deduplicate as you append, not afterward.
 
 **Over-engineering the ASCII renderer.** The ASCII ego-graph has a hard practical ceiling of around 12 nodes regardless of implementation quality. Beyond ~12 nodes, labels overlap and arrows cross unreadably — this is a constraint of the rendering medium, not a bug. Do not spend time building a sophisticated layout algorithm. The correct behavior beyond the ceiling is graceful degradation: truncate with a count ("… and 7 more nodes"). Richer rendering is a v2 feature requiring a proper canvas.
 
@@ -222,46 +272,72 @@ def render_ascii(ego: EgoGraph) -> str:
 
 ## Deliverable
 
-```python
-def test_ego_graph_depth_1():
-    # A contradicts B, A supports C
-    # build_ego_graph(A, depth=1) → nodes {A,B,C}, 2 outgoing edges
-    ...
+The complete test suite is in `tests/phase_03/test_graph.py` — 12 tests in three groups:
 
-def test_ego_graph_incoming():
-    # A contradicts B
-    # build_ego_graph(B, depth=1) → nodes {A,B}, 1 incoming edge from A
-    ...
+**Depth semantics (`TestBuildEgoGraphDepth`):**
 
-def test_cycle_does_not_loop():
-    # A supports B, B supports A
-    # build_ego_graph(A, depth=3) terminates, returns {A,B}, not infinite
-    ...
+- `test_build_ego_graph_depth_1` — in chain A→B→C, `max_depth=1` from A includes A and B, not C
+- `test_build_ego_graph_depth_2` — `max_depth=2` from A includes all of A, B, C
+- `test_ego_graph_max_depth_zero` — `max_depth=0` returns only the root (raising `ValueError` is also accepted)
 
-def test_depth_boundary():
-    # A → B → C
-    # depth=1 → {A,B};  depth=2 → {A,B,C}
-    ...
+**Structure (`TestBuildEgoGraphStructure`):**
 
-def test_disconnected_node():
-    # D has no edges
-    # build_ego_graph(D, depth=1) → {D}, edges []
-    ...
+- `test_build_ego_graph_includes_root` — root is always in `ego.nodes`, and `ego.root` is that same object
+- `test_build_ego_graph_cycle_handling` — cycle A→B→A at `max_depth=3` terminates
+- `test_circular_graph_resolution` — bidirectional A⇄B at `max_depth=5`: exactly 2 nodes, and **no duplicate edge signatures** — this is where the dedup deliverable is enforced
+- `test_build_ego_graph_both_directions` — A→B (outgoing) and C→A (incoming) both appear at `max_depth=1` from A
+- `test_build_ego_graph_edge_directions` — `EgoEdge.direction` is `OUTGOING` for root→X, `INCOMING` for X→root, while source/target stay natural
+- `test_build_ego_graph_empty_graph` — a node with no edges yields one node, zero edges
+- `test_build_ego_graph_nonexistent_root` — unknown `root_id` raises (never silently returns `None`)
 
-def test_ascii_render_arrows():
-    ego = build_ego_graph(root_id, db, depth=1)
-    output = render_ascii(ego)
-    assert "──" in output or "<·" in output
+**Rendering (`TestRenderAscii`):**
+
+- `test_render_ascii_returns_string` — non-empty `str`, no crash
+- `test_render_ascii_contains_node_title` — the root's title appears in the output
+
+All tests call `build_ego_graph(root_id, db, max_depth=N)` — the keyword is
+`max_depth`, matching the skeleton signature. The cycle tests are the most important:
+they prove the visited-set fix works and reflect a deliberate design choice (cycles
+permitted, traversal safe).
+
+Plus 8 vault nodes with typed edges.
+
+---
+
+## See It Work — 15 Minutes
+
+Tests prove the algorithm; this proves the *feature*. Once `make test PHASE=3` is
+green, point your code at your own vault — the one you've been building since Phase 0 —
+and render the ego-graph of a real node in your terminal:
+
+```bash
+uv run python - <<'EOF'
+from pathlib import Path
+from akanga_core.db import GraphDatabase
+from akanga_core.indexer import full_scan_and_index
+from akanga_core.graph import build_ego_graph, render_ascii
+
+db = GraphDatabase("./.akanga.db")
+full_scan_and_index(Path("./vault"), db)
+
+# Pick the node you created for this phase
+root = next(n for n in db.list_nodes(limit=1000) if n.title == "BFS")
+print(render_ascii(build_ego_graph(root.id, db, max_depth=2)))
+db.close()
+EOF
 ```
 
-Plus 8 vault nodes with typed edges. The `test_cycle_does_not_loop` test is the most
-important — it proves the visited-set fix works and reflects a deliberate design
-choice (cycles permitted, traversal safe).
+You should see the `BFS` node connected to `Graph Traversal`, `DFS`, `Ego-Graph`,
+and whatever else you linked — with the **real relation names** (`subtype_of`,
+`contrasts_with`, `is_applied_in`) in the arrows. If every arrow says `links` or is
+blank, your edges aren't carrying relations: go back to `get_edges_from`/`get_edges_to`.
+Swap the title for any other node in your vault and explore. This is the navigation
+mechanism the TUI builds on in Phase 5.
 
 ---
 
 ## Reflect
 
-> **Solo:** The traversal tracks `visited` by node ID. But what about edges — could the same edge appear twice in `ego.edges`? Walk through the case where A → B and B → A both exist and depth=2. How many times does the edge A → B appear in the result (after calling `build_ego_graph`), and is that correct behavior for the renderer?
+> **Solo:** The traversal tracks `visited` by node ID and `seen_edges` by `(source_id, target_id, relation)`. Walk through the case where A → B and B → A both exist and `max_depth=2`: how many times does BFS *encounter* the edge A → B, and why does the dedup key include `relation` rather than just `(source_id, target_id)`? What real vault situation would the simpler key silently destroy?
 
 > **Group:** BFS was chosen over DFS because it naturally groups nodes by distance from the root. But the ego-graph result (`EgoGraph.nodes`) is a dict keyed by UUID — distance is not stored. Should distance be included in the result? What would the TUI or ASCII renderer need to do differently if it had distance information, and is that worth the added complexity at this stage?

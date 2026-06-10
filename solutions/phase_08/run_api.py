@@ -1,24 +1,29 @@
+"""Run the Akanga REST API against a vault.
+
+Usage: python run_api.py <vault_path> <db_path>
+
+The db path is required so the SQLite file never lands in the solution
+directory by accident (e.g. ~/.local/share/akanga/akanga.db).
+"""
 import sys
-import uvicorn
 from pathlib import Path
 
-# Add src to path
-src_path = str(Path(__file__).parent / "src")
-sys.path.insert(0, src_path)
+import uvicorn
 
-from akanga_core.app import AkangaApp
-from akanga_core.server import create_app
+# Make akanga_core importable when running from the solution directory.
+sys.path.insert(0, str(Path(__file__).parent / "src"))
+
+from akanga_core.app import AkangaApp  # noqa: E402
+from akanga_core.server import create_app  # noqa: E402
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python run_api.py <vault_path> [db_path]")
+    if len(sys.argv) < 3:
+        print("Usage: python run_api.py <vault_path> <db_path>")
         sys.exit(1)
-    
-    vault_path = sys.argv[1]
-    db_path = sys.argv[2] if len(sys.argv) > 2 else "akanga.db"
-    
-    akanga = AkangaApp(vault_path=vault_path, db_path=db_path)
+
+    akanga = AkangaApp(vault_path=sys.argv[1], db_path=sys.argv[2])
     akanga.start_all()
-    
+
     app = create_app(akanga)
+    # SEC-04: localhost only.
     uvicorn.run(app, host="127.0.0.1", port=8000)

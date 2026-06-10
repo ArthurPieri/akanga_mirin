@@ -41,6 +41,7 @@ GLOW         := glow
 
 .PHONY: help \
         study docs-phase docs-all foundations \
+        vault-init vault-check \
         run serve mcp \
         test test-solution test-all test-mine test-phase-range \
         verify verify-all \
@@ -63,6 +64,10 @@ help: ## Show this help message
 	@printf '\n'
 	@printf '  \033[1;33mStudy workflow\033[0m\n'
 	@grep -E '^(study|docs-phase|docs-all|foundations)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
+		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
+	@printf '\n'
+	@printf '  \033[1;33mVault\033[0m\n'
+	@grep -E '^(vault-init|vault-check)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
 		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
 	@printf '\n'
 	@printf '  \033[1;33mRun your app\033[0m\n'
@@ -156,8 +161,28 @@ foundations: ## Open a foundations doc in glow (TOPIC=sqlite → sqlite-basics.m
 	$(GLOW) -p "$$DOC"
 
 # =============================================================================
-# DOCS — serve the learning path as a website
+# VAULT — create and validate the learner's knowledge vault
 # =============================================================================
+
+vault-init: ## Create ./vault + akanga.yaml (owner from git config, Nhamandu default workspace)
+	@if [ -f "vault/akanga.yaml" ]; then \
+		echo "vault/akanga.yaml already exists — skipping."; \
+	else \
+		mkdir -p vault; \
+		OWNER=$$(git config user.name 2>/dev/null || true); \
+		OWNER="$${OWNER:-Your Name}"; \
+		WS_UUID=$$($(PYTHON) -c "import uuid; print(uuid.uuid4())"); \
+		printf 'owner: %s\ndefault_workspace:\n  name: Nhamandu\n  id: %s   # generated at init, never changes\nworkspaces: []\n' \
+			"$$OWNER" "$$WS_UUID" > vault/akanga.yaml; \
+		printf 'Created \033[36mvault/akanga.yaml\033[0m (owner: %s, default workspace: Nhamandu)\n' "$$OWNER"; \
+	fi; \
+	printf 'Vault ready at \033[36m./vault/\033[0m\n'
+
+vault-check: ## Validate your vault (PHASE=N checks that phase's expected nodes; FULL=1 adds the >=50-node check)
+	@ARGS=""; \
+	if [ "$(origin PHASE)" != "file" ]; then ARGS="--phase $(PHASE)"; fi; \
+	if [ -n "$(FULL)" ]; then ARGS="$$ARGS --full"; fi; \
+	$(PYTHON) scripts/validate_vault.py "$${VAULT:-./vault}" $$ARGS
 
 # =============================================================================
 # RUN — launch the learner's own app (TUI / REST API / MCP server)

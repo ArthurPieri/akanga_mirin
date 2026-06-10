@@ -1,5 +1,7 @@
 # Phase 7 — Version Control as a Feature
 
+**Estimated time:** 2–3 hours
+
 **Core concept:** The vault is a directory of Markdown files that change over time.
 That is exactly what git was built for. The insight is treating git not as optional
 developer infrastructure but as a first-class user feature: every node you write,
@@ -136,6 +138,99 @@ as any README.
 
 ---
 
+> **Security: Auto-Push and Remote Trust**
+
+**Why auto-push to a public remote exposes your knowledge graph:**
+
+The vault contains everything you think — notes, research threads, unfinished ideas,
+references to projects, relationships between concepts. A single `git push` to a
+public GitHub repository makes every node, every edge, and the complete history of
+your thinking permanently public and indexed by search engines. Unlike a database
+breach, a git push to a public repo is not reversible: forks and crawlers may
+already have the content before you delete the repository.
+
+This permanence cuts both ways locally too: auto-commit means anything that lands in
+a vault file — an API key pasted into a note, a phone number, someone else's personal
+data — is captured in git history within seconds and survives deleting the note.
+Removing it later requires history rewriting (see the remediation note below), which
+is exactly the kind of operation auto-commit was supposed to spare you.
+
+`auto_push: false` is the correct default and should remain the default for any
+Akanga installation. Do not change it to `true` without understanding exactly
+where the content is going.
+
+**The safe defaults and what each setting means:**
+
+```yaml
+git:
+  enabled: true
+  commit_on_session_end: true   # local commits only — always safe
+  commit_interval: null         # periodic local commits — always safe
+  auto_push: false              # NEVER enable without reading this section
+  remote: origin
+```
+
+Local commits (`commit_on_session_end`, `commit_interval`) produce only local
+git history. They are safe regardless of what `remote` is configured — nothing
+leaves your machine. The only setting that sends data off-machine is `auto_push: true`.
+
+**Private remote vs public remote:**
+
+| Remote type | Auto-push safe? | Conditions |
+|---|---|---|
+| Self-hosted Gitea (LAN-only, no public route) | Yes | Server not reachable from the internet |
+| Private GitHub/GitLab repository | Yes | Repository visibility set to Private; your account uses SSH key or token auth |
+| Public GitHub/GitLab repository | No | Any push is permanently public |
+| Shared team repository | Depends | Does every team member intend to share your vault content? |
+| Cloud sync via git (Dropbox-as-remote, etc.) | Depends | Who has access to the sync destination? |
+
+**How to audit your vault before enabling auto-push:**
+
+Before enabling `auto_push: true` for the first time, review what you are about
+to send:
+
+```bash
+# 1. Check the configured remote:
+git remote -v
+
+# 2. Check the remote repository's visibility (GitHub CLI):
+gh repo view --json isPrivate
+
+# 3. Review what files are tracked (nothing in .gitignore should appear):
+git ls-files
+
+# 4. Check that .akanga.db is NOT tracked:
+git ls-files | grep -E '\.(db|db-wal|db-shm)$'  # should return nothing
+
+# 5. Review recent commits before they go up:
+git log --oneline -20
+git show HEAD
+```
+
+Only after this audit should you change `auto_push` to `true`.
+
+**If a secret already made it into history:** deleting the file and committing again
+does not remove it — every prior commit still contains it. Use
+[`git filter-repo`](https://github.com/newren/git-filter-repo) to rewrite history and
+strip the file or string, rotate the secret regardless (assume it leaked the moment
+it was committed if the repo ever had a remote), and force-push only after
+understanding what that does to clones.
+
+**The explicit push keybinding (`P`) is intentional:**
+
+The TUI's `P` keybinding (push to remote with confirmation) exists precisely
+because push is the one irreversible action in Akanga's version control model.
+The confirmation dialog shows what branch is being pushed and to which remote.
+Read it before pressing Enter. This is not a UX nicety — it is the control
+point for an action that cannot be undone.
+
+> **If you want automatic off-site backup:** configure a private repository on a
+> self-hosted Gitea instance or a private GitHub repo, verify the remote URL with
+> `git remote -v`, and only then set `auto_push: true`. The backup value of
+> auto-push is real; the risk is in doing it without knowing where the data goes.
+
+---
+
 ## Vault Nodes to Create
 
 | Node | Type | Key Edges |
@@ -145,6 +240,7 @@ as any README.
 | `Non-Fatal Error Handling` | note | `is_applied_in` → `Akanga GitManager`; `contrasts_with` → `Fail-Fast Pattern` |
 | `Idempotent Commit` | note | `blocks` → `Empty Commit`; `uses` → `is_dirty Check` |
 | `.gitignore as Contract` | note | `blocks` → `Unversioned DB Files`; `enables` → `Clean Vault History` |
+| `Remote Trust` | note | `is_a` → `Security Posture`; `qualifies` → `Git as User Feature`; `is_applied_in` → `GitManager` |
 
 ---
 
@@ -192,6 +288,21 @@ All git operations are non-fatal by design: every method wraps its GitPython cal
 `try/except` and logs failures at WARNING level rather than re-raising. A user without
 git installed (or whose repo is in a broken state) must still be able to use Akanga.
 
+**Vault config (`akanga.yaml`) — git section:**
+
+```yaml
+git:
+  enabled: true
+  commit_on_session_end: true
+  commit_interval: null
+  auto_push: false    # default — see the "Auto-Push and Remote Trust" callout above
+  remote: origin
+```
+
+`auto_push: false` is the shipping default: commits are local-only until the user
+explicitly opts in to pushing. `GitManager.push()` is only ever invoked by the TUI's
+confirmed `P` keybinding unless this flag is flipped.
+
 ---
 
 ## Common Pitfalls
@@ -227,9 +338,11 @@ Key behaviors the tests verify:
 - `is_dirty` returns `False` on a clean repo and `True` after staging changes
 - `commit` records the given message in `git log` and returns a SHA string or `None`
 - `status` returns a non-empty string without crashing
+- `push` with no remote configured returns without raising (logged at WARNING)
 - All methods are non-fatal on a broken or non-git directory — errors are caught and logged
 
-Plus 5 vault nodes with typed edges.
+Plus 6 vault nodes with typed edges (including the `Remote Trust` node from the
+security callout).
 
 ---
 

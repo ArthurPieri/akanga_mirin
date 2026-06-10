@@ -27,6 +27,14 @@ docs = [
     "mkdocs>=1.6.0",
     "mkdocs-material>=9.5.0",
 ]
+graph = [
+    # Phase 5 stretch goal: two-layer graph renderer (Kitty graphics + canvas fallback)
+    "textual-kitty",
+    "textual-canvas",
+    "networkx",
+    "matplotlib",
+    "pillow",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

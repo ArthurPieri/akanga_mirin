@@ -84,19 +84,21 @@ test: ## Run phase tests against your src/
 # RUNTIME
 # =============================================================================
 
-run: ## Start the Textual TUI
-	$(PYTHON) -m akanga_core.cli tui --vault $(VAULT) --db $(DB)
+run: ## Start the Textual TUI (Phase 5+)
+	$(PYTHON) -m akanga_tui.app --vault $(VAULT) --db $(DB)
 
-serve: ## Start the REST API server (default: 127.0.0.1:8000)
-	$(PYTHON) -m akanga_core.cli serve \
-		--vault $(VAULT) --db $(DB) \
-		--host $(HOST) --port $(PORT)
+serve: ## Start the REST API server (Phase 6+; default: 127.0.0.1:8000)
+	$(PYTHON) -c "import uvicorn; from akanga_core.server import create_app; \
+		uvicorn.run(create_app(vault='$(VAULT)', db_path='$(DB)'), host='$(HOST)', port=$(PORT))"
 
 index: ## Re-index the vault (scans vault/ and updates .akanga.db)
-	$(PYTHON) -m akanga_core.cli index --vault $(VAULT) --db $(DB)
+	$(PYTHON) -c "from akanga_core.indexer import full_scan_and_index; \
+		from akanga_core.db import GraphDatabase; \
+		n = full_scan_and_index('$(VAULT)', GraphDatabase('$(DB)')); \
+		print(f'Indexed {n} nodes.')"
 
-mcp: ## Start the MCP server (for Claude Code / Claude Desktop integration)
-	$(PYTHON) -m akanga_core.cli mcp-server --vault $(VAULT) --db $(DB)
+mcp: ## Start the MCP server (Phase 8; for Claude Code / Claude Desktop integration)
+	$(PYTHON) -m akanga_mcp.server --vault $(VAULT) --db $(DB)
 
 docs-serve: ## Preview your knowledge graph as a website (MKDocs)
 	uv run mkdocs serve
@@ -109,12 +111,15 @@ setup: ## Install project dependencies via uv
 	uv sync
 	@printf '\n\033[0;32mDone.\033[0m Run \033[36mmake init-vault\033[0m then \033[36mmake run\033[0m.\n'
 
-init-vault: ## Create vault/ directory and a minimal akanga.yaml config
+init-vault: ## Create vault/ directory and the canonical akanga.yaml config
 	@mkdir -p $(VAULT)
 	@if [ ! -f "$(VAULT)/akanga.yaml" ]; then \
-		printf 'vault:\n  path: $(VAULT)\ngit:\n  enabled: false\n  auto_push: false\n' \
-			> $(VAULT)/akanga.yaml; \
-		printf 'Created \033[36m$(VAULT)/akanga.yaml\033[0m\n'; \
+		OWNER=$$(git config user.name 2>/dev/null || true); \
+		OWNER="$${OWNER:-Your Name}"; \
+		WS_UUID=$$($(PYTHON) -c "import uuid; print(uuid.uuid4())"); \
+		printf 'owner: %s\ndefault_workspace:\n  name: Nhamandu\n  id: %s   # generated at init, never changes\nworkspaces: []\n' \
+			"$$OWNER" "$$WS_UUID" > $(VAULT)/akanga.yaml; \
+		printf 'Created \033[36m$(VAULT)/akanga.yaml\033[0m (owner: %s, default workspace: Nhamandu)\n' "$$OWNER"; \
 	else \
 		echo "$(VAULT)/akanga.yaml already exists — skipping."; \
 	fi

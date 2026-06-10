@@ -164,6 +164,32 @@ class TestBuildContextContent:
 # ---------------------------------------------------------------------------
 
 class TestBuildContextCaps:
+    def test_spec_constants(self) -> None:
+        """MAX_CONTEXT_CHARS == 12_000 and max_triples default == 80 are spec constants.
+
+        These are not tunables: 12,000 chars is the hard context budget and a
+        max_triples default of 200 produces ~31k chars, blowing the ceiling.
+        """
+        import inspect as _inspect
+
+        rag = _load_rag()
+        build_context = _get_build_context(rag)
+
+        assert getattr(rag, "MAX_CONTEXT_CHARS", None) == 12_000, (
+            f"rag.MAX_CONTEXT_CHARS must be exactly 12_000, got "
+            f"{getattr(rag, 'MAX_CONTEXT_CHARS', '<missing>')!r}.\n"
+            "Define the module-level constant: MAX_CONTEXT_CHARS = 12_000 — "
+            "you may not redefine your own budget."
+        )
+
+        params = _inspect.signature(build_context).parameters
+        max_triples_param = params.get("max_triples")
+        assert max_triples_param is not None and max_triples_param.default == 80, (
+            "build_context must declare max_triples with a default of exactly 80 "
+            f"(got {max_triples_param!r}).\n"
+            "Signature: build_context(node, db, vault, max_triples=80) -> str"
+        )
+
     def test_build_context_caps_total_chars(
         self, tmp_path: Path
     ) -> None:
@@ -174,7 +200,11 @@ class TestBuildContextCaps:
         GraphDatabase = _load_db()
         rag = _load_rag()
         build_context = _get_build_context(rag)
-        max_chars = getattr(rag, "MAX_CONTEXT_CHARS", 12_000)
+        assert getattr(rag, "MAX_CONTEXT_CHARS", None) == 12_000, (
+            "rag.MAX_CONTEXT_CHARS must be exactly 12_000 — a self-defined cap "
+            "would make this test assert nothing."
+        )
+        max_chars = 12_000
 
         vault = tmp_path / "vault"
         vault.mkdir()
@@ -206,7 +236,8 @@ class TestBuildContextCaps:
                 "id": nid, "title": f"Sat{i}", "type": "note", "tags": [],
                 "path": str(nfile), "content": "", "content_hash": f"h_{i}",
             })
-            db.upsert_edge(hub_id, nid, relation="links_to")
+            # upsert_edge is positional: (source_id, target_id, relation, relation_id)
+            db.upsert_edge(hub_id, nid, "links_to", "")
 
         hub_node = db.get_node(hub_id)
         try:
@@ -292,7 +323,9 @@ class TestTripleSerialization:
     def test_serialize_triples_outgoing_direction(
         self, tmp_vault_with_nodes
     ) -> None:
-        """Outgoing edge (Cognition→Attention) must appear as 'Cognition -supports-> Attention'."""
+        """Outgoing edge (Cognition→Attention) must render as a whole triple line:
+        source first, relation in the middle, target last (e.g.
+        'Cognition --[supports]--> Attention')."""
         rag = _load_rag()
         build_context = _get_build_context(rag)
 
@@ -300,15 +333,66 @@ class TestTripleSerialization:
         root_node = ctx.db.get_node(ctx.id_cognition)
         context = build_context(root_node, ctx.db, ctx.vault)
 
-        # At least one triple in the context should show the outgoing direction
-        # Cognition supports Attention (outgoing from Cognition's perspective)
-        has_outgoing = (
-            "Cognition" in context and "Attention" in context and "->" in context
+        # A whole-line semantic check — 'Cognition', 'supports' and 'Attention'
+        # merely co-existing somewhere in the context is NOT enough.
+        triple_lines = [ln.strip() for ln in context.splitlines() if "->" in ln]
+        matching = [
+            ln for ln in triple_lines
+            if ln.startswith("Cognition")
+            and ln.endswith("Attention")
+            and "supports" in ln
+        ]
+        assert matching, (
+            "Context for Cognition must contain one triple LINE that starts "
+            "with 'Cognition', contains 'supports', and ends with 'Attention' "
+            "(natural direction: source --[relation]--> target).\n"
+            f"Triple lines found: {triple_lines!r}"
         )
-        assert has_outgoing, (
-            "Context for Cognition must include a triple showing 'supports' "
-            "edge to Attention. Got: "
-            + "\n".join(ln for ln in context.splitlines() if ">" in ln or "Attention" in ln)
+
+    def test_serialize_triples_incoming_natural_direction(
+        self, tmp_vault_with_nodes
+    ) -> None:
+        """Incoming edge (Memory→Cognition) must render in NATURAL direction.
+
+        BUG-03 regression guard: an edge X→Cognition, seen while building
+        context for Cognition, must still render 'X --[rel]--> Cognition' —
+        never an inverted 'Cognition <-[rel]- X' arrow and never a synthesized
+        'is_X_by' inverse label (51 of the 71 directed types have no defined
+        inverse, so there is no sanctioned label for an inverted rendering).
+        """
+        rag = _load_rag()
+        build_context = _get_build_context(rag)
+
+        ctx = tmp_vault_with_nodes
+        # Add an INCOMING edge to the root node: Memory -depends_on-> Cognition
+        ctx.db.upsert_edge(ctx.id_memory, ctx.id_cognition, "depends_on", "SC-001")
+
+        root_node = ctx.db.get_node(ctx.id_cognition)
+        context = build_context(root_node, ctx.db, ctx.vault)
+
+        triple_lines = [ln.strip() for ln in context.splitlines() if "->" in ln]
+        natural = [
+            ln for ln in triple_lines
+            if ln.startswith("Memory")
+            and ln.endswith("Cognition")
+            and "depends_on" in ln
+        ]
+        assert natural, (
+            "The incoming edge Memory→Cognition must render in natural "
+            "direction: a line starting with 'Memory', containing "
+            "'depends_on', ending with 'Cognition'.\n"
+            f"Triple lines found: {triple_lines!r}\n"
+            "EgoEdge stores the natural direction — serialization always "
+            "renders source --[relation]--> target for BOTH directions."
+        )
+        assert "<-" not in context, (
+            "Context must never contain a reversed '<-' arrow — incoming "
+            "edges are rendered in natural direction, not flipped."
+        )
+        assert "is_depends_on_by" not in context, (
+            "Do not synthesize 'is_X_by' inverse labels — most vocabulary "
+            "types have no defined inverse. Render the edge in its natural "
+            "direction instead."
         )
 
     def test_context_with_no_edges(
@@ -349,18 +433,16 @@ class TestBuildContextErrors:
     def test_build_context_nonexistent_node_raises_or_returns_empty(
         self, tmp_vault_with_nodes
     ) -> None:
-        """build_context with a node_id that doesn't exist must raise or return ''.
+        """build_context with a node that doesn't exist must raise OR return ''/None.
 
-        The spec does not mandate which behavior — document whichever the
-        learner chose. This test accepts both.
+        The spec does not mandate which behavior — document whichever you
+        chose. What is NOT acceptable: silently returning a non-empty context
+        for a node that does not exist.
         """
         rag = _load_rag()
         build_context = _get_build_context(rag)
 
         ctx = tmp_vault_with_nodes
-
-        # Construct a fake Node-like object with a nonexistent ID and no path
-        _load_db()  # ensure import path works; GraphDatabase not used directly here
 
         nonexistent_id = str(uuid.UUID("00000000-dead-beef-0000-000000000000"))
         fake_node = ctx.db.get_node(nonexistent_id)  # should be None
@@ -368,14 +450,15 @@ class TestBuildContextErrors:
         if fake_node is not None:
             pytest.skip("DB returned a node for a nonexistent ID — unexpected.")
 
-        # Option A: learner passes the node object directly (None case)
         try:
             result = build_context(fake_node, ctx.db, ctx.vault)
-            # If it doesn't raise, it must return an empty string or None
-            assert result == "" or result is None or isinstance(result, str), (
-                "build_context with None node must return an empty string, None, or raise; "
-                f"got {result!r}."
+        except Exception:
+            # Raising (TypeError/AttributeError/ValueError/...) is acceptable.
+            pass
+        else:
+            assert result in ("", None), (
+                "build_context for a nonexistent node must either raise or "
+                f"return '' / None — got {result!r}.\n"
+                "Returning an arbitrary non-empty string would feed the LLM a "
+                "context for a node that does not exist."
             )
-        except (TypeError, AttributeError, ValueError):
-            # Raising is also acceptable
-            pass  # any of these is acceptable

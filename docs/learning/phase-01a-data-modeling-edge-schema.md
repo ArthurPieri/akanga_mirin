@@ -1,5 +1,7 @@
 # Phase 1A — Data Modeling: Edge Schema and Inline Shorthand
 
+**Estimated time: 2–3h**
+
 **Core concept:** Deciding how to represent a *connection* between two nodes as plain
 text. Phase 0 gave you a file with metadata and a body. Phase 1A asks: what does a
 typed edge look like inside a file? What happens when a user writes connections
@@ -72,7 +74,7 @@ drawn from the 71-type vocabulary.
 
 > Akanga node: `Labeled Property Graph`
 
-> → Foundation doc: `docs/foundations/design-patterns.md` (Labeled Property Graph section)
+> → Foundation doc: `docs/foundations/design-patterns.md`
 
 > → Foundation doc: `docs/foundations/relation-vocabulary.md` (full 71-type vocabulary)
 
@@ -222,7 +224,7 @@ def test_merge_adds_new_inline_edge():
 def test_writeback_roundtrip():
     # File with inline edge in body but empty frontmatter edges block.
     # After write_back(), frontmatter edges block contains the inline edge.
-    node = create(title="Test", type="note", vault=tmp_path)
+    node = create(title="Test", node_type="note", vault=tmp_path)
     node.path.write_text(node.path.read_text() + "\n[[Blink | contradicts]]")
     write_back(node.path)
     re_parsed = parse_node_file(node.path)
@@ -234,7 +236,7 @@ def test_writeback_roundtrip():
     assert edges[0]["relation"] == "contradicts"
 
 def test_writeback_is_idempotent():
-    node = create(title="Test", type="note", vault=tmp_path)
+    node = create(title="Test", node_type="note", vault=tmp_path)
     node.path.write_text(node.path.read_text() + "\n[[Blink | contradicts]]")
     write_back(node.path)
     write_back(node.path)  # second call must not duplicate the edge

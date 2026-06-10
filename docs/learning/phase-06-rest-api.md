@@ -1,5 +1,7 @@
 # Phase 6 — REST API
 
+**Estimated time:** 3–4 hours
+
 **Core concept:** The TUI talks directly to `akanga_core` as a Python library — same
 process, no network. The REST API adds a second surface: an HTTP server that exposes
 everything the library can do over a network boundary. This enables external clients
@@ -155,10 +157,14 @@ implementation must match it.
 | `Path Traversal Protection` | note | `subtype_of` → `Security Pattern`; `is_applied_in` → `Akanga API`; `solves` → `Path Traversal Attack` |
 | `API Boundary` | note | `contrasts_with` → `Library Consumer`; `qualifies` → `Pydantic`; `is_applied_in` → `Akanga API` |
 | `OpenAPI` | note | `was_generated_by` → `FastAPI`; `documents` → `Akanga API`; `enables` → `Client Code Generation` |
+| `CORS` | note | `is_a` → `Browser Security Mechanism`; `solves` → `Cross-Site Request Forgery`; `is_applied_in` → `Akanga API` |
 
 ---
 
 ## Endpoints
+
+The core endpoints below are in the skeleton (`skeletons/phase_06/src/akanga_core/server.py`)
+and covered by `tests/phase_06/test_server.py` — they are the phase contract:
 
 ```
 GET    /api/v1/nodes                    list / search nodes
@@ -167,29 +173,33 @@ GET    /api/v1/nodes/{id}               get node by UUID
 PUT    /api/v1/nodes/{id}               update node (rewrites file)
 DELETE /api/v1/nodes/{id}               delete node (removes file + deindexes)
 
-GET    /api/v1/nodes/{id}/edges         outgoing edges
+GET    /api/v1/nodes/{id}/edges         all edges touching this node
 GET    /api/v1/nodes/{id}/neighbors     neighbor nodes (outgoing)
 GET    /api/v1/nodes/{id}/backlinks     nodes linking TO this node
-GET    /api/v1/nodes/{id}/ego-graph     ego-graph data (depth param)
-GET    /api/v1/nodes/{id}/results       active check results
 
 POST   /api/v1/edges                    create manual edge
 DELETE /api/v1/edges/{id}              delete edge
 
+GET    /api/v1/templates                list available node templates
+```
+
+The following are stretch endpoints — not in the skeleton and not tested. Build them
+only after the core suite is green (see "Stretch deliverables" in the Deliverable section):
+
+```
+GET    /api/v1/nodes/{id}/ego-graph     ego-graph data (depth param)
+GET    /api/v1/nodes/{id}/results       active check results
 GET    /api/v1/workspaces               list workspaces (from config)
 GET    /api/v1/relations                list relation vocabulary (from config)
-
 POST   /api/v1/sync/drain               trigger sync queue drain
 GET    /api/v1/sync/queue               view pending sync jobs
-
 GET    /api/v1/git/status               git repo status
 POST   /api/v1/git/push                 push to remote
-
 WebSocket /ws                           push events to connected clients
 ```
 
 **Query parameters on `GET /api/v1/nodes`:**
-`?query=` (FTS5 search) · `?type=` · `?tag=` · `?workspace=` · `?limit=` · `?offset=`
+`?query=` (FTS5 search) · `?type=` · `?tag=` · `?limit=` · `?offset=` (`?workspace=` is stretch)
 
 ---
 
@@ -206,6 +216,82 @@ database-only nodes. The file is always created first.
 **Sync on write.** After every node write or delete, the file watcher will detect the
 change within 500ms. The API does not need to manually trigger re-indexing — the
 watcher handles it. This keeps the API stateless between write calls.
+
+---
+
+> **Security: CORS and Localhost Binding**
+
+**What CORS is and why it matters for a local server:**
+
+CORS (Cross-Origin Resource Sharing) is a browser security mechanism. When a
+web page running at `http://evil.example.com` makes a JavaScript `fetch()` call
+to `http://localhost:8000/api/v1/nodes`, the browser first sends a preflight
+`OPTIONS` request asking: "does this server permit requests from my origin?" If
+the server does not respond with the correct `Access-Control-Allow-Origin` header,
+the browser blocks the response before the JavaScript code ever sees it.
+
+This protects you from a class of attack called Cross-Site Request Forgery (CSRF):
+a malicious web page silently reading your vault via your local server because
+you happened to have a browser tab open. The attack does not require the user to
+click anything — loading the page is enough.
+
+**Why localhost binding is the first line of defence:**
+
+The Akanga server binds to `127.0.0.1` by default. This means it only accepts
+TCP connections from the same machine. A browser tab on the same machine *can*
+reach it (CORS applies), but no device on your local network can reach it at all
+— the connection is refused at the network layer before CORS is even relevant.
+
+If you change `--host 0.0.0.0`, the server accepts connections from any device on
+your network. At that point, anyone on the same Wi-Fi network can reach your vault.
+CORS will not protect you from this — CORS only runs in browsers. A `curl` command
+on a network-adjacent machine bypasses it entirely.
+
+```
+127.0.0.1 (default)  →  network-level isolation  →  no auth needed
+0.0.0.0              →  network-exposed           →  CORS alone is not enough
+```
+
+**Safe CORS configuration for local-only use:**
+
+```python
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Content-Type"],
+)
+```
+
+`allow_origins` should list only the specific origins that need access: if you
+are building a local web GUI that runs at `localhost:3000`, list exactly that.
+Do not use `allow_origins=["*"]` — a wildcard allows any browser tab on any
+site to read your vault content.
+
+**What becomes dangerous if you expose on 0.0.0.0:**
+
+| Setting | Localhost only | 0.0.0.0 (network-exposed) |
+|---|---|---|
+| `allow_origins=["http://localhost:3000"]` | Safe | Still safe for browsers, but non-browser callers bypass CORS |
+| `allow_origins=["*"]` | Convenient | Any browser tab on any site can read your vault |
+| No CORSMiddleware at all | Same-origin only (browser) | No browser cross-origin access |
+
+**Relationship to path traversal protection:**
+
+Path traversal protection (already in this phase) prevents a caller from escaping
+the vault directory via crafted filenames. CORS prevents untrusted browser tabs from
+reaching the server at all. These are independent controls at different layers:
+network binding → CORS → path validation. Each layer fails open if the one above it
+is misconfigured. All three need to be correct simultaneously.
+
+> **If you expose on 0.0.0.0 for a legitimate reason** (e.g., accessing your vault
+> from a phone on the same network), add basic HTTP authentication or bind to a VPN
+> interface. There is no authentication mechanism in Akanga MVP — this is a documented
+> and deliberate scope decision for a single-user local tool, but you must understand
+> what you are trading away when you change the default binding.
 
 ---
 
@@ -233,36 +319,55 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 ```
 
-**Pydantic schemas (examples):**
+The tests construct the app through a **`create_app(vault, db_path)` factory** (see the
+skeleton's `server.py`) — build the FastAPI instance inside the factory so tests can
+spin it up against a temp vault and temp DB without global state leaking between runs.
+
+**Pydantic request models** (these match the skeleton exactly — the skeleton and tests
+are the normative contract):
 
 ```python
-class NodeCreate(BaseModel):
-    title: str
-    type: Literal["note", "reference"]
+class CreateNodeRequest(BaseModel):
+    title: str                  # required — omitting it returns HTTP 422
+    type: str = "note"
+    content: str = ""           # the markdown body (see terminology note below)
     tags: list[str] = []
-    graph: list[str] = []      # workspace names — resolved to IDs internally
-    author: str | None = None  # defaults to vault config owner
-    meta: dict = {}
-    url: str = ""              # reference nodes only
-    external_type: str = ""
-    description: str = ""
-    body: str = ""
+    path: str = ""              # optional custom path within the vault
 
-class NodeResponse(BaseModel):
-    id: str
-    title: str
-    type: str
-    tags: list[str]
-    graph: list[dict]          # [{name, id}]
-    author: str
-    created_at: str
-    updated_at: str
-    meta: dict
-    edges: list[dict]
-    # path is intentionally excluded from response
+class UpdateNodeRequest(BaseModel):
+    title: str | None = None
+    content: str | None = None
+    tags: list[str] | None = None
+
+class CreateEdgeRequest(BaseModel):
+    source_id: str
+    target_id: str
+    relation: str | None = None
+    relation_id: str | None = None
 ```
 
-**WebSocket connection manager:**
+**Why `path` is in the request model:** it is optional and always vault-relative
+(e.g. `"projects/my-note.md"`). When omitted, the server auto-generates a slug
+filename from the title. The field exists precisely so the SEC-02 containment check
+has something to validate — a client-supplied path is the one input that can attempt
+`../` escapes, absolute paths, or symlink tricks, and the create handler must
+`resolve()` it and verify `is_relative_to(vault_root)` before writing anything.
+
+**Frontmatter-level fields are not API fields:** `graph` (workspace names), `author`,
+and `meta` live in the node's YAML frontmatter, not in the Phase 6 request model. The
+skeleton's `CreateNodeRequest` carries only the five fields above; richer frontmatter
+editing is out of scope for this phase's API.
+
+**Terminology seam:** the API field `content`, the `Node` dataclass field `content`,
+and "the markdown body" all name the same thing — the prose below the YAML
+frontmatter; the docs use the three terms interchangeably.
+
+**Responses are plain dicts**, not Pydantic models: `db.get_node()` returns a
+`SimpleNamespace`, so convert before returning (`vars(node)` or an explicit
+`{"id": ..., "title": ..., "type": ..., "tags": ..., "path": ...}` dict — see the
+skeleton's HOW steps).
+
+**WebSocket connection manager (stretch — untested, see Deliverable):**
 
 ```python
 class ConnectionManager:
@@ -287,7 +392,13 @@ akanga version
 
 ## Common Pitfalls
 
-**Path traversal vulnerability (SEC-02):** `os.path.normpath + startswith` does NOT follow symlinks. Use `Path(body.path).resolve().is_relative_to(vault_root.resolve())` — the only safe approach.
+**Path traversal vulnerability (SEC-02):** `os.path.normpath + startswith` does NOT follow symlinks, and a substring check like `".." in path` catches none of the real attack shapes reliably. Use `vault_root.joinpath(body.path).resolve().is_relative_to(vault_root.resolve())` — the only safe pattern. The test suite exercises three distinct escape shapes, and only resolve-then-contain defeats all of them:
+
+- *Relative traversal* — `path: "../../etc/passwd"` (`test_create_node_path_traversal_blocked`). `resolve()` collapses the `..` segments so the containment check sees the real destination.
+- *Absolute path* — `path: "/etc/passwd"`. `Path.joinpath` with an absolute right-hand side **silently discards the vault root** (`vault / "/etc/passwd"` is `/etc/passwd`), so the resolved path must still be checked with `is_relative_to` — a prefix/`startswith` check on the unresolved string never sees this.
+- *Symlink escape* — a symlink inside the vault pointing outside it. The string looks vault-relative and contains no `..` at all; only `resolve()`, which follows symlinks, reveals the true target. This is why `normpath`/`startswith` and `".." in path` are banned — they validate the name, not the destination.
+
+All three must return HTTP 400. SECURITY.md lists symlink escape as in-scope; the SEC-02 error-path tests in `tests/phase_06/test_server.py` cover these rejection cases.
 
 **Forgetting `check_same_thread=False`:** SQLite connections opened outside the lifespan context and used across async routes will raise threading errors. Initialize once in lifespan, store in `app.state`.
 
@@ -299,55 +410,40 @@ akanga version
 
 ## Deliverable
 
-```python
-def test_create_and_get_node(client):
-    resp = client.post("/api/v1/nodes", json={
-        "title": "Test Node", "type": "note"
-    })
-    assert resp.status_code == 201
-    node_id = resp.json()["id"]
-    resp2 = client.get(f"/api/v1/nodes/{node_id}")
-    assert resp2.status_code == 200
-    assert resp2.json()["title"] == "Test Node"
+The complete test suite is in `tests/phase_06/test_server.py`. The tests build the
+app through your `create_app()` factory and exercise it with Starlette's `TestClient`.
 
-def test_node_file_is_written(client, tmp_vault):
-    client.post("/api/v1/nodes", json={"title": "Filed", "type": "note"})
-    md_files = list(tmp_vault.glob("*.md"))
-    assert any("Filed" in f.read_text() for f in md_files)
+Happy-path tests:
 
-def test_delete_removes_file(client, tmp_vault):
-    resp = client.post("/api/v1/nodes", json={"title": "Gone", "type": "note"})
-    node_id = resp.json()["id"]
-    client.delete(f"/api/v1/nodes/{node_id}")
-    assert not any(node_id in f.stem for f in tmp_vault.glob("*.md"))
+- `test_list_nodes_empty` — `GET /api/v1/nodes` on a fresh vault returns 200 and an empty list
+- `test_create_node` — `POST /api/v1/nodes` returns 201 with a valid UUID `id`
+- `test_get_node_by_id` / `test_get_node_not_found` — 200 with matching title; 404 for an unknown id
+- `test_update_node` — `PUT` changes the title; a subsequent `GET` reflects it
+- `test_delete_node` — `DELETE` returns 200/204; a subsequent `GET` returns 404
+- `test_list_nodes_search` — `?query=` returns only matching nodes (FTS5 or LIKE fallback)
+- `test_list_nodes_pagination` — `limit=2&offset=2` over 5 nodes returns exactly 2
+- `test_create_and_get_edge` — `POST /api/v1/edges` returns 201; the edge appears in `/edges`
+- `test_get_neighbors` / `test_get_backlinks` — A→B traversal in both directions
+- `test_list_templates` — `GET /api/v1/templates` returns a non-empty list of template names
 
-def test_path_traversal_rejected(client):
-    resp = client.post("/api/v1/nodes", json={
-        "title": "../../etc/crontab", "type": "note"
-    })
-    assert resp.status_code == 400
+Error-path tests (CCR-9):
 
-def test_search(client):
-    client.post("/api/v1/nodes", json={
-        "title": "Cognition Note", "type": "note", "tags": ["cognition"]
-    })
-    resp = client.get("/api/v1/nodes?tag=cognition")
-    assert any(n["title"] == "Cognition Note" for n in resp.json())
+- `test_create_node_path_traversal_blocked` — `path: "../../etc/passwd"` → 400 (SEC-02; see the pitfall above for the absolute-path and symlink-escape rejection cases the suite also covers)
+- `test_create_node_missing_title_returns_422` — missing required field triggers Pydantic validation
+- `test_delete_nonexistent_node` — deleting an unknown id → 404, not 500
 
-def test_websocket_broadcast(client):
-    with client.websocket_connect("/ws") as ws:
-        client.post("/api/v1/nodes", json={"title": "WS Test", "type": "note"})
-        msg = ws.receive_json(timeout=2)
-        assert msg["event"] == "node_updated"
+Plus 9 vault nodes with typed edges (including the `CORS` node from the security callout).
 
-def test_ego_graph_endpoint(client):
-    # create two nodes, edge between them, then call ego-graph
-    ...
-```
+### Stretch deliverables (untested)
 
-Plus 8 vault nodes with typed edges. The `test_node_file_is_written` and
-`test_websocket_broadcast` tests are the most important — they prove the API
-is not a DB-only shortcut and that push events work end-to-end.
+These were previously billed as "most important" but have no tests yet — treat them
+as extensions after the suite above is green:
+
+- WebSocket `/ws` broadcast (`node_updated` events pushed to connected clients)
+- A vault-file assertion test (POST writes a `.md` file; DELETE removes it) — the
+  suite verifies create/delete via the API only, not by globbing the vault directory
+- `GET /api/v1/nodes/{id}/ego-graph` and the other stretch endpoints listed above
+  (workspaces, relations, sync, git)
 
 ---
 

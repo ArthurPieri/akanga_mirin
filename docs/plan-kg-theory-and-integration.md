@@ -28,18 +28,23 @@ Relation types live in `akanga.yaml` (or a companion `vocabulary.yaml` if you pr
 ```yaml
 relation_types:
   - id: EP-001
-    name: contradicts
-    description: "Asserts that the target claim is false or substantially wrong."
+    name: supports
+    description: "A provides evidence, reasoning, or data that strengthens B."
     category: epistemic
     symmetric: false
-    inverse_id: EP-002        # optional — the ID of the inverse relation type
 
   - id: EP-002
-    name: is_contradicted_by
-    description: "The passive form of 'contradicts'."
+    name: contradicts
+    description: "A conflicts with or undermines B — they can't both be fully true."
     category: epistemic
+    symmetric: true           # contradicts is its own inverse — no inverse_id needed
+
+  - id: HT-002
+    name: is_part_of
+    description: "A is a component, section, or member of B."
+    category: hierarchical
     symmetric: false
-    inverse_id: EP-001
+    inverse_id: HT-001        # optional — only the 4 built-in inverse pairs have one
 
   - id: MY-001
     name: inspires
@@ -58,7 +63,9 @@ relation_types:
 
 The built-in IDs use the category-prefix format (`EP-`, `SC-`, `CT-`, `TC-`, etc.). Custom relation types you add should use a distinct prefix — `MY-`, `WK-` (for a project-specific vocabulary), or a UUID — to avoid colliding with future built-in IDs.
 
-The ID is the machine key. The `name` is a display cache. The `description` is shown in the TUI relation picker and in `list_relation_types` MCP output. The `inverse_id` is optional but enables lazy inverse lookup (covered in Phase 3).
+The ID is the machine key. The `name` is a display cache. The `description` is shown in the TUI relation picker and in `list_relation_types` MCP output. The `inverse_id` is optional registry metadata: only the four built-in inverse pairs define one (see `docs/foundations/relation-vocabulary.md` — Natural Inverse Pairs), and at MVP it is never used for rendering — triples are always serialized in their stored, natural direction. Automatic inverse rendering is a V2 feature.
+
+All built-in IDs and names above must match the registry in `docs/foundations/relation-vocabulary.md` — that file is the single source of truth for `XX-NNN` assignments.
 
 #### The dual-key pattern applies to relation types too
 
@@ -67,7 +74,7 @@ Every edge in a node's frontmatter stores both `relation` (the display name) and
 ```yaml
 edges:
   - relation: contradicts
-    relation-id: EP-001
+    relation-id: EP-002
     target: Blink — Malcolm Gladwell
     target-id: d4e1f9cc-5678-1234-efab-012345678901
 ```
@@ -208,56 +215,58 @@ When a user calls `get_neighbors(node_id, direction="out")` or traverses the gra
 Consider a two-node graph:
 
 ```
-Fast Thinking is Unreliable  --[contradicts]-->  Blink by Gladwell
+Fast Thinking is Unreliable  --[questions]-->  Blink by Gladwell
 ```
 
 With outgoing-only traversal:
 - Traversing from **Fast Thinking**: `Blink by Gladwell` is reachable (it's a direct outgoing neighbor).
-- Traversing from **Blink by Gladwell**: `Fast Thinking is Unreliable` is **not reachable** unless you traverse incoming edges or add an explicit reverse edge.
+- Traversing from **Blink by Gladwell**: `Fast Thinking is Unreliable` is **not reachable** unless you traverse incoming edges (backlinks).
 
 This is the intended behavior for semantic queries. "What does this node assert?" is a different question from "What asserts about this node?" They should be queryable separately. The `direction` parameter in `get_neighbors` — `"out"`, `"in"`, or `"both"` — exposes this choice to the caller.
 
-The outgoing-only default is not an oversight. It reflects a modeling principle: in a directed knowledge graph, the source of an assertion carries the semantic weight. `A contradicts B` is a claim made by the author of A. Whether the author of B wants to make the reverse claim is a separate decision.
+The outgoing-only default is not an oversight. It reflects a modeling principle: in a directed knowledge graph, the source of an assertion carries the semantic weight. `A questions B` is a claim made by the author of A. Whether the author of B wants to make any reverse claim is a separate decision.
 
-#### The tradeoff: explicit reverse edges vs computed inverses
+#### How the other side is reached: backlinks + natural-direction rendering (MVP rule)
 
-There are two ways to make `Blink by Gladwell` reachable from itself in the context of the contradiction:
+How does `Blink by Gladwell` see the edge that points at it? **Not** by storing a
+second, reversed edge, and **not** by inventing an inverse name. The MVP rule is:
 
-**Option 1 — Explicit reverse edge (more data, clearer semantics):**
+1. **Storage:** every logical edge is stored exactly once, in the source node's
+   frontmatter, in its natural direction.
+2. **Query:** the incoming side is reached via the backlinks query
+   (`db.get_backlinks(node_id)` — "edges where `target_id` = this node"). The
+   ego-graph BFS already does this and tags the result `EdgeDirection.INCOMING`.
+3. **Rendering:** a triple is **always serialized in its stored, natural
+   direction** — `Fast Thinking is Unreliable --[questions]--> Blink by Gladwell` —
+   no matter which endpoint you are viewing from. The UI may visually mark the
+   direction (solid vs dotted arrows), but it never re-labels the relation.
 
-Write a second edge in Blink's frontmatter:
+What about inverse names (`is_questioned_by`)? 56 of the 60 directed types have no
+sanctioned inverse label in the registry, so mechanical `is_X_by` generation would
+mint 56 phantom relation names. **Inverse-name generation is deferred to V2.** The
+four types that do have true inverses (`is_part_of`/`contains`, `precedes`/`follows`,
+`produces`/`consumes`, `reports_to`/`manages`) are governed by the canonicalization
+rule in `docs/foundations/relation-vocabulary.md`: store the canonical member
+(`is_part_of`, `precedes`, `produces`, `reports_to`); the paired name is derived for
+display only. The `inverse_id` registry field records these four pairs — it is
+metadata for the future V2 query layer, not something Phase 3 (or Phase 8) consults.
 
-```yaml
-edges:
-  - relation: is_contradicted_by
-    relation-id: EP-002
-    target: Fast Thinking is Unreliable
-    target-id: <uuid>
-```
+**Explicit reverse edges are an anti-pattern at MVP.** Writing a second edge in
+Blink's frontmatter pointing back at Fast Thinking duplicates data: when the
+original edge changes, two files must be updated, and the Phase 8 serializer would
+emit the same logical relationship twice. For symmetric types (`symmetric: true`,
+e.g. `contradicts`, `is_related_to`) a reverse edge is doubly wrong — the edge
+already means the same thing read in either direction.
 
-Now `Blink by Gladwell` has its own outgoing edge pointing back to `Fast Thinking`. Outgoing-only traversal from Blink reaches Fast Thinking. The graph is symmetric in data, and both nodes carry their relationships explicitly. Reading either file in raw Markdown shows the full relationship from that node's perspective.
+#### Decision table
 
-Downside: data duplication. If the original edge changes (say, the relation type is updated), you must update two files instead of one. In a personal vault managed by one person, this is rarely a problem. At scale or with multiple editors, it creates synchronization obligations.
-
-**Option 2 — Lazy inverse lookup via `inverse_id` (less data, more complex queries):**
-
-The `inverse_id` field on relation types (defined in `akanga.yaml` and introduced in Phase 1) enables a different approach: when you encounter an edge with `relation-id: EP-001` (contradicts), you can look up its inverse: `EP-002` (`is_contradicted_by`). Rather than querying for "edges where source = Blink", you can query for "edges where target = Blink AND relation-id = EP-001, then present them as EP-002 edges pointing in the other direction."
-
-This is lazy inverse resolution. The `get_edges_to()` DB method already enables this — it returns all edges whose `target_id` matches the node. The question is whether to re-label them with their inverse relation name before returning.
-
-The ego-graph implementation uses this approach for the INCOMING result set: it fetches edges pointing to the root node and tags them `EdgeDirection.INCOMING`. Whether it also re-labels the relation to its inverse (`is_contradicted_by` instead of `contradicts`) is a UI decision — the relation is semantically the same edge seen from the other side.
-
-**The `inverse_id` field enables this re-labeling without storing a second edge.** It is the foundation of lazy inverse inference, and it is why the `symmetric` and `inverse_id` fields were introduced in Phase 1 even though Phase 3 does not yet use them fully.
-
-#### When to add explicit reverse edges vs rely on `inverse_id`
-
-| Scenario | Recommendation |
+| Scenario | Rule |
 |---|---|
-| Personal vault, < 1000 nodes | Explicit reverse edges are fine. They make raw files self-documenting and eliminate the need for inverse resolution logic. |
-| Shared or growing vault, > 1000 nodes | Prefer `inverse_id` lazy lookup. Explicit reverse edges double the write surface and create sync obligations across editors. |
-| The relation is `symmetric: true` (e.g., `is_related_to`) | Never add reverse edges — the edge already reads the same in both directions. Rely on the `get_edges_to()` query for the other side. |
-| The relation has no `inverse_id` defined | You must use explicit reverse edges if you want the relationship to be discoverable from the target side without bidirectional traversal. |
-| Graph RAG context at depth 2+ | Use bidirectional BFS regardless — `direction="both"` ensures the full neighborhood is captured. The missed-neighbor problem compounds at each additional hop. |
+| Any directed relation | Store once, natural direction, in the source node's frontmatter. Reach the other side via `get_backlinks()`. |
+| The relation is `symmetric: true` (e.g., `contradicts`, `is_related_to`) | Never add a reverse edge — the edge reads the same in both directions. The backlinks query surfaces it from the other side. |
+| One of the 4 inverse pairs (e.g., `contains`/`is_part_of`) | Store the canonical member only (`is_part_of`, `precedes`, `produces`, `reports_to`). The inverse name is display-derivation, deferred to V2. |
+| Rendering an incoming edge | Render the triple unchanged, natural direction; mark `EgoEdge.direction = INCOMING` if the UI needs to distinguish it. Do not invent `is_X_by` names. |
+| Graph RAG context at depth 2+ | Use bidirectional BFS — `direction="both"` ensures the full neighborhood is captured. The missed-neighbor problem compounds at each additional hop. |
 
 #### How the ego-graph implementation already handles both directions
 
@@ -271,8 +280,8 @@ For the Phase 3 deliverable, the ego-graph traversal is correct as written. The 
 
 1. Outgoing-only BFS is semantically correct for "what does this node assert?" queries.
 2. Bidirectional BFS (already implemented in ego_graph) is correct for "what is this node's full neighborhood?" — which is what you want for display and for RAG.
-3. The `inverse_id` field is the mechanism for lazy inverse resolution — it defers the decision of whether to add explicit reverse edges to vault scale and use-case.
-4. For small personal vaults: explicit reverse edges are the pragmatic choice. For large vaults or multi-editor contexts: `inverse_id` keeps the data lean.
+3. Every logical edge is stored exactly once, in natural direction; the incoming side is a backlinks query, and triples always render `Source --[relation]--> Target`.
+4. The `inverse_id` field is registry metadata for the four true inverse pairs only — store the canonical member, and leave inverse-name rendering to V2. Never write explicit reverse edges.
 
 ---
 
@@ -300,9 +309,9 @@ Contradictions are also temporally meaningful. `I supports approach Y` written i
 
 The practical consequence: the `contradicts` relation type in Akanga is epistemic metadata, not a logical assertion that triggers inference. Two contradicting edges coexist in the DB as sibling rows. The TUI surfaces them together in the ego-graph — it is up to the human to decide what the contradiction means and whether to resolve it. Akanga holds the contradiction; the human does the reasoning.
 
-If you want contradiction detection as a tool (not a constraint), it is achievable as a query: `SELECT * FROM edges WHERE source_id IN (SELECT source_id FROM edges WHERE relation_id = 'EP-001') AND relation_id = 'EP-003'` — a "show me nodes that both support and endorse the same target" query. That is a lens on the data, not enforcement on the writes.
+If you want contradiction detection as a tool (not a constraint), it is achievable as a query: `SELECT e1.source_id, e1.target_id FROM edges e1 JOIN edges e2 ON e1.source_id = e2.source_id AND e1.target_id = e2.target_id WHERE e1.relation_id = 'EP-001' AND e2.relation_id = 'EP-002'` — a "show me nodes that both support and contradict the same target" query (`EP-001` = supports, `EP-002` = contradicts). That is a lens on the data, not enforcement on the writes.
 
-> The `symmetric` and `inverse_id` fields in the relation registry are the closest Akanga comes to constraint-like metadata — they are structural assertions about how a relation type behaves, not consistency constraints on the graph. They enable lazy inverse resolution (Phase 3) and future relation inference (future-ideas.md), but they never reject an edge that a human chose to write.
+> The `symmetric` and `inverse_id` fields in the relation registry are the closest Akanga comes to constraint-like metadata — they are structural assertions about how a relation type behaves, not consistency constraints on the graph. They record the twelve symmetric types and the four natural inverse pairs; inverse rendering and relation inference are deferred to V2 (future-ideas.md), and they never reject an edge that a human chose to write.
 
 ---
 
@@ -330,18 +339,18 @@ Learners implementing Phase 8 often try to add a direct `git_manager.commit()` c
 
 **What happens structurally:**
 
-Phase 2 builds the `GraphDatabase` with an FTS5 virtual table (`nodes_fts`) that indexes node titles and bodies. This is optimized for text search — it is not a vector index, it is an inverted term index. Phase 8's `context_for_query()` function calls `db.search(query, limit=5)` as its first step, which runs an FTS5 query. The Graph RAG pipeline is: FTS5 seed search → BFS expansion → triple serialization. FTS5 is not a detail of Phase 2 — it is the entry point of the entire AI integration.
+Phase 2 builds the `GraphDatabase` with an FTS5 virtual table (`nodes_fts`) that indexes node titles and tags (not bodies — prose stays on disk). This is optimized for text search — it is not a vector index, it is an inverted term index. Phase 8's query entry point calls `db.search_fts(query, limit=...)` as its first step, which runs an FTS5 query. The Graph RAG pipeline is: FTS5 seed search → BFS expansion → triple serialization. FTS5 is not a detail of Phase 2 — it is the entry point of the entire AI integration.
 
 **What learners miss:**
 
 FTS5's `MATCH` queries use a specific syntax that differs from SQL `LIKE`. Learners who implement FTS5 mechanically in Phase 2 without testing edge cases will hit silent failures in Phase 8 when the query string contains characters that FTS5 treats as syntax (hyphens, asterisks, quotes). The `LIKE` fallback that Phase 2 recommends for malformed queries is not just a defensive measure — it is essential infrastructure for Phase 8's reliability.
 
-The other missed connection: FTS5 scores results by term frequency (BM25 in SQLite's implementation). The order of seed nodes returned by `db.search()` affects which nodes become the BFS roots in Phase 8. A poorly tuned FTS5 query returns lower-relevance seeds, which produces lower-quality graph context. The indexer design decision in Phase 2 directly determines Graph RAG quality.
+The other missed connection: FTS5 scores results by term frequency (BM25 in SQLite's implementation). The order of seed nodes returned by `db.search_fts()` affects which nodes become the BFS roots in Phase 8. A poorly tuned FTS5 query returns lower-relevance seeds, which produces lower-quality graph context. The indexer design decision in Phase 2 directly determines Graph RAG quality.
 
 **Where to highlight this:**
 
 - Phase 2: add a forward reference — "The FTS5 virtual table you are building here is the entry point for Graph RAG in Phase 8. The quality of your seed nodes (determined by this index) directly determines the quality of the structured context injected into an LLM prompt."
-- Phase 8: add a backward reference — "The `db.search()` call at the top of `context_for_query()` runs an FTS5 query against the index built in Phase 2. If that index is missing or malformed, Graph RAG silently returns no context. The FTS5 `LIKE` fallback from Phase 2 is why the pipeline degrades gracefully rather than crashing."
+- Phase 8: add a backward reference — "The `db.search_fts()` call at the top of `context_for_query()` runs an FTS5 query against the index built in Phase 2. If that index is missing or malformed, Graph RAG silently returns no context. The FTS5 `LIKE` fallback from Phase 2 is why the pipeline degrades gracefully rather than crashing."
 
 ### Integration 3: Ego-graph BFS (Phase 3) appears in both the TUI (Phase 5) and MCP `get_context` (Phase 8)
 
@@ -425,7 +434,7 @@ No. The pragmatic approach is correct for this PBL course, for three reasons:
 
 ### Connections to the broader KG ecosystem that would enrich without adding complexity
 
-**Wikidata:** Wikidata is a public LPG with ~100M items and ~2B statements. Its relation types (called "properties", prefixed `P`) are structurally analogous to Akanga's relation type IDs. The Wikidata property `P31` ("instance of") is the semantic equivalent of Akanga's `is_a` relation. Pointing learners to `https://www.wikidata.org/wiki/Q42` and asking "what would this node look like in Akanga?" is a five-minute exercise that makes the abstract concrete without adding any implementation.
+**Wikidata:** Wikidata is a public LPG with ~100M items and ~2B statements. Its relation types (called "properties", prefixed `P`) are structurally analogous to Akanga's relation type IDs. The Wikidata property `P31` ("instance of") is the semantic equivalent of Akanga's `instance_of` relation (`HT-005`). Pointing learners to `https://www.wikidata.org/wiki/Q42` and asking "what would this node look like in Akanga?" is a five-minute exercise that makes the abstract concrete without adding any implementation.
 
 **Microsoft GraphRAG (2024):** The Phase 8 section already cites the 35%+ accuracy improvement from GraphRAG research. This is worth naming explicitly as a research result, because it answers the question "why not just use a vector store?" for AI-literate learners. The citation is brief — it does not require reading the paper — but it grounds Akanga's architecture in active research.
 

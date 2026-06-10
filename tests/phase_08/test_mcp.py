@@ -22,6 +22,7 @@ sys.path insertion from conftest runs first.
 """
 from __future__ import annotations
 
+import ast
 import inspect
 import uuid
 from pathlib import Path
@@ -85,15 +86,23 @@ def _bootstrap_db(server_mod, vault: Path, db_path: Path,
     Tries server_mod.init_server(vault, db_path) first; falls back to
     setting server_mod.db directly.
     """
-    from akanga_core.db import GraphDatabase  # noqa: PLC0415
+    # Dual-layout import: flat 'db' first, then 'akanga_core.db' (package layout)
+    try:
+        from db import GraphDatabase  # noqa: PLC0415
+    except ModuleNotFoundError:
+        try:
+            from akanga_core.db import GraphDatabase  # noqa: PLC0415
+        except ModuleNotFoundError:
+            pytest.fail("Cannot import GraphDatabase from 'db' or 'akanga_core.db'")
 
     db = GraphDatabase(str(db_path))
     for node in nodes:
         fpath = vault / node["fname"]
         fpath.write_text(node["content"], encoding="utf-8")
         db.upsert_node({k: v for k, v in node.items() if k != "fname" and k != "content"})
-    for src_id, tgt_id, relation in edges:
-        db.upsert_edge(src_id, tgt_id, relation=relation)
+    for src_id, tgt_id, relation, relation_id in edges:
+        # upsert_edge is positional: (source_id, target_id, relation, relation_id)
+        db.upsert_edge(src_id, tgt_id, relation, relation_id)
 
     # Try the official init path first
     init_server = getattr(server_mod, "init_server", None)
@@ -121,6 +130,7 @@ def _bootstrap_db(server_mod, vault: Path, db_path: Path,
 _ID_COGNITION = str(uuid.UUID("aaaaaaaa-0800-0000-0000-000000000001"))
 _ID_ATTENTION = str(uuid.UUID("bbbbbbbb-0800-0000-0000-000000000002"))
 _ID_MEMORY    = str(uuid.UUID("cccccccc-0800-0000-0000-000000000003"))
+_ID_BOOLEAN   = str(uuid.UUID("dddddddd-0800-0000-0000-000000000006"))
 
 
 @pytest.fixture()
@@ -192,10 +202,31 @@ def mcp_env(tmp_path: Path):
                 Memory is the faculty by which information is encoded and stored.
                 """),
         },
+        {
+            "id": _ID_BOOLEAN,
+            "title": "Boolean OR Logic",
+            "type": "note",
+            "tags": [],
+            "path": str(vault / "boolean-or-logic.md"),
+            "content_hash": "h_bool",
+            "fname": "boolean-or-logic.md",
+            "content": dedent(f"""\
+                ---
+                id: {_ID_BOOLEAN}
+                title: Boolean OR Logic
+                type: note
+                tags: [logic]
+                ---
+
+                A node whose title contains an FTS5 operator, for SEC-06 tests.
+                """),
+        },
     ]
     edges = [
-        (_ID_COGNITION, _ID_ATTENTION, "supports"),
-        (_ID_COGNITION, _ID_MEMORY,    "is_related_to"),
+        # (source_id, target_id, relation, relation_id) — relation_id from
+        # the registry in docs/foundations/relation-vocabulary.md
+        (_ID_COGNITION, _ID_ATTENTION, "supports",      "EP-001"),
+        (_ID_COGNITION, _ID_MEMORY,    "is_related_to", "CC-007"),
     ]
 
     _bootstrap_db(server_mod, vault, db_path, nodes, edges)
@@ -206,6 +237,7 @@ def mcp_env(tmp_path: Path):
         id_cognition  = _ID_COGNITION
         id_attention  = _ID_ATTENTION
         id_memory     = _ID_MEMORY
+        id_boolean    = _ID_BOOLEAN
 
     return Env()
 
@@ -270,6 +302,50 @@ class TestSearchNodes:
                 f"Got {type(exc).__name__}: {exc}"
             )
 
+    def test_search_nodes_operator_treated_as_literal(self, mcp_env) -> None:
+        """SEC-06 semantic check: searching 'OR' must match the literal title.
+
+        The fixture indexes a node titled 'Boolean OR Logic'. An implementation
+        that swallows the FTS5 error (try/except: return []) passes the
+        no-crash test but fails this one — the quoting mitigation must treat
+        the operator as a searchable literal term.
+        """
+        search_nodes = _get_tool(mcp_env.mod, "search_nodes")
+        result = search_nodes("OR")
+        nodes = result if isinstance(result, list) else result.get("nodes", result)
+
+        assert any(
+            n.get("id") == mcp_env.id_boolean or "Boolean OR Logic" in str(n.get("title", ""))
+            for n in nodes
+        ), (
+            "search_nodes('OR') must return the node titled 'Boolean OR Logic'. "
+            "Double-quote each user term before FTS5 MATCH so operators are "
+            "treated as literal text — returning [] by swallowing the FTS5 "
+            f"error is NOT a fix. Got: {nodes!r}"
+        )
+
+    def test_search_nodes_embedded_double_quote_safe(self, mcp_env) -> None:
+        """SEC-06: a query containing a double quote must not raise.
+
+        Naive quoting ('\"' + term + '\"') breaks when the term itself contains
+        a quote — strip embedded quotes before wrapping (the reference
+        implementation needed exactly this handling).
+        """
+        search_nodes = _get_tool(mcp_env.mod, "search_nodes")
+        try:
+            result = search_nodes('cogn"ition')
+            nodes = result if isinstance(result, list) else result.get("nodes", result)
+            assert isinstance(nodes, list), (
+                "search_nodes on a quoted term must return a list, "
+                f"got {type(result).__name__!r}."
+            )
+        except Exception as exc:
+            pytest.fail(
+                "search_nodes('cogn\"ition') must not crash (SEC-06). "
+                "Strip embedded double quotes from each term before wrapping: "
+                f"term.replace('\"', ''). Got {type(exc).__name__}: {exc}"
+            )
+
 
 class TestGetNode:
     def test_get_node_returns_dict(self, mcp_env) -> None:
@@ -314,8 +390,9 @@ class TestListRelationTypes:
         """list_relation_types() must return all 71 built-in relation types.
 
         The 71 types span 11 prefix categories: EP, HT, SC, CT, AP, DR, CC,
-        EV, PA, SO, TC. The test accepts >= 10 to handle partial implementations,
-        but the target is 71.
+        EV, PA, SO, TC. The registry is docs/foundations/relation-vocabulary.md.
+        Custom (learner-defined) types may append beyond 71 — but a partial
+        built-in list is a bug, not an implementation choice.
         """
         list_relation_types = _get_tool(mcp_env.mod, "list_relation_types")
         result = list_relation_types()
@@ -324,9 +401,11 @@ class TestListRelationTypes:
             f"list_relation_types must return a list, "
             f"got {type(result).__name__!r}."
         )
-        assert len(result) >= 10, (
-            f"list_relation_types must return at least 10 relation types "
-            f"(target: 71), got {len(result)}."
+        assert len(result) >= 71, (
+            f"list_relation_types must return all 71 built-in relation types, "
+            f"got {len(result)}.\n"
+            "Load the full registry (docs/foundations/relation-vocabulary.md — "
+            "the Phase 1 relation registry) — do not hardcode a sample subset."
         )
         # Each item must be a dict with an 'id' or 'name' key
         for item in result[:5]:  # spot-check first 5
@@ -402,12 +481,53 @@ class TestCreateNode:
 # Security tests
 # ---------------------------------------------------------------------------
 
+def _find_wildcard_host_bindings(source: str) -> list[int]:
+    """Return line numbers where '0.0.0.0' is used as a VALUE in code.
+
+    AST-based so that comments, docstrings, and NotImplementedError messages
+    that merely *mention* '0.0.0.0' (the skeleton's own security warnings do,
+    three times) never trigger a false positive. Flags the string literal only
+    when it appears as:
+      - the right-hand side of an assignment (host = "0.0.0.0")
+      - a function-parameter default (def run(host="0.0.0.0"))
+      - a keyword-argument value (mcp.run(host="0.0.0.0"),
+        parser.add_argument("--host", default="0.0.0.0"))
+    """
+
+    def _contains_wildcard(node: ast.AST) -> bool:
+        return any(
+            isinstance(sub, ast.Constant) and sub.value == "0.0.0.0"
+            for sub in ast.walk(node)
+        )
+
+    offenders: list[int] = []
+    for node in ast.walk(ast.parse(source)):
+        suspects: list[ast.AST] = []
+        if isinstance(node, (ast.Assign, ast.AugAssign)) and node.value is not None:
+            suspects.append(node.value)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            suspects.append(node.value)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            args = node.args
+            suspects.extend(d for d in args.defaults if d is not None)
+            suspects.extend(d for d in args.kw_defaults if d is not None)
+        elif isinstance(node, ast.keyword):
+            suspects.append(node.value)
+
+        for suspect in suspects:
+            if _contains_wildcard(suspect):
+                offenders.append(getattr(suspect, "lineno", getattr(node, "lineno", 0)))
+    return sorted(set(offenders))
+
+
 class TestMcpSecurity:
     def test_mcp_server_binds_localhost(self, mcp_env) -> None:
         """SEC-04: The MCP server must bind to 127.0.0.1, never 0.0.0.0.
 
-        We inspect the server module's source for the host configuration
-        rather than spinning up a live server.
+        We parse the server module's AST rather than substring-scanning the
+        source — the skeleton's own comments and error messages legitimately
+        mention '0.0.0.0' while warning against it, and a learner must not
+        fail SEC-04 for keeping those warnings.
         """
         server_mod = mcp_env.mod
         source_file = inspect.getfile(server_mod)
@@ -419,11 +539,14 @@ class TestMcpSecurity:
                 "Cannot read server module source file to verify host binding."
             )
 
-        # The source must NOT contain '0.0.0.0' as a host binding
-        assert "0.0.0.0" not in source, (
-            "SEC-04: MCP server source must not bind to '0.0.0.0'. "
-            "Use host='127.0.0.1' (localhost only). "
-            "Binding to all interfaces exposes the server to the network."
+        offenders = _find_wildcard_host_bindings(source)
+        assert not offenders, (
+            f"SEC-04: '0.0.0.0' is used as a value in the MCP server source "
+            f"(line(s) {offenders}).\n"
+            "Use host='127.0.0.1' (localhost only) — binding to all interfaces "
+            "exposes the server (and your private vault) to the network.\n"
+            "Comments and warning messages mentioning 0.0.0.0 are fine; "
+            "assigning or defaulting to it is not."
         )
 
         # And it should mention 127.0.0.1 (the expected safe default)

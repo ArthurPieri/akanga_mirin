@@ -75,6 +75,11 @@ class AkangaTUI(App):
     }
     """
 
+    # Keymap is canonical per docs/learning/phase-05-terminal-ui.md §Keybindings:
+    #   e      = inline TextArea edit (Ctrl+S saves)   — NOT $EDITOR
+    #   g      = ego-graph screen (selected node)
+    #   ctrl+g = vault-wide graph screen
+    #   G      = jump to bottom of the node list (vim)
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("n", "new_node", "New"),
@@ -82,11 +87,12 @@ class AkangaTUI(App):
         Binding("d", "delete_node", "Delete"),
         Binding("slash", "search", "Search", key_display="/"),
         Binding("g", "ego_graph", "Ego Graph"),
-        Binding("shift+g", "vault_graph", "Vault Graph", key_display="G"),
+        Binding("ctrl+g", "vault_graph", "Vault Graph"),
         Binding("question_mark", "help_cheatsheet", "Help", key_display="?"),
         Binding("r", "refresh", "Refresh"),
         Binding("j", "focus_next_node", "Next node"),
         Binding("k", "focus_prev_node", "Prev node"),
+        Binding("shift+g", "focus_last_node", "Bottom", key_display="G"),
         Binding("o", "open_url", "Open URL"),
     ]
 
@@ -194,19 +200,34 @@ class AkangaTUI(App):
         operation so the display stays consistent with the vault on disk.
 
         HOW:
-        1. Call ``self.db.list_nodes(limit=10_000)`` → list of Node objects.
-        2. Get the ListView: ``node_list = self.query_one("#left-panel", ListView)``.
-        3. Clear it: ``node_list.clear()``.
-        4. For each node, create a ``ListItem(Label(node.title))``
+        Do NOT call the DB synchronously on the UI thread — a slow query
+        (cold cache, large vault, WAL checkpoint) freezes every keystroke.
+        Run the query in a worker and apply widget updates back on the UI
+        thread:
+
+        1. Fetch off the UI thread — either decorate this method with
+           ``@work(thread=True)`` (``from textual import work``) and call
+           ``nodes = self.db.list_nodes(limit=10_000)`` inside it, or from
+           an async context use
+           ``nodes = await asyncio.to_thread(self.db.list_nodes, limit=10_000)``.
+        2. Apply the UI updates on the UI thread. Inside a thread worker
+           that means wrapping steps 3–6 with
+           ``self.call_from_thread(...)``; in the asyncio variant you are
+           already back on the loop after the ``await``.
+        3. Get the ListView: ``node_list = self.query_one("#left-panel", ListView)``.
+        4. Clear it: ``node_list.clear()``.
+        5. For each node, create a ``ListItem(Label(node.title))``
            and append it to the list view.  Store ``node.id`` somewhere
            accessible (e.g. as a custom attribute on the ListItem, or by
            keeping a parallel list ``self._node_ids``).
-        5. Update ``self.sub_title`` with the node count, e.g.
+        6. Update ``self.sub_title`` with the node count, e.g.
            ``f"Knowledge Graph ({len(nodes)} nodes)"``.
         """
         raise NotImplementedError(
-            "db.list_nodes(limit=10_000) → clear ListView → append ListItem(Label(node.title)) "
-            "for each node → update self.sub_title with count"
+            "Fetch db.list_nodes(limit=10_000) in a worker (@work(thread=True) or "
+            "asyncio.to_thread) — never synchronously on the UI thread. Then, back "
+            "on the UI thread (call_from_thread), clear the ListView, append "
+            "ListItem(Label(node.title)) per node, update self.sub_title with count"
         )
 
     def show_node(self, node_id: str) -> None:
@@ -309,36 +330,59 @@ class AkangaTUI(App):
         )
 
     def action_edit_node(self) -> None:
-        """WHAT: Open the selected node's Markdown file in ``$EDITOR``.
+        """WHAT: Edit the selected node's Markdown body INLINE in a
+        ``TextArea`` widget in the center panel; ``Ctrl+S`` saves.
 
-        WHY: Rich text editing belongs in the user's preferred editor, not
-        a terminal widget.  The TUI suspends, the editor runs in the
-        foreground, and the TUI resumes and re-indexes after the editor exits.
+        WHY: Inline editing keeps the user inside the TUI — no terminal
+        suspend, no external process, and the edit→save→re-index loop stays
+        observable. This is the canonical Phase 5 design (see the phase doc
+        keybindings: ``e`` = inline TextArea, ``Ctrl+S`` = save).
 
         HOW:
         1. Guard: if ``self._selected_id`` is None, call
            ``self.notify("No node selected", severity="warning")`` and return.
-        2. Look up the node: ``node = self.db.get_node(self._selected_id)``
-        3. Determine the editor::
+        2. Look up the node: ``node = self.db.get_node(self._selected_id)``,
+           then read the current body from disk::
 
-               editor = os.environ.get("EDITOR", "nano")
+               import frontmatter
+               post = frontmatter.load(node.path)
 
-        4. Suspend the Textual app, run the editor, resume::
+        3. Swap the center panel into edit mode: hide (or remove) the
+           ``Markdown`` widget and mount a ``TextArea`` in its place,
+           pre-loaded with ``post.content``::
 
-               with self.suspend():
-                   subprocess.run([editor, node.path])
+               from textual.widgets import TextArea
+               editor = TextArea(post.content, id="editor")
+               # mount into the center container, then editor.focus()
 
-        5. After the editor exits, re-parse and re-index::
+        4. Bind the save key on the TextArea (e.g. a small ``TextArea``
+           subclass with ``BINDINGS = [Binding("ctrl+s", "save", "Save")]``,
+           or handle the key event). On ``Ctrl+S``:
 
-               node = parse_node_file(node.path)
-               self.db.upsert_node(node)
+           a. ``write_node_file(node.path, dict(post.metadata), editor.text)``
+              (from ``akanga_core.parser`` — atomic write).
+           b. Re-parse and re-index::
 
-        6. Call ``self.show_node(self._selected_id)`` to refresh the panels.
-        7. ``self.notify("Saved")``.
+                  node = parse_node_file(node.path)
+                  self.db.upsert_node(node)
+
+           c. Remove the TextArea, restore the ``Markdown`` widget, and call
+              ``self.show_node(self._selected_id)`` to refresh the panels.
+           d. ``self.notify("Saved")``.
+        5. (Optional) Escape cancels: discard the TextArea without writing.
+
+        Optional v1 extra (not required, do AFTER inline editing works):
+        a second binding that suspends to ``$EDITOR``
+        (``with self.suspend(): subprocess.run([editor, node.path])``) for
+        users who want their full editor. Note it does not survive every
+        terminal/tmux combination — that is why it is the extra, not the
+        default.
         """
         raise NotImplementedError(
-            "Guard no-selection, get node path, suspend app, run $EDITOR via subprocess, "
-            "resume, re-parse and upsert, refresh panels"
+            "Guard no-selection, load body with frontmatter.load(node.path), "
+            "mount a TextArea over the center panel pre-filled with the body, "
+            "on ctrl+s: write_node_file → parse_node_file → upsert_node → "
+            "restore Markdown widget → show_node → notify('Saved')"
         )
 
     def action_delete_node(self) -> None:
@@ -351,8 +395,17 @@ class AkangaTUI(App):
         HOW:
         1. Guard: if ``self._selected_id`` is None, notify and return.
         2. Look up the node: ``node = self.db.get_node(self._selected_id)``.
-        3. Ask for confirmation — push a small confirmation screen, or use
-           ``self.notify`` with a bell and a second keypress pattern.
+        3. Ask for confirmation with a ``ModalScreen`` — the same pattern as
+           the help cheatsheet (action_help_cheatsheet): define a
+           ``ConfirmDeleteScreen(ModalScreen[bool])`` showing
+           "Delete '<title>'? (y/n)" with Yes/No buttons (or y/n keys) that
+           ``self.dismiss(True/False)``, then::
+
+               self.push_screen(ConfirmDeleteScreen(node.title), callback=...)
+
+           Run steps 4a–4g in the callback only when the result is True.
+           Do NOT use a bell + second-keypress pattern — it is invisible to
+           screen readers and indistinguishable from a stuck key.
         4. On confirmation:
 
            a. Resolve the id explicitly: ``node_id = self._selected_id``
@@ -376,51 +429,71 @@ class AkangaTUI(App):
            g. ``self.notify("Deleted")``.
         """
         raise NotImplementedError(
-            "Guard no-selection, confirm, node_id = self._selected_id, "
+            "Guard no-selection, push a ConfirmDeleteScreen(ModalScreen[bool]) and in "
+            "its callback (result True): node_id = self._selected_id, "
             "with db._lock, db.conn: db.conn.execute('DELETE FROM edges WHERE target_id=?', (node_id,)), "
             "os.remove, db.delete_node(node_id), clear panels, load_node_list, notify"
         )
 
     def action_ego_graph(self) -> None:
-        """WHAT: Show the ego-graph (immediate neighbourhood) of the selected node.
+        """WHAT: Push an ``EgoGraphScreen`` showing the selected node's
+        neighbourhood as a Textual ``Tree`` widget.
 
         WHY: Visualising a node's direct connections helps users understand
         the local structure of the knowledge graph without rendering the
-        entire vault.
+        entire vault. A dedicated ``Screen`` with a ``Tree`` gives free
+        keyboard navigation, folding, and scrolling — do NOT hand-draw an
+        ASCII-art graph in the content panel (the phase doc forbids it; the
+        Phase 3 ``render_ascii`` helper is a debugging tool, not a UI).
 
         HOW:
         1. Guard: if ``self._selected_id`` is None, notify and return.
-        2. Fetch data::
+        2. Build the ego-graph with your Phase 3 deliverable::
 
-               node = self.db.get_node(self._selected_id)
-               neighbors = self.db.get_neighbors(self._selected_id)   # outgoing
-               backlinks = self.db.get_backlinks(self._selected_id)   # incoming
+               from akanga_core.graph import build_ego_graph
+               ego = build_ego_graph(self._selected_id, self.db, max_depth=2)
 
-        3. Render the ego graph as ASCII art or using Textual's ``Tree`` widget.
-        4. Display in the center panel, or push a dedicated ``EgoGraphScreen``.
+        3. Define an ``EgoGraphScreen(Screen)`` whose ``compose()`` yields a
+           ``Tree`` (``from textual.widgets import Tree``):
+
+           - Tree root label: the ego root's title.
+           - For each edge in ``ego.edges``, add a child labelled in the
+             edge's natural direction, e.g.
+             ``f"--[{edge.relation or 'links'}]--> {target.title}"`` under
+             its source node (look titles up in ``ego.nodes``).
+           - Bind ``q`` / ``escape`` to ``self.app.pop_screen()``.
+
+        4. ``self.push_screen(EgoGraphScreen(ego))``.
         """
         raise NotImplementedError(
-            "Guard no-selection, fetch node/neighbors/edges, render ASCII or push EgoGraphScreen"
+            "Guard no-selection, ego = build_ego_graph(self._selected_id, self.db, "
+            "max_depth=2), push an EgoGraphScreen(Screen) rendering ego as a "
+            "Textual Tree widget (no ASCII art)"
         )
 
     def action_vault_graph(self) -> None:
-        """WHAT: Show a graph view of the entire vault.
+        """WHAT: Push a ``VaultGraphScreen`` (bound to ``Ctrl+g``) showing a
+        vault-wide overview as a Textual ``Tree`` widget.
 
         WHY: A high-level overview helps users spot clusters, isolated nodes,
         and over-connected hubs.
 
         HOW:
         1. ``nodes = self.db.list_nodes(limit=10_000)``
-        2. Collect all edges (iterate nodes, call ``get_neighbors`` for outgoing
-           and ``get_backlinks`` for incoming on each node, de-duplicate by edge ID).
-        3. Render an ASCII overview or push a ``VaultGraphScreen``.
+        2. Collect all edges: iterate nodes and call ``get_edges_from`` on
+           each (outgoing only is sufficient — every edge has exactly one
+           source, so iterating sources covers the whole vault exactly once).
+        3. Define a ``VaultGraphScreen(Screen)`` with a ``Tree``: one branch
+           per node, children labelled ``--[relation]--> target_title``.
+           Reuse the EgoGraphScreen rendering helper if you wrote one.
+        4. ``self.push_screen(VaultGraphScreen(...))``.
 
         Performance note: for large vaults (> 500 nodes) a full graph render
         can be slow.  Consider limiting to the top N nodes by edge count.
         """
         raise NotImplementedError(
-            "list_nodes(limit=10_000), collect and deduplicate edges via get_neighbors/get_backlinks, "
-            "render ASCII or push VaultGraphScreen"
+            "list_nodes(limit=10_000), collect edges via get_edges_from per node, "
+            "push a VaultGraphScreen(Screen) rendering them as a Textual Tree widget"
         )
 
     def action_help_cheatsheet(self) -> None:
@@ -437,6 +510,9 @@ class AkangaTUI(App):
         2. Render as a Textual ``DataTable`` or a formatted ``Markdown`` string.
         3. Push a ``ModalScreen`` (or any ``Screen``) that displays the table
            and dismisses on any key press.
+
+        Note: this ModalScreen is the pattern the delete confirmation
+        (action_delete_node) reuses — build it once, parameterise twice.
         """
         raise NotImplementedError(
             "Build a table from self.BINDINGS, push a ModalScreen showing the table. "
@@ -465,22 +541,42 @@ class AkangaTUI(App):
             "Move selection to the previous item in the NodeList widget."
         )
 
-    def action_open_url(self) -> None:
-        """WHAT: Open the selected virtual node's URL in the system browser.
-
-        WHY: Virtual nodes represent external resources (GitHub repos, web pages).
-        The `o` key launches the URL without leaving the TUI.
+    def action_focus_last_node(self) -> None:
+        """WHAT: Jump selection to the LAST node in the list (vim ``G``).
 
         HOW:
-        1. Get selected node: node = self._get_selected_node()
-        2. If node is None or node.type != "virtual": return (only for virtual nodes)
-        3. import webbrowser, yaml, pathlib
-           fm = yaml.safe_load(pathlib.Path(node.path).read_text().split("---")[1])
-           url = fm.get("virtual", {}).get("url", "")
+        1. Get the node list widget: node_list = self.query_one("#left-panel", ListView)
+        2. Move the cursor to the last item — e.g. set
+           ``node_list.index = len(node_list) - 1`` (guard the empty list),
+           or call the equivalent Textual cursor method.
+        """
+        raise NotImplementedError(
+            "Move selection to the last item in the node list (vim G)."
+        )
+
+    def action_open_url(self) -> None:
+        """WHAT: Open the selected reference node's URL in the system browser.
+
+        WHY: Reference nodes (type "reference", Phase 1B) point at external
+        resources (web pages, papers, GitHub repos) via a top-level `url`
+        frontmatter field. The `o` key launches the URL without leaving the TUI.
+
+        HOW:
+        1. Get selected node: node = self.db.get_node(self._selected_id)
+           (guard self._selected_id is None first).
+        2. If node is None or node.type != "reference": return
+           (only reference nodes carry a URL).
+        3. Read the top-level `url` frontmatter field::
+
+               import webbrowser, frontmatter
+               fm = frontmatter.load(node.path).metadata
+               url = fm.get("url", "")
+
         4. If url: webbrowser.open(url)
         """
         raise NotImplementedError(
-            "Read the virtual node's frontmatter.virtual.url and open with webbrowser.open()."
+            "Guard selection; only for node.type == 'reference'. Read the top-level "
+            "frontmatter 'url' field and open it with webbrowser.open()."
         )
 
     def action_refresh(self) -> None:

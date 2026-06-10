@@ -23,6 +23,29 @@
 # and propagate pipe failures (so a failing `find | head` doesn't silently pass).
 set -euo pipefail
 
+# ── 0. Dependency preflight ───────────────────────────────────────────────────
+# The study layout needs tmux + nvim + glow; claude is optional (warn only).
+MISSING=0
+for cmd in tmux nvim glow; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        case "$cmd" in
+            tmux) HINT="brew install tmux        (Debian/Ubuntu: apt install tmux)" ;;
+            nvim) HINT="brew install neovim      (Debian/Ubuntu: apt install neovim)" ;;
+            glow) HINT="brew install glow        (or: go install github.com/charmbracelet/glow@latest)" ;;
+        esac
+        echo "error: '$cmd' not found — required for the study session." >&2
+        echo "       install: $HINT" >&2
+        MISSING=1
+    fi
+done
+if [[ "$MISSING" -eq 1 ]]; then
+    exit 1
+fi
+if ! command -v claude >/dev/null 2>&1; then
+    echo "warning: 'claude' (Claude Code CLI) not found — the bottom-right pane will open but the command will fail." >&2
+    echo "         install: npm install -g @anthropic-ai/claude-code  (https://claude.com/claude-code)" >&2
+fi
+
 # ── 1. Normalise the phase number ─────────────────────────────────────────────
 # Accept bare digits (0, 3, 08) and zero-pad to two digits (00, 03, 08).
 # Phase 1 is split into 1A/1B: accept "1a"/"1b" (case-insensitive) as a suffix.

@@ -1,60 +1,49 @@
+"""Akanga data model — the ONE Node dataclass.
+
+WHAT: `Node` is the typed representation of a single `.md` file in the vault.
+
+WHY: Every phase of the learning path (0 through 8) uses THIS exact Node
+shape — it is monotonic: fields are never renamed or removed in later
+phases, so your parser, indexer, DB layer, TUI, and MCP server all share
+one contract. Fields that a phase does not need yet (e.g. `content_hash`
+before the Phase 2 indexer exists) simply stay at their defaults.
+
+HOW (field reference — provided, do not modify):
+- id:            UUID as a *string* (e.g. str(uuid4())). Never a uuid.UUID object.
+- title:         Human-readable node title from frontmatter (or filename fallback).
+- type:          Plain string. Valid values: "note" | "reference".
+                 There is NO enum — compare with string literals.
+                 "note" is the default; "reference" (Phase 1B) points at an
+                 external resource via top-level frontmatter fields
+                 (url / external_type / description).
+- tags:          List of tag strings from frontmatter.
+- content_hash:  SHA-256 hex digest of the file. Filled by the Phase 2
+                 indexer; stays "" before that.
+- content:       Markdown body. Optional — the DB never stores the prose
+                 body (file-first architecture); it is read from disk when
+                 needed.
+- path:          Absolute or vault-relative path of the backing .md file.
+- frontmatter:   The raw YAML frontmatter dict, unmodified.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from enum import StrEnum
 from typing import Any
-from uuid import UUID, uuid4
-
-
-class NodeType(StrEnum):
-    note = "note"
-    active = "active"
-    active_service = "active-service"
-    diagram = "diagram"
-    virtual = "virtual"
 
 
 @dataclass
 class Node:
-    id: UUID
-    path: str
+    """A single knowledge-graph node backed by one Markdown file.
+
+    This shape is identical in every phase (monotonic contract — see the
+    module docstring). `type` is a plain string: "note" | "reference".
+    """
+
+    id: str
     title: str
-    type: NodeType
-    tags: list[str]
-    frontmatter: dict[str, Any]
-    content: str
-    created_at: datetime
-    updated_at: datetime
-
-    @staticmethod
-    def new(path: str, title: str = "", type: NodeType = NodeType.note) -> Node:
-        now = datetime.now(UTC)
-        return Node(
-            id=uuid4(), path=path, title=title, type=type,
-            tags=[], frontmatter={}, content="",
-            created_at=now, updated_at=now,
-        )
-
-
-@dataclass
-class Edge:
-    id: UUID
-    source_id: UUID
-    target_id: UUID
-    relation: str | None = None
-
-
-@dataclass
-class ActiveConfig:
-    action: str
-    params: dict[str, Any] = field(default_factory=dict)
-    interval: int = 60
-    timeout: int = 5
-
-
-@dataclass
-class VirtualConfig:
-    url: str
-    external_type: str = "url"
-    description: str = ""
+    type: str = "note"
+    tags: list[str] = field(default_factory=list)
+    content_hash: str = ""
+    content: str = ""
+    path: str = ""
+    frontmatter: dict[str, Any] = field(default_factory=dict)

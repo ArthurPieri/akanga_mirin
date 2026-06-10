@@ -1,5 +1,7 @@
 # Phase 4 — Concurrency and Events
 
+**Estimated time:** 3–4 hours
+
 **Core concept:** A running Akanga process has multiple things happening simultaneously
 — the file watcher fires when you save a note, the active manager pings URLs on a
 schedule, the API handles a request, and the TUI renders. These components run in
@@ -25,7 +27,7 @@ Check each item you can answer confidently. If you can't check 3 or more, review
 - [ ] I understand the difference between threads and async/await → See `docs/foundations/python-threading.md`
 - [ ] I know what an asyncio event loop is → See `docs/foundations/asyncio-primer.md`
 - [ ] I understand threading.Lock and thread safety → See `docs/foundations/python-threading.md`
-- [ ] I know what a timer is and how threading.Timer works → See `docs/foundations/python-threading.md`
+- [ ] I know how to run a loop in a background thread and stop it cleanly with a `threading.Event` → See `docs/foundations/python-threading.md`
 - [ ] I've completed Phases 0, 1A, 1B, 2, and 3
 
 ---
@@ -61,10 +63,11 @@ and when, or it floods downstream components with redundant work.
 Coalescing a burst of rapid events into a single action taken after the burst settles.
 When you save a file in nvim, the OS fires 5–10 events within 50 milliseconds. Without
 debouncing, the indexer re-indexes the same file 10 times per save, wasting CPU and
-triggering 10 git commits. The debounce pattern: on each event, reset a timer to fire
-in N ms. Only when the timer actually fires (no new events within N ms) does the
-action execute. Akanga uses 500ms — fast enough to feel live, slow enough to coalesce
-rapid saves.
+triggering 10 git commits. The debounce pattern: on each event, push the path's
+*deadline* forward by N ms; only when the deadline passes with no new events does the
+action execute. In Akanga this is one dictionary (`path → deadline`) polled by a
+single worker thread — not one timer per path. Akanga uses 500ms — fast enough to
+feel live, slow enough to coalesce rapid saves.
 
 > Akanga node: `Debouncing`
 
@@ -92,6 +95,19 @@ indexer, TUI, or git manager will handle it. Each subscriber registers independe
 Subscriber errors are isolated — one failing handler doesn't crash the bus or prevent
 other subscribers from running. The event bus is the nervous system of the application.
 
+Two details make Akanga's bus robust rather than racy:
+
+1. **Startup buffering.** If `publish()` is called for an async subscriber *before*
+   `set_loop()` has registered the asyncio loop, the dispatch is not dropped and the
+   handler is not called directly from the wrong thread (that's the BUG-04 race).
+   Instead the pending dispatch is appended to a `collections.deque` buffer;
+   `set_loop()` drains that buffer onto the newly registered loop. Events published
+   during startup are delayed, never lost.
+2. **Async error visibility.** `run_coroutine_threadsafe` returns a
+   `concurrent.futures.Future`. If nobody ever looks at that Future, exceptions raised
+   inside async handlers vanish silently. The bus attaches a done-callback that logs
+   `future.exception()` — the async half of the error-isolation invariant.
+
 > Akanga node: `Event Bus`
 
 → Foundation doc: `docs/foundations/design-patterns.md` (Observer pattern section)
@@ -103,7 +119,12 @@ The standard Python bridge between a daemon thread and an asyncio event loop.
 loop from any thread, returning a `concurrent.futures.Future`. The EventBus uses this
 internally: when `publish()` is called from a watchdog daemon thread, async subscribers
 are scheduled onto the asyncio loop rather than called directly (which would violate
-asyncio's single-thread contract and likely crash).
+asyncio's single-thread contract and likely crash). This is **the** bridge — the only
+pattern Akanga sanctions for thread→asyncio dispatch. If you encounter
+`call_soon_threadsafe` or a `create_task` lambda suggested for this job, use
+`run_coroutine_threadsafe` instead: it is the only one of the three that accepts a
+coroutine directly, works from any thread, and hands back a Future you can attach an
+error-logging done-callback to.
 
 > Akanga node: `run_coroutine_threadsafe`
 
@@ -113,12 +134,14 @@ asyncio's single-thread contract and likely crash).
 
 The mechanism that executes the lazy work enqueued in Phase 1B. The drain worker reads
 pending jobs from `sync_queue`, processes each (reads the affected file, updates the
-stale display-name field, writes atomically), and marks it processed. Three job types:
-`node_title` (update `target` field in edges), `workspace_name` (update `name` in
-graph entries), `relation_name` (update `relation` in edges). Triggered on TUI open,
-specific node opened, explicit sync command, or background schedule. The `limit`
-parameter caps work per drain call so startup time stays bounded regardless of queue
-depth.
+stale display-name field, writes atomically), and marks it processed. In this phase
+there is exactly **one kind of job**: node-title propagation — a node was renamed, and
+every file whose edges still reference it by the old display name must be patched to
+`new_name`. Do **not** branch on a `job_type` field; the Phase 2 schema has no such
+column (it is reserved for later extensions like workspace and relation renames).
+Drain is triggered on TUI open, on a specific node being opened, on an explicit sync
+command, or on a background schedule. The `limit` parameter caps work per drain call
+so startup time stays bounded regardless of queue depth.
 
 > Akanga node: `Sync Queue Drain`
 
@@ -152,9 +175,15 @@ class VaultWatcher:
 Rules:
 - Ignores hidden directories (`.git/`, `.akanga/`)
 - Ignores editor temp files (`.swp`, `.tmp`, `~`-suffixed)
-- Debounces per file path — rapid saves to the same file coalesce into one event
+- Debounces per file path — rapid saves to the same file coalesce into one event.
+  Implementation: one lock-protected `dict[path → deadline]` plus a **single polling
+  worker thread** (see Common Pitfalls — not a Timer per path)
+- Handles `on_created`, `on_modified`, **and** `on_moved` — atomic writes via
+  `os.replace` arrive as move events on macOS; use `event.dest_path` for moves
 - On settled change: publishes `file_changed(path)` to eventbus
 - On delete: publishes `file_deleted(path)` to eventbus
+- `stop()` sets the worker's `threading.Event`, stops the watchdog observer, and
+  joins the worker thread
 
 **`eventbus.py`** — `EventBus`:
 
@@ -166,8 +195,16 @@ class EventBus:
     def set_loop(self, loop: asyncio.AbstractEventLoop): ...
 ```
 
-- `publish()` called from non-asyncio thread → uses `run_coroutine_threadsafe`
-- Subscriber errors are caught and logged, never re-raised
+- `publish()` called from a non-asyncio thread → async handlers are scheduled with
+  `run_coroutine_threadsafe(handler(**kwargs), self._loop)` — never called directly
+- **Startup buffering:** if an async dispatch arrives before `set_loop()` has been
+  called, append the pending `(handler, kwargs)` to a `collections.deque` instead of
+  dropping it or calling the handler from the wrong thread; `set_loop(loop)` stores
+  the loop and then drains the buffer onto it
+- **Done-callback logging:** every Future returned by `run_coroutine_threadsafe` gets
+  `future.add_done_callback(...)` that logs `future.exception()` if one occurred —
+  async handler errors must be visible, not silently dropped with the Future
+- Sync subscriber errors are caught and logged per handler, never re-raised
 - `unsubscribe()` is safe to call from any thread
 
 Events in Phase 4:
@@ -183,26 +220,32 @@ Events in Phase 4:
 
 ```python
 class SyncWorker:
-    def drain(self, db: GraphDatabase, vault: Path, limit: int = 50): ...
+    def drain(self, db: GraphDatabase, vault: Path, limit: int = 50) -> int: ...
 ```
 
-Per job type:
-- `node_title`: find all files where `edges[].target_id == entity_id`, update
-  `target` to `new_name`, write atomically
-- `workspace_name`: find all files where `graph[].id == entity_id`, update `name`
-  to `new_name`, write atomically
-- `relation_name`: find all files where `edges[].relation_id == entity_id`, update
-  `relation` to `new_name`, write atomically
+Every job in `sync_queue` has the same semantics — node-title propagation:
+
+- Fetch pending jobs with `pending_sync_jobs(db, limit)` (rows where `processed = 0`,
+  oldest first); each job carries `entity_id` (the renamed node's UUID) and `new_name`
+- Find all `.md` files where `edges[].target_id == entity_id`, update `target` to
+  `new_name`, write atomically
+- Mark each job done with `mark_processed(db, job["id"])` and return the count
+
+There is no `job_type` column in the Phase 2 schema — do not branch on one. The
+single-semantics design is deliberate: workspace and relation renames are future
+extensions, and the column is reserved until they exist.
 
 **`app.py`** — `AkangaApp` startup sequence:
 
 ```
-1. db = GraphDatabase(db_path)  → connection opens in __init__ (no db.connect() call)
+1. db = GraphDatabase(db_path)        → connection opens in __init__ (no db.connect() call)
    # TODO: load_vault_config(vault) — reads akanga.yaml; no skeleton implementation
    # exists yet (described in Phase 00 concepts). Add when implemented.
-2. full_scan_and_index → two-pass; DB fully populated
-3. sync_worker.drain  → resolve stale display names
-4. watcher.start      → begin watching for changes
+2. eventbus.set_loop(loop)            → register the running asyncio loop
+                                        (loop = asyncio.get_running_loop() in async context)
+3. full_scan_and_index(vault, db)     → two-pass; DB fully populated
+4. sync_worker.drain(db, vault)       → resolve stale display names
+5. watcher.start()                    → begin watching for changes
 
 on file_changed:
   indexer.index_file(path, db)            → re-index
@@ -210,99 +253,76 @@ on file_changed:
   eventbus.publish('node_updated')        → TUI refreshes (Phase 5)
 ```
 
+**Ordering matters:** `set_loop` must run *before* `watcher.start()` — the moment the
+watcher starts, its daemon thread can call `publish()`, and async subscribers can only
+be scheduled if the bus already knows the loop (the startup buffer catches anything
+published even earlier, but never rely on it as the normal path). Drain runs *before*
+the watcher too, so its file rewrites don't fire change events mid-startup.
+
 ---
 
 ## Common Pitfalls
 
 **Calling async from a thread directly:** `await handler()` inside a watchdog callback will fail — watchdog runs in a non-asyncio thread. Use `asyncio.run_coroutine_threadsafe(handler(), loop)` or make the handler sync.
 
-**Global debounce timer instead of per-path:** If you use one timer for all paths, a save to `a.md` resets the timer for `b.md`. Use `dict[path → Timer]` with lock protection.
+**A `threading.Timer` per path — the thread-exhaustion trap:** the tempting debounce design is `dict[path → Timer]`, cancelling and recreating a Timer on every event. Every `Timer` is a full OS thread; an editor save burst, a git checkout, or a bulk edit spawns dozens of short-lived threads, and cancel/recreate races multiply under load. The correct design is a **single polling worker thread**: watchdog callbacks only update a lock-protected `dict[path → deadline]` (`time.monotonic() + debounce_ms/1000`, pushed forward on every event); one worker thread loops every ~25ms, pops entries whose deadline has passed, and publishes their events. One dict, one thread, no cancellation races — and per-path independence comes free, since each path has its own deadline (a save to `a.md` never delays `b.md`).
 
-**Re-raising subscriber exceptions:** If an EventBus subscriber raises and you let it propagate, all subsequent subscribers for that event are skipped. Always `try/except` per handler.
+**No stop signal on the debounce worker:** the worker loop must check a `threading.Event` (e.g. `while not self._stop.is_set(): ...`). `stop()` sets the event, stops the watchdog observer, and `join()`s the worker. Also mark the worker `daemon=True` as a safety net — a non-daemon thread keeps the process alive after the main thread exits — but the daemon flag is the backstop, not the shutdown mechanism.
 
-**Forgetting timer.daemon = True:** A non-daemon timer thread keeps the process alive after the main thread exits. Always set `timer.daemon = True` before `timer.start()`.
+**Re-raising subscriber exceptions:** If an EventBus subscriber raises and you let it propagate, all subsequent subscribers for that event are skipped. Always `try/except` per handler — and for async handlers, attach the done-callback that logs `future.exception()`; otherwise the async half of your error isolation is theater.
+
+**The self-write echo loop:** your own components write files too. `sync_worker.drain()` rewrites vault files → the watcher fires `file_changed` → the indexer re-indexes → (from Phase 7) git commits — potentially round and round. The natural damper is the **content-hash skip** from Phase 2: the indexer compares the file's `content_hash` against the stored one and skips re-indexing when nothing actually changed, which breaks the loop after one harmless cycle. Don't disable that check, and don't "fix" the loop by ignoring your own writes via timing hacks.
+
+**macOS delivers atomic writes as `on_moved`:** `write_node_file()` writes a temp file and `os.replace()`s it over the target. On macOS (FSEvents), that replace often arrives as a *move* event, not a modify. If your handler only implements `on_modified`/`on_created`, saves will silently produce no events on macOS while passing on Linux. Handle `on_moved` too, treating `event.dest_path` as the changed file (and still applying the temp-file filters to it).
 
 ---
 
 ## Deliverable
 
-```python
-def test_watcher_fires_on_save(tmp_path):
-    events = []
-    bus = EventBus()
-    bus.subscribe("file_changed", lambda path: events.append(path))
-    watcher = VaultWatcher(tmp_path, bus, debounce_ms=50)
-    watcher.start()
-    (tmp_path / "test.md").write_text("hello")
-    time.sleep(0.2)
-    watcher.stop()
-    assert len(events) == 1
+The complete test suite lives in `tests/phase_04/` — three files.
 
-def test_watcher_debounces_rapid_saves(tmp_path):
-    events = []
-    bus = EventBus()
-    bus.subscribe("file_changed", lambda path: events.append(path))
-    watcher = VaultWatcher(tmp_path, bus, debounce_ms=200)
-    watcher.start()
-    for i in range(10):
-        (tmp_path / "test.md").write_text(f"save {i}")
-    time.sleep(0.5)
-    watcher.stop()
-    assert len(events) == 1   # 10 saves → 1 event
+**`test_eventbus.py`** — the bus contract:
 
-def test_watcher_ignores_temp_files(tmp_path):
-    events = []
-    bus = EventBus()
-    bus.subscribe("file_changed", lambda path: events.append(path))
-    watcher = VaultWatcher(tmp_path, bus, debounce_ms=50)
-    watcher.start()
-    (tmp_path / ".test.md.swp").write_text("vim temp")
-    time.sleep(0.2)
-    watcher.stop()
-    assert len(events) == 0
+- `test_subscribe_and_publish` — a subscribed handler fires on the matching event
+- `test_publish_passes_kwargs` — `publish(path=..., extra=...)` reaches the handler unchanged
+- `test_multiple_subscribers` — two subscribers to the same event both fire
+- `test_multiple_events` — subscribing to `event_a` does not trigger on `event_b`
+- `test_unsubscribe` — after unsubscribe, the handler no longer fires
+- `test_unsubscribe_nonexistent_handler_is_safe` — unsubscribing an unknown handler must not raise
+- `test_subscriber_error_isolation` — a raising handler doesn't stop later subscribers; `publish()` never raises
+- `test_no_subscribers_publish_is_safe` — publishing with zero subscribers must not raise
+- The `set_loop` / buffering tests — `publish()` before `set_loop()` buffers async
+  dispatches instead of dropping them, and `set_loop(loop)` drains the buffer onto the
+  loop
 
-def test_subscriber_error_isolation():
-    bus = EventBus()
-    results = []
-    def bad_handler(**kwargs): raise RuntimeError("boom")
-    def good_handler(**kwargs): results.append(True)
-    bus.subscribe("test", bad_handler)
-    bus.subscribe("test", good_handler)
-    bus.publish("test")   # must not raise
-    assert results == [True]
+**`test_watcher.py`** — debounced filesystem events:
 
-def test_async_subscriber_receives_event():
-    # Verifies that publish() from a non-asyncio thread schedules async
-    # subscribers via run_coroutine_threadsafe (not called directly).
-    loop = asyncio.new_event_loop()
-    loop_thread = threading.Thread(target=loop.run_forever, daemon=True)
-    loop_thread.start()
-    try:
-        bus = EventBus()
-        bus.set_loop(loop)
-        called = []
-        async def async_handler(**kwargs):
-            called.append(kwargs)
-        bus.subscribe("test_event", async_handler)
-        bus.publish("test_event", source="main_thread")   # called from main thread
-        time.sleep(0.2)
-        assert len(called) == 1
-        assert called[0]["source"] == "main_thread"
-    finally:
-        loop.call_soon_threadsafe(loop.stop)
-        loop_thread.join(timeout=2)
+- `test_watcher_fires_on_file_creation` / `test_watcher_fires_on_file_modification` /
+  `test_watcher_fires_on_file_deletion` — the three basic event paths (note: the test
+  helper writes files with `os.replace`, so your `on_moved` handling is exercised on macOS)
+- `test_watcher_event_contains_path` — the payload includes a `path` key
+- `test_watcher_debounces_rapid_saves` — 10 rapid writes to one file coalesce to 1–3 events
+- `test_watcher_parallel_saves_not_debounced` — writes to *different* files are not merged
+- `test_watcher_ignores_swp_files` / `test_watcher_ignores_tilde_files` /
+  `test_watcher_ignores_hidden_dirs` — the filter rules
+- `test_watcher_stop_and_start` — `start()` then `stop()` completes without raising
+- `test_watcher_nonexistent_vault_raises` — a missing vault path raises in `__init__` or `start()`
+- `test_async_subscriber_receives_event` — **the bridge test**: `publish()` from a
+  non-asyncio thread reaches an async subscriber via `run_coroutine_threadsafe`
 
-def test_sync_queue_drain_node_title(tmp_path):
-    # Node A has edge to B (target="Old Title", target_id=B.id).
-    # B is renamed to "New Title" → job enqueued.
-    # After drain(), A's frontmatter reads: target: "New Title".
-    ...
-```
+**`test_sync_worker.py`** — queue drain:
 
-Plus 7 vault nodes with typed edges. The debounce test proves that rapid saves don't
-flood the indexer — the main performance guarantee of this phase. The async-subscriber
-test proves that `run_coroutine_threadsafe` is wired correctly — async handlers always
-run on the event loop, even when `publish()` is called from a watchdog daemon thread.
+- Drain propagates a renamed node's `new_name` into the `target` field of every
+  referencing file (written atomically), marks each job `processed = 1` via
+  `mark_processed`, respects the `limit` cap, and returns the processed count
+
+The debounce test proves rapid saves don't flood the indexer — the main performance
+guarantee of this phase. The async-subscriber test proves the bridge is wired
+correctly — async handlers always run on the event loop, even when `publish()` is
+called from a watchdog daemon thread. The buffering tests prove startup events
+survive the window before `set_loop()`.
+
+Plus 7 vault nodes with typed edges.
 
 ---
 
@@ -441,7 +461,9 @@ With `--verbose`, look for:
 **"A file change is being indexed 10 times."**
 
 Look for 10 `EVENT file_changed` lines for the same path within 500ms. The debounce
-is not working. Check that `VaultWatcher` is using a per-path timer, not a global one.
+is not working. Check that the watchdog callback only *updates the deadline* in the
+`path → deadline` dict and that the worker thread is the one publishing — if the
+callback publishes directly, nothing is debounced.
 
 **"The watcher never fires."**
 
@@ -461,6 +483,6 @@ the MCP server (Phase 8) — git specifically is Phase 7.
 
 ## Reflect
 
-> **Solo:** Draw a timeline diagram showing: a file save event → OS notification → watchdog callback → debounce timer → EventBus publish → indexer subscriber → `node_updated` event. Where do thread boundaries occur?
+> **Solo:** Draw a timeline diagram showing: a file save event → OS notification → watchdog callback → deadline updated → debounce worker fires → EventBus publish → indexer subscriber → `node_updated` event. Where do thread boundaries occur?
 
-> **Group:** What would happen if two files changed simultaneously during the debounce window? Would both trigger separate events, or could they interfere? Walk through the per-path timer design together.
+> **Group:** What would happen if two files changed simultaneously during the debounce window? Would both trigger separate events, or could they interfere? Walk through the single-worker design together: the `path → deadline` dict, the ~25ms polling loop, and the `threading.Event` stop signal. Then argue the other side — what would a Timer-per-path design cost during a 200-file git checkout?
