@@ -44,11 +44,11 @@ D11 phase-5: doc keymap canonical; Kitty renderer = stretch goal (`uv sync --ext
 
 ## Remaining open items (small, tracked)
 
-1. **CI doc-contract lint is `--warn-only`** — flip to enforcing after the first clean
-   GitHub Actions run (`.github/workflows/ci.yml`, drop the flag).
+1. ~~CI doc-contract lint `--warn-only`~~ — **flipped to enforcing 2026-06-10** after
+   first clean run (27286025295).
 2. **Anti-entropy `akanga sync --full`** — specced as deferred V1 work in phase-01b.
 3. **Solutions for phases 0–7** — still unwritten (was Sprint-3/4 scope; phase_08 is
    the only reference and now passes its suite).
 4. **Phase-5 stretch renderer** — `[graph]` extra deps are unpinned; pin after first use.
-5. **Push to origin** — not yet pushed this cycle (3 local commits ahead).
+5. ~~Push to origin~~ — **pushed 2026-06-10** (main `e9209ff..96a003c` + `arthur/phase-work`); CI green.
 6. The author's own learning path continues from Phase 0 `create()` on `arthur/phase-work`.

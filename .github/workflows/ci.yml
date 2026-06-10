@@ -28,10 +28,9 @@ jobs:
       - name: Lint
         run: uv run ruff check tests/ skeletons/ scripts/
 
-      # --warn-only for the soft launch; flip to enforcing (drop the flag)
-      # once the first clean run is confirmed.
+      # Enforcing since 2026-06-10 (first clean run: 27286025295).
       - name: Doc-contract lint (doc ↔ skeleton signature drift)
-        run: uv run python scripts/check_doc_contracts.py --warn-only
+        run: uv run python scripts/check_doc_contracts.py
 
       - name: No gitignored files may be tracked
         run: |
