@@ -20,7 +20,7 @@ def _make_node(node_id: str, title: str, tmp_vault: Path, *, tags=None, content_
 
     return Node(
         id=node_id,
-        path=str(tmp_vault / f"{node_id[:8]}.md"),
+        path=str(tmp_vault / f"{node_id}.md"),  # full id — node paths are UNIQUE in the DB schema
         title=title,
         type="note",
         tags=tags or [],

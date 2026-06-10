@@ -47,8 +47,8 @@ D11 phase-5: doc keymap canonical; Kitty renderer = stretch goal (`uv sync --ext
 1. ~~CI doc-contract lint `--warn-only`~~ — **flipped to enforcing 2026-06-10** after
    first clean run (27286025295).
 2. **Anti-entropy `akanga sync --full`** — specced as deferred V1 work in phase-01b.
-3. **Solutions for phases 0–7** — still unwritten (was Sprint-3/4 scope; phase_08 is
-   the only reference and now passes its suite).
+3. **Solutions** — phases 0, 1, 2, 8 complete and green (0: 17/17; 1: 37/37 cumulative;
+   2: 71/71 cumulative; 8: 23/23). Phases 3–7 remain (next run).
 4. **Phase-5 stretch renderer** — `[graph]` extra deps are unpinned; pin after first use.
 5. ~~Push to origin~~ — **pushed 2026-06-10** (main `e9209ff..96a003c` + `arthur/phase-work`); CI green.
 6. The author's own learning path continues from Phase 0 `create()` on `arthur/phase-work`.
