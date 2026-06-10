@@ -5,11 +5,7 @@ The DB_SCHEMA constant is provided for reference — do not modify it.
 """
 from __future__ import annotations
 
-import json
-import sqlite3
-import threading
 from typing import Any
-from uuid import uuid4
 
 # ---------------------------------------------------------------------------
 # Schema reference (do not modify)

@@ -1,5 +1,5 @@
 site_name: "Akanga Mirin — Learning Path"
-site_description: "Build a personal knowledge graph in 9 phases"
+site_description: "Build a personal knowledge graph in 10 phases"
 
 theme:
   name: material
@@ -17,7 +17,6 @@ nav:
   - Home: index.md
   - Learning Path:
     - "Phase 0 — File System as Database": learning/phase-00-file-system-as-database.md
-    - "Phase 1 — Data Modeling": learning/phase-01-data-modeling.md
     - "Phase 1A — Edge Schema": learning/phase-01a-data-modeling-edge-schema.md
     - "Phase 1B — Workspace and Sync": learning/phase-01b-workspace-and-sync.md
     - "Phase 2 — Storage and Indexing": learning/phase-02-storage-and-indexing.md

@@ -1,15 +1,9 @@
 """FastAPI REST server for the Akanga knowledge graph."""
 from __future__ import annotations
 
-import os
-from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
-from fastapi import APIRouter, FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, FastAPI
 from pydantic import BaseModel
 
 # ── APIRouter — register handlers on this router, then include it in create_app()

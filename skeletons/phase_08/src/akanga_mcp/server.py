@@ -10,7 +10,6 @@ SERVER_INSTRUCTIONS must warn the LLM:
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 # FastMCP import — learner must install: uv add fastmcp

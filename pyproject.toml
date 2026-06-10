@@ -35,7 +35,7 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 
-[tool.uv.workspace]
-members = [
-    "my_implementations",
-]
+[tool.ruff.lint.per-file-ignores]
+# Skeleton stubs reference types ("GraphDatabase", "Node") in string annotations
+# that the LEARNER will create — forward refs to not-yet-written code are the point.
+"skeletons/**" = ["F821"]

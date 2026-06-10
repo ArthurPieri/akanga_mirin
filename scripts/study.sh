@@ -25,9 +25,19 @@ set -euo pipefail
 
 # ── 1. Normalise the phase number ─────────────────────────────────────────────
 # Accept bare digits (0, 3, 08) and zero-pad to two digits (00, 03, 08).
+# Phase 1 is split into 1A/1B: accept "1a"/"1b" (case-insensitive) as a suffix.
 # 10#$PHASE forces base-10 so "08" isn't treated as invalid octal.
 PHASE="${1:-00}"
+SUB=""
+if [[ "$PHASE" =~ ^([0-9]+)([aAbB])$ ]]; then
+    SUB=$(printf '%s' "${BASH_REMATCH[2]}" | tr '[:upper:]' '[:lower:]')
+    PHASE="${BASH_REMATCH[1]}"
+fi
 PADDED=$(printf "%02d" "$((10#$PHASE))")
+if [[ "$PADDED" == "01" && -z "$SUB" ]]; then
+    echo "note: Phase 1 is split into 1A and 1B — opening 1A. Use 'PHASE=1b' for 1B."
+    SUB="a"
+fi
 
 # ── 2. Resolve paths ──────────────────────────────────────────────────────────
 # Allow overrides via env vars so the script works outside the default layout.
@@ -37,12 +47,12 @@ CODE_DIR="${AKANGA_CODE:-$HOME/code/akanga_mirin}"
 # tmux session name (used when launching from outside an existing tmux session)
 # and window name (the tab label visible in the status bar).
 SESSION="akanga-study"
-WINDOW="phase-${PADDED}"
+WINDOW="phase-${PADDED}${SUB}"
 
 # ── 3. Locate the phase learning document ────────────────────────────────────
-# Files are named phase-NN-<slug>.md; glob on the NN prefix so we don't have
-# to hard-code the slug. head -1 picks the first match (there should be only one).
-PHASE_DOC=$(find "$AKANGA_DOCS/learning" -name "phase-${PADDED}-*.md" 2>/dev/null | head -1)
+# Files are named phase-NN-<slug>.md (or phase-NNa-/phase-NNb- for split phases);
+# glob on the NN prefix + optional sub-phase letter. head -1 picks the first match.
+PHASE_DOC=$(find "$AKANGA_DOCS/learning" -name "phase-${PADDED}${SUB}-*.md" 2>/dev/null | sort | head -1)
 if [[ -z "$PHASE_DOC" ]]; then
     echo "error: no phase doc found for phase ${PADDED} in $AKANGA_DOCS/learning"
     exit 1

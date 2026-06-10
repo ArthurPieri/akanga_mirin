@@ -23,7 +23,6 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-import pytest
 
 from tests.phase_01.conftest import _load_sync_queue
 

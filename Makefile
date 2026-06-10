@@ -16,12 +16,16 @@
 # ── Variables ─────────────────────────────────────────────────────────────────
 
 PHASE        ?= 0
-PHASE_PAD    := $(shell printf "%02d" $(PHASE))
+# Phase 1 is split into 1A/1B: PHASE may carry an a/b suffix (1a, 1b).
+# PHASE_NUM strips it (tests/skeletons are unified at phase_01); docs-phase/study keep it.
+PHASE_NUM    := $(shell echo "$(PHASE)" | sed 's/[aAbB]$$//')
+PHASE_PAD    := $(shell printf "%02d" "$(PHASE_NUM)" 2>/dev/null)
 
 FROM         ?= 0
 TO           ?= 8
 
 TOPIC        ?=
+PYTEST_ARGS  ?=
 
 AKANGA_SRC   ?= ./src
 AKANGA_DOCS  ?= $(shell pwd)/docs
@@ -37,6 +41,7 @@ GLOW         := glow
 
 .PHONY: help \
         study docs-phase docs-all foundations \
+        run serve mcp \
         test test-solution test-all test-mine test-phase-range \
         verify verify-all \
         example examples-all \
@@ -58,6 +63,10 @@ help: ## Show this help message
 	@printf '\n'
 	@printf '  \033[1;33mStudy workflow\033[0m\n'
 	@grep -E '^(study|docs-phase|docs-all|foundations)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
+		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
+	@printf '\n'
+	@printf '  \033[1;33mRun your app\033[0m\n'
+	@grep -E '^(run|serve|mcp)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
 		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
 	@printf '\n'
 	@printf '  \033[1;33mTesting workflow\033[0m\n'
@@ -104,21 +113,29 @@ study: ## Open tmux study session (PHASE=2 → phase 02)
 	@AKANGA_DOCS="$(AKANGA_DOCS)" AKANGA_CODE="$(AKANGA_CODE)" \
 		bash scripts/study.sh $(PHASE)
 
-docs-phase: ## Open phase doc in glow without launching full tmux (PHASE=3)
-	@PHASE_PAD=$$(printf "%02d" $(PHASE)); \
-	DOC=$$(find "$(AKANGA_DOCS)/learning" -name "phase-$${PHASE_PAD}-*.md" 2>/dev/null | head -1); \
+docs-phase: ## Open phase doc in glow without launching full tmux (PHASE=3, PHASE=1a)
+	@RAW="$(PHASE)"; SUB=""; \
+	case "$$RAW" in \
+		*[aAbB]) SUB=$$(printf '%s' "$${RAW#"$${RAW%?}"}" | tr 'AB' 'ab'); RAW="$${RAW%?}";; \
+	esac; \
+	PHASE_PAD=$$(printf "%02d" "$$RAW"); \
+	if [ "$$PHASE_PAD" = "01" ] && [ -z "$$SUB" ]; then \
+		echo "note: Phase 1 is split into 1A and 1B — opening 1A. Use PHASE=1b for 1B."; SUB="a"; \
+	fi; \
+	DOC=$$(find "$(AKANGA_DOCS)/learning" -name "phase-$${PHASE_PAD}$${SUB}-*.md" 2>/dev/null | sort | head -1); \
 	if [ -z "$$DOC" ]; then \
-		echo "error: no doc found for phase $${PHASE_PAD} in $(AKANGA_DOCS)/learning/"; exit 1; \
+		echo "error: no doc found for phase $${PHASE_PAD}$${SUB} in $(AKANGA_DOCS)/learning/"; exit 1; \
 	fi; \
 	$(GLOW) -p "$$DOC"
 
 docs-all: ## Open all phase docs in glow sequentially (full review mode)
-	@for n in 0 1 2 3 4 5 6 7 8; do \
-		PHASE_PAD=$$(printf "%02d" $$n); \
-		DOC=$$(find "$(AKANGA_DOCS)/learning" -name "phase-$${PHASE_PAD}-*.md" 2>/dev/null | head -1); \
+	@for pat in 00 01a 01b 02 03 04 05 06 07 08; do \
+		DOC=$$(find "$(AKANGA_DOCS)/learning" -name "phase-$${pat}-*.md" 2>/dev/null | sort | head -1); \
 		if [ -n "$$DOC" ]; then \
-			printf '\n\033[1;33m── Phase %s ──────────────────────────────────────────\033[0m\n' "$${PHASE_PAD}"; \
+			printf '\n\033[1;33m── Phase %s ──────────────────────────────────────────\033[0m\n' "$${pat}"; \
 			$(GLOW) -p "$$DOC"; \
+		else \
+			printf '\033[0;31mwarning: no doc found for phase %s\033[0m\n' "$${pat}"; \
 		fi; \
 	done
 
@@ -142,6 +159,32 @@ foundations: ## Open a foundations doc in glow (TOPIC=sqlite → sqlite-basics.m
 # DOCS — serve the learning path as a website
 # =============================================================================
 
+# =============================================================================
+# RUN — launch the learner's own app (TUI / REST API / MCP server)
+# =============================================================================
+
+run: ## Launch your TUI from AKANGA_SRC (Phase 5+; VAULT=./vault DB=./.akanga.db)
+	@if [ ! -d "$(AKANGA_SRC)" ]; then \
+		echo "error: AKANGA_SRC ($(AKANGA_SRC)) does not exist"; exit 1; \
+	fi; \
+	printf 'Launching TUI from \033[36m%s\033[0m ...\n' "$(AKANGA_SRC)"; \
+	printf '\033[2mTip: the graph view (Kitty protocol) degrades inside tmux — run this in a plain Ghostty/Kitty window.\033[0m\n'; \
+	PYTHONPATH="$(AKANGA_SRC)" $(PYTHON) -m akanga_tui.app --vault "$${VAULT:-./vault}" --db "$${DB:-./.akanga.db}"
+
+serve: ## Launch your FastAPI server from AKANGA_SRC (Phase 6+; localhost:8000)
+	@if [ ! -d "$(AKANGA_SRC)" ]; then \
+		echo "error: AKANGA_SRC ($(AKANGA_SRC)) does not exist"; exit 1; \
+	fi; \
+	printf 'Launching REST API from \033[36m%s\033[0m on http://127.0.0.1:8000 ...\n' "$(AKANGA_SRC)"; \
+	PYTHONPATH="$(AKANGA_SRC)" $(PYTHON) -c "import uvicorn; from akanga_core.server import create_app; uvicorn.run(create_app(vault='$${VAULT:-./vault}', db_path='$${DB:-./.akanga.db}'), host='127.0.0.1', port=8000)"
+
+mcp: ## Launch your MCP server from AKANGA_SRC (Phase 8; binds 127.0.0.1)
+	@if [ ! -d "$(AKANGA_SRC)" ]; then \
+		echo "error: AKANGA_SRC ($(AKANGA_SRC)) does not exist"; exit 1; \
+	fi; \
+	printf 'Launching MCP server from \033[36m%s\033[0m ...\n' "$(AKANGA_SRC)"; \
+	PYTHONPATH="$(AKANGA_SRC)" $(PYTHON) -m akanga_mcp.server --vault "$${VAULT:-./vault}" --db "$${DB:-./.akanga.db}"
+
 docs-serve: ## Start MKDocs dev server with live reload (localhost:8000)
 	@echo "Starting MKDocs dev server ..."; \
 	uv run mkdocs serve
@@ -155,7 +198,7 @@ docs-build: ## Build static site into site/ directory
 # =============================================================================
 
 test: ## Run tests for one phase against AKANGA_SRC (PHASE=2)
-	@PHASE_PAD=$$(printf "%02d" $(PHASE)); \
+	@PHASE_PAD="$(PHASE_PAD)"; \
 	if [ ! -d "tests/phase_$${PHASE_PAD}" ]; then \
 		echo "error: tests/phase_$${PHASE_PAD}/ not found — tests may not exist yet"; exit 1; \
 	fi; \
@@ -166,10 +209,10 @@ test: ## Run tests for one phase against AKANGA_SRC (PHASE=2)
 		printf '\033[1;33m   To test the solution:   make test-solution PHASE=%d\033[0m\n\n' "$(PHASE)"; \
 	fi; \
 	printf 'Testing phase \033[1m%s\033[0m against \033[36m%s\033[0m ...\n' "$${PHASE_PAD}" "$(AKANGA_SRC)"; \
-	AKANGA_SRC="$(AKANGA_SRC)" $(PYTEST) tests/phase_$${PHASE_PAD}/ -v
+	AKANGA_SRC="$(AKANGA_SRC)" $(PYTEST) tests/phase_$${PHASE_PAD}/ -v $(PYTEST_ARGS)
 
 test-solution: ## Run tests for one phase against the reference solution (PHASE=2)
-	@PHASE_PAD=$$(printf "%02d" $(PHASE)); \
+	@PHASE_PAD="$(PHASE_PAD)"; \
 	SOLUTION_SRC="solutions/phase_$${PHASE_PAD}/src"; \
 	if [ ! -d "$$SOLUTION_SRC" ]; then \
 		echo "ERROR: No solution found for phase $(PHASE). Skipping." >&2; exit 1; \
@@ -227,7 +270,7 @@ test-phase-range: ## Run phases FROM..TO against their solutions (FROM=0 TO=3)
 # =============================================================================
 
 verify: ## Verify solution N passes all tests 00..N cumulatively (PHASE=3)
-	@PHASE_PAD=$$(printf "%02d" $(PHASE)); \
+	@PHASE_PAD="$(PHASE_PAD)"; \
 	SOLUTION_SRC="solutions/phase_$${PHASE_PAD}/src"; \
 	if [ ! -d "$$SOLUTION_SRC" ]; then \
 		echo "ERROR: Solutions for phase $(PHASE) are not yet published." >&2; exit 1; \
@@ -275,7 +318,7 @@ verify-all: ## Verify all 9 phases are cumulative (facilitator, slow)
 # =============================================================================
 
 example: ## Run the standalone example script for a phase (PHASE=2)
-	@PHASE_PAD=$$(printf "%02d" $(PHASE)); \
+	@PHASE_PAD="$(PHASE_PAD)"; \
 	SCRIPT=$$(find examples -name "phase_$${PHASE_PAD}_*.py" 2>/dev/null | head -1); \
 	if [ -z "$$SCRIPT" ]; then \
 		echo "error: no example script found for phase $${PHASE_PAD} in examples/"; exit 1; \
@@ -302,19 +345,33 @@ examples-all: ## Run all 9 phase example scripts sequentially
 # =============================================================================
 
 skeleton: ## Copy skeleton for a phase into ./src/ as the learner's starting point (PHASE=2)
-	@PHASE_PAD=$$(printf "%02d" $(PHASE)); \
+	@PHASE_PAD="$(PHASE_PAD)"; \
 	SKEL="skeletons/phase_$${PHASE_PAD}"; \
 	if [ ! -d "$$SKEL" ]; then \
 		echo "error: no skeleton found at $$SKEL"; exit 1; \
 	fi; \
 	echo "Copying skeleton for phase $${PHASE_PAD} → ./src/ ..."; \
 	mkdir -p src; \
-	cp -r "$$SKEL/src/." src/; \
+	COPIED=0; SKIPPED=0; \
+	for f in $$(cd "$$SKEL/src" && find . -type f | sed 's|^\./||'); do \
+		if [ -e "src/$$f" ]; then \
+			SKIPPED=$$((SKIPPED+1)); \
+		else \
+			mkdir -p "src/$$(dirname "$$f")"; \
+			cp "$$SKEL/src/$$f" "src/$$f"; \
+			COPIED=$$((COPIED+1)); \
+		fi; \
+	done; \
+	printf 'Copied %d new file(s).\n' "$$COPIED"; \
+	if [ "$$SKIPPED" -gt 0 ]; then \
+		printf '\033[0;33mPreserved %d existing file(s) in src/ — your implementations were NOT overwritten.\033[0m\n' "$$SKIPPED"; \
+		printf 'To inspect what the new skeleton ships: \033[36mls %s/src\033[0m\n' "$$SKEL"; \
+	fi; \
 	echo "Done. Edit src/ to complete the implementation."; \
 	printf 'Next: \033[36mmake test PHASE=%d\033[0m\n' "$(PHASE)"
 
 skeleton-check: ## Verify skeleton still raises NotImplementedError — no solution leakage (PHASE=2)
-	@PHASE_PAD=$$(printf "%02d" $(PHASE)); \
+	@PHASE_PAD="$(PHASE_PAD)"; \
 	SKEL="skeletons/phase_$${PHASE_PAD}/src"; \
 	if [ ! -d "$$SKEL" ]; then \
 		echo "error: no skeleton found at $$SKEL"; exit 1; \
@@ -351,7 +408,7 @@ lint: ## Lint all Python files in tests/ skeletons/ solutions/ examples/
 	$(RUFF) check $$DIRS
 
 typecheck: ## Run mypy on solutions/phase_NN/src/ (PHASE=3)
-	@PHASE_PAD=$$(printf "%02d" $(PHASE)); \
+	@PHASE_PAD="$(PHASE_PAD)"; \
 	SRC="solutions/phase_$${PHASE_PAD}/src"; \
 	if [ ! -d "$$SRC" ]; then \
 		echo "error: no solution at $$SRC"; exit 1; \
@@ -403,7 +460,7 @@ sync-forward: ## Preview or apply a fix from phase FROM to all later phases (FRO
 # =============================================================================
 
 commit-progress: ## Auto-commit progress with message 'progress: phase N tests passing'
-	@PHASE_PAD=$$(printf "%02d" $(PHASE)); \
+	@PHASE_PAD="$(PHASE_PAD)"; \
 	MSG="progress: phase $${PHASE_PAD} tests passing"; \
 	git add tests/ solutions/ skeletons/ examples/ docs/ scripts/ Makefile 2>/dev/null || true; \
 	git commit -m "$$MSG"; \

@@ -14,50 +14,53 @@ is split into 1A + 1B). Each phase has:
 - A phase doc (`docs/learning/phase-NN-*.md`) — the spec and guide
 - A skeleton (`skeletons/phase_NN/`) — stub code with WHAT/WHY/HOW docstrings
 - A test suite (`tests/phase_NN/`) — pytest tests run against learner code
-- A reference solution (`solutions` branch — not on `main`)
+- A reference solution (location under review — currently `solutions/phase_08/` on `main`; see decision note below)
 
 ---
 
 ## Repo structure at a glance
 
 ```
-docs/learning/          9 phase docs — DONE
-docs/foundations/       10 explainer docs — 3/10 done, 7 in progress
+docs/learning/          10 phase docs (Phase 1 split into 1A + 1B) — DONE
+docs/foundations/       15 explainer docs — DONE
 docs/                   planning, security, roadmap, user stories, etc.
 scripts/                study.sh, skeleton_check.py, sync_forward.py
 templates/              project-makefile template for learners
-tests/                  phase test suites — NOT YET WRITTEN (Sprint 2)
-skeletons/              skeleton code per phase — NOT YET WRITTEN (Sprint 2)
-solutions branch        reference implementations — NOT YET WRITTEN (Sprint 3)
+tests/                  phase test suites — DONE for all 9 phases (145 tests)
+skeletons/              skeleton code per phase — DONE for all 9 phases
+solutions/              reference implementations — IN PROGRESS (phase_08 only,
+                        currently on main; branch-vs-directory decision pending,
+                        see docs/adversarial-analysis-v2.md #7)
+examples/               runnable examples per phase — DONE for all 9 phases
 ```
 
----
-
-## Current sprint
-
-**Sprint 1** — Infrastructure + phase doc quality. See `docs/implementation-plan.md`.
-
-Work in progress:
-- Writing the 10 foundation explainer docs (`docs/foundations/`)
-- Fixing phase doc cross-references and content bugs
-
-Not yet started:
-- Test suites (`tests/phase_NN/`) — Sprint 2
-- Skeleton files (`skeletons/phase_NN/`) — Sprint 2
-- Reference solutions (`solutions` branch) — Sprint 3
+Run `make status` for the live completion matrix — trust it over any static list.
 
 ---
 
-## How testing works (once tests exist)
+## Current focus
+
+Resolving the findings of the Round 2 adversarial analysis — see
+`docs/adversarial-analysis-v2.md` (risk matrix + priority tiers). Headlines:
+- Reference solutions for phases 0–7 do not exist yet
+- Doc↔skeleton↔test contract drift is being reconciled (skeleton+tests win on conflict)
+- `docs/implementation-plan.md` is a historical snapshot — its "current state" and
+  hour totals are stale; do not trust them over the filesystem / `make status`
+
+---
+
+## How testing works
 
 ```bash
 AKANGA_SRC=./src make test PHASE=2     # learner's code in ./src
-make test-solution PHASE=2             # reference solution (solutions branch)
-make test-all                          # all phases against solutions
+make test-solution PHASE=2             # reference solution (only exists for phase 8)
+make test-all                          # all phases against solutions/ dirs that exist
 ```
 
-The `AKANGA_SRC` env var points pytest at learner code. Without it, tests fall back to
-the solutions directory. Always set it explicitly when testing learner code.
+The `AKANGA_SRC` env var points pytest at learner code. If it is unset, the Makefile
+warns and defaults to `./src`; if the directory is missing, `tests/conftest.py`
+**fails fast with a clear error** (there is NO fallback to solutions). Always set it
+explicitly when testing learner code.
 
 ---
 
@@ -81,7 +84,7 @@ make sync-forward FROM=2 FILE=src/akanga_core/parser.py  # propagate bug fix
 | Decision | Resolution |
 |---|---|
 | Split Phase 1 into 1A + 1B | YES — edge schema / workspace registry boundary |
-| Solutions on separate branch | YES — `solutions` branch, not `solutions/` dir on `main` |
+| Solutions on separate branch | DECIDED YES in Round 1, **never implemented** — no `solutions` branch exists; `solutions/phase_08/` sits on `main` and all Makefile/CI tooling reads the working tree. Re-decision pending (adversarial-analysis-v2 #7) |
 | Solo/Group Reflect tracks | YES — `> **Solo:**` / `> **Group:**` callouts |
 | Open-ended vault exercises | YES — replace half of fixed tables with open prompts |
 | Prerequisite self-assessment | YES — checklist at top of each phase doc |
@@ -90,7 +93,7 @@ make sync-forward FROM=2 FILE=src/akanga_core/parser.py  # propagate bug fix
 
 ## Things NOT to do
 
-- Do not modify `solutions/` content directly — the solutions branch is the authoritative source
+- Do not modify `solutions/` content without flagging it — the branch-vs-directory decision is unresolved (adversarial-analysis-v2 #7); note that the current `solutions/phase_08/` is known-broken (fails its own phase tests)
 - Do not add SENTINEL comments to non-skeleton files — SENTINEL is a skeleton mechanism
 - Do not create Docker-based workflows — explicitly out of scope
 - Do not add cloud sync, multi-user, or vector embedding features — parked in `docs/future-ideas.md`

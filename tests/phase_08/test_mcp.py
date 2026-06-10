@@ -22,7 +22,6 @@ sys.path insertion from conftest runs first.
 """
 from __future__ import annotations
 
-import ast
 import inspect
 import uuid
 from pathlib import Path

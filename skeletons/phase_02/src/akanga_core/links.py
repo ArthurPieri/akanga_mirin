@@ -4,7 +4,6 @@ Implement the two functions below.
 """
 from __future__ import annotations
 
-import re
 
 
 def extract_wikilinks(content: str) -> list[str]:

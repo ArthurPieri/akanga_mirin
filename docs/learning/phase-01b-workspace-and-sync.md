@@ -38,9 +38,9 @@ linked foundation doc before proceeding.
 ## Quick Start
 
 ```bash
-make skeleton PHASE=1    # copy the starting code into ./src/
-make test PHASE=1        # run the tests (they will fail initially)
-make study PHASE=1       # open the tmux study session
+make skeleton PHASE=1    # copy the starting code into ./src/ (shared by 1A and 1B)
+make test PHASE=1        # full phase 1 suite (1A schema + 1B sync queue)
+make study PHASE=1b      # open the tmux study session for 1B
 ```
 
 > First time here? Run `make setup` first, then `direnv allow` to activate the environment.

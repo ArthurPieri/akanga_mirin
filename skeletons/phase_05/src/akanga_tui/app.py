@@ -23,14 +23,11 @@ Reference implementation:
 """
 from __future__ import annotations
 
-import os
-import subprocess
 from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal
-from textual.widgets import Footer, Header, Label, ListItem, ListView, Markdown
+from textual.widgets import ListView
 
 
 class AkangaTUI(App):
@@ -544,3 +541,15 @@ class AkangaTUI(App):
         raise NotImplementedError(
             "self.db.close() if self.db is not None; watcher.stop() if watcher was started"
         )
+
+
+if __name__ == "__main__":
+    # Boilerplate launcher so `make run` / `python -m akanga_tui.app` works.
+    # Not part of the learning deliverable — no need to modify this block.
+    import argparse
+
+    _parser = argparse.ArgumentParser(description="Akanga TUI")
+    _parser.add_argument("--vault", default="./vault")
+    _parser.add_argument("--db", default="./.akanga.db")
+    _args = _parser.parse_args()
+    AkangaTUI(vault=_args.vault, db_path=_args.db).run()

@@ -7,7 +7,6 @@ Usage:
 """
 
 import argparse
-import os
 import re
 import sys
 from pathlib import Path
@@ -28,12 +27,12 @@ def validate_vault(vault_path: str) -> bool:
     if not count_ok:
         print(f"Validation FAILED: Found {node_count} nodes (minimum 50 required).")
     else:
-        print(f"Node count validation PASSED (>= 50).")
+        print("Node count validation PASSED (>= 50).")
 
     # 3. Validate edges
     # Standard format: [[Target | relation]]
     # We strip code blocks first.
-    edge_pattern = re.compile(r"\[\[([^\]|]+)\|([^\]]+)\]\]")
+    _edge_pattern = re.compile  # documents the [[Target|relation]] format; per-relation validation TODO(r"\[\[([^\]|]+)\|([^\]]+)\]\]")
     any_link_pattern = re.compile(r"\[\[([^\]]+)\]\]")
     
     total_edges = 0

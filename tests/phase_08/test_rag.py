@@ -308,7 +308,7 @@ class TestTripleSerialization:
         assert has_outgoing, (
             "Context for Cognition must include a triple showing 'supports' "
             "edge to Attention. Got: "
-            + "\n".join(l for l in context.splitlines() if ">" in l or "Attention" in l)
+            + "\n".join(ln for ln in context.splitlines() if ">" in ln or "Attention" in ln)
         )
 
     def test_context_with_no_edges(
@@ -334,7 +334,7 @@ class TestTripleSerialization:
             "Delimiters must be present even when the node has no edges."
         )
         # No triple lines expected
-        triple_lines = [l for l in context.splitlines() if "->" in l]
+        triple_lines = [ln for ln in context.splitlines() if "->" in ln]
         assert len(triple_lines) == 0, (
             f"Isolated node should produce zero triple lines, "
             f"but got: {triple_lines!r}"
@@ -376,6 +376,6 @@ class TestBuildContextErrors:
                 "build_context with None node must return an empty string, None, or raise; "
                 f"got {result!r}."
             )
-        except (TypeError, AttributeError, ValueError) as exc:
+        except (TypeError, AttributeError, ValueError):
             # Raising is also acceptable
             pass  # any of these is acceptable

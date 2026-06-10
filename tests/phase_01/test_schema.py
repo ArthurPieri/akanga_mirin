@@ -30,8 +30,6 @@ def _load_module():
         import parser as m  # noqa: PLC0415
         return m
     except ModuleNotFoundError:
-        import importlib  # noqa: PLC0415
-        import sys  # noqa: PLC0415
         # Try akanga_core.parser
         try:
             from akanga_core import parser as m  # noqa: PLC0415

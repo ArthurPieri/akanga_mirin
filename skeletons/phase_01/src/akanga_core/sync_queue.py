@@ -29,7 +29,6 @@ Notes on the schema:
 """
 from __future__ import annotations
 
-from uuid import uuid4
 
 
 def enqueue_title_sync(db, node_id: str, new_title: str) -> None:

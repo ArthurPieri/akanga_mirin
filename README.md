@@ -1,7 +1,7 @@
 # Akanga Mirin
 
-> **Status:** Sprint 1 of 5 active — tests, skeletons, and solutions are in progress.
-> Phase docs and Makefile are complete. Star/watch for updates.
+> **Status:** Phase docs, skeletons, and test suites are complete for all 9 phases.
+> Reference solutions are in progress (Phase 8 only so far). Run `make status` for the live completion matrix.
 
 Akanga Mirin is an open-source, project-based learning path for Python developers who want to understand how real systems are built — not by following a tutorial, but by building one themselves. Across nine phases, you construct a personal, offline-first knowledge graph: from atomic file writes and UUID identity through SQLite indexing, graph algorithms, a Textual TUI, a FastAPI server, GitPython version control, and finally an AI layer using the Model Context Protocol. At the end of every phase, you have a working artifact you can use — not a checkpoint in someone else's codebase.
 
@@ -14,7 +14,8 @@ Akanga Mirin is an open-source, project-based learning path for Python developer
 | Phase | Topic | Artifact delivered | Est. hours |
 |---|---|---|---|
 | 0 | File System as Database | Atomic writer + UUID-keyed vault parser | 2–3h |
-| 1 | Data Modeling | Typed edge vocabulary, frontmatter schema, sync queue | 2–3h |
+| 1A | Data Modeling — Edge Schema | Typed edge vocabulary, frontmatter schema, write-back | 2–3h |
+| 1B | Workspace and Sync | Workspace registry, reference nodes, sync queue | 2–3h |
 | 2 | Storage and Indexing | SQLite + WAL + FTS5 full-text search | 3–4h |
 | 3 | Graph Algorithms | BFS ego-graph, cycle detection, ASCII renderer | 2–3h |
 | 4 | Concurrency and Events | Watchdog file watcher, debounce, EventBus | 3–4h |
@@ -23,7 +24,8 @@ Akanga Mirin is an open-source, project-based learning path for Python developer
 | 7 | Version Control | GitPython auto-commit, squash queue, change history | 2–3h |
 | 8 | AI Integration | MCP server + Graph RAG (FTS5 seed → BFS context) | 3–4h |
 
-Total: **roughly 380 hours ±30%** for an intermediate Python developer working alone.
+Total: **roughly 35–55 hours ±30%** of hands-on coding for an intermediate Python
+developer working alone (more with optional foundation-doc study and vault work).
 Per-phase estimates above are realistic learner time, not author time. Phase 5
 (Textual TUI) is the steepest; budget 12–20 hours if you have not used Textual before.
 
@@ -33,7 +35,7 @@ Per-phase estimates above are realistic learner time, not author time. Phase 5
 
 **Individual learners.** Python developers (2+ years) who can build a CRUD app but want practical experience with the systems-level concepts that separate junior from senior work — WAL-mode SQLite, asyncio event bridges, BFS traversal, git internals, the Model Context Protocol.
 
-**Workshop facilitators.** Tech leads, bootcamp instructors, senior devs running a 2–4 day curriculum. The repo ships a facilitator guide, per-phase learning objectives, checkpoint exercises, and a test suite that evaluates participant code objectively.
+**Workshop facilitators.** Tech leads, bootcamp instructors, senior devs running a 2–4 day curriculum. The repo ships per-phase learning objectives, checkpoint exercises, and a test suite that evaluates participant code objectively. (A dedicated facilitator guide is planned but not yet written.)
 
 **Engineering teams.** Teams who want to upskill together and end up with a real artifact — a shared knowledge graph of their own architecture, documentation, or projects — rather than slides and notes.
 
@@ -55,7 +57,6 @@ Run the tests against your own code:
 
 ```bash
 AKANGA_SRC=./src make test PHASE=0    # your code
-make test-solution PHASE=0            # reference solution (to compare)
 ```
 
 `make help` lists all available targets.
@@ -74,9 +75,9 @@ AKANGA_SRC=./src make test PHASE=2
 
 If `AKANGA_SRC` is not set, tests will fail with a clear error message telling you to set it. Use `AKANGA_SRC=./src make test PHASE=N` to test your own code.
 
-**Reference solutions.** `solutions/phase_NN/` contains a complete, working implementation of all phases up to and including phase N. Look at it after you've written your own version, not before.
+**Reference solutions.** Reference implementations are being written phase by phase (currently Phase 8 only — run `make status` to see what exists). When a solution exists, `make test-solution PHASE=N` runs the suite against it. Look at solutions after you've written your own version, not before.
 
-**Foundation docs.** `docs/foundations/` has 13 optional explainers (SQLite basics, asyncio primer, git basics, JSON-RPC, and more). Skip them if you already know the topic; read them if you're unfamiliar. They are not blocking prerequisites.
+**Foundation docs.** `docs/foundations/` has 15 optional explainers (SQLite basics, asyncio primer, git basics, JSON-RPC, and more). Skip them if you already know the topic; read them if you're unfamiliar. They are not blocking prerequisites.
 
 ---
 
@@ -108,18 +109,17 @@ akanga_mirin/
 ├── Makefile                        # all workflows: study, test, lint, serve
 ├── docs/
 │   ├── README.md                   # documentation navigation hub ← start here
-│   ├── learning/                   # 9 phase docs (the learning path)
-│   ├── foundations/                # 13 optional explainer docs
+│   ├── learning/                   # 10 phase docs (the learning path; Phase 1 is split into 1A + 1B)
+│   ├── foundations/                # 15 optional explainer docs
 │   ├── implementation-plan.md      # master task list for repo contributors
 │   ├── roadmap.md                  # MVP / V1 / V2 / V4+ version plan
 │   ├── user-stories.md             # 38 stories across 5 personas
 │   ├── observability-module.md     # structured logging, @timed, /health patterns
-│   ├── deployment.md               # launchd, systemd, tmux deployment guide
-│   └── facilitator-guide.md        # workshop facilitation (coming soon)
+│   └── deployment.md               # launchd, systemd, tmux deployment guide
 ├── tests/                          # phase test suites (run against your code)
-├── skeletons/                      # starting point for each phase (coming soon)
-├── solutions/                      # reference implementations (coming soon)
-├── examples/                       # runnable examples per phase (coming soon)
+├── skeletons/                      # starting point for each phase (all 9 phases)
+├── solutions/                      # reference implementations (in progress — Phase 8 only)
+├── examples/                       # runnable examples per phase (all 9 phases)
 ├── templates/
 │   └── project-makefile            # learner's own project Makefile template
 └── scripts/

@@ -18,6 +18,8 @@ wheels/
 
 # Runtime artifacts created by learners (root-level only, not skeleton src/)
 /src/
+# Author's personal phase work — lives on the arthur/phase-work branch, not main
+/my_implementations/
 vault/
 *.db
 *.db-wal

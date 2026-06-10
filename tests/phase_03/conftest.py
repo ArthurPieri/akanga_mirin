@@ -1,5 +1,4 @@
 """Phase 03 conftest — resolves AKANGA_SRC and provides graph fixtures."""
-import tempfile
 import uuid
 from pathlib import Path
 

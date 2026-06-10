@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import MINIMAL_VAULT_CONFIG, _resolve_akanga_src
+from tests.conftest import _resolve_akanga_src
 
 
 @pytest.fixture(scope="session", autouse=True)

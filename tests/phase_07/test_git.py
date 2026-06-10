@@ -165,7 +165,7 @@ class TestCommit:
         subprocess.run(["git", "add", "note.md"], cwd=str(tmp_git_repo),
                        check=True, capture_output=True)
 
-        result = gm.commit("test commit")
+        gm.commit("test commit")
 
         # commit() may return a SHA string or None — both are acceptable per spec.
         # What matters is that a new commit exists in the log.

@@ -7,7 +7,6 @@ Tests for eventbus.py:
     EventBus.publish(event, **kwargs)
     EventBus.set_loop(loop)
 """
-import pytest
 
 
 class TestSubscribeAndPublish:

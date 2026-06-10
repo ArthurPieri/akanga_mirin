@@ -4,7 +4,6 @@ Implement the three functions below.
 """
 from __future__ import annotations
 
-import os
 from collections.abc import Iterator
 
 
