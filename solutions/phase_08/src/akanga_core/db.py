@@ -237,6 +237,52 @@ class GraphDatabase:
             ).fetchall()
         return [_row_to_node(row) for row in rows]
 
+    def get_edges_from(self, node_id: str) -> list[tuple[Node, str, str]]:
+        """Outgoing edges as ``(target_node, relation, relation_id)`` tuples.
+
+        Unlike :meth:`get_neighbors`, the relation label and registry id
+        travel with each neighbor — Phase 3 ego graphs and Graph RAG triples
+        need them. No DISTINCT: two relations between the same pair are two
+        distinct edges. (Same contract as the phase 02–07 lineage.)
+        """
+        with self.lock:
+            rows = self.conn.execute(
+                """
+                SELECT nodes.*, edges.relation, edges.relation_id FROM nodes
+                JOIN edges ON nodes.id = edges.target_id
+                WHERE edges.source_id = ?
+                """,
+                (node_id,),
+            ).fetchall()
+        return [
+            (_row_to_node(row), row["relation"] or "", row["relation_id"] or "")
+            for row in rows
+        ]
+
+    def get_edges_to(self, node_id: str) -> list[tuple[Node, str, str]]:
+        """Incoming edges as ``(source_node, relation, relation_id)`` tuples.
+
+        The returned node is the edge's SOURCE; the natural direction is
+        ``node.id → node_id`` (D4: incoming edges are never inverted).
+        """
+        with self.lock:
+            rows = self.conn.execute(
+                """
+                SELECT nodes.*, edges.relation, edges.relation_id FROM nodes
+                JOIN edges ON nodes.id = edges.source_id
+                WHERE edges.target_id = ?
+                """,
+                (node_id,),
+            ).fetchall()
+        return [
+            (_row_to_node(row), row["relation"] or "", row["relation_id"] or "")
+            for row in rows
+        ]
+
+    def list_nodes(self, limit: int = 100, offset: int = 0) -> list[Node]:
+        """Lineage-API alias for :meth:`get_all_nodes` (phase 02–07 name)."""
+        return self.get_all_nodes(limit=limit, offset=offset)
+
     # -- search ---------------------------------------------------------------
 
     def search(self, query: str) -> list[Node]:

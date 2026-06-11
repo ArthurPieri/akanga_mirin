@@ -1,26 +1,26 @@
-"""FastAPI REST server for the Akanga knowledge graph (Phase 06).
+"""Phase 06 — FastAPI REST server for the Akanga knowledge graph.
 
-The factory pattern (``create_app(vault, db_path)``) lets tests and the
-CLI create the app with different vault/db paths without global state
-leaking between runs: the ASGI lifespan opens the ``GraphDatabase`` on
-startup, parks it in ``_app_state``, and closes it on shutdown.
+The API never bypasses the file system: ``POST /api/v1/nodes`` writes a
+real `.md` file into the vault and THEN indexes it, exactly like a
+hand-written note picked up by the watcher. The DB stays an expendable,
+derived index; the files stay the source of truth.
 
-SEC-02 — path traversal protection — is enforced on EVERY filesystem
-path the API touches, with ``Path.resolve()`` + ``is_relative_to()``:
+Security posture (all three layers, outermost first):
 
-- ``../../etc/passwd`` (relative escape) resolves outside the vault;
-- ``/etc/passwd`` (absolute) silently REPLACES the vault root in
-  ``joinpath`` — a '..'-substring check can never catch it;
-- ``link/x.md`` through a symlink looks vault-relative lexically but
-  ``resolve()`` follows the symlink to its real, outside location.
-
-CORS (S2) is restricted to explicit localhost origins. NEVER ``"*"`` —
-the API is unauthenticated, so the origin allowlist is the only thing
-standing between a malicious web page and the vault.
+- Network binding — serve on ``127.0.0.1`` only (the CLI's concern).
+- CORS (S2) — explicit localhost dev origins, NEVER ``"*"``: the API is
+  unauthenticated, so the origin allowlist is the only thing standing
+  between a malicious browser tab and the vault.
+- SEC-02 path traversal — every client-supplied or stored path is
+  validated with ``Path.resolve()`` + ``is_relative_to()`` BEFORE any
+  filesystem write/delete. ``resolve()`` follows symlinks, which is the
+  only defence that catches all three escape shapes: ``../`` traversal,
+  absolute paths (``joinpath('/etc/passwd')`` silently DISCARDS the vault
+  root — pathlib semantics), and a symlink inside the vault pointing out.
+  A '``..`` in the string' check catches only the first.
 """
 from __future__ import annotations
 
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -33,31 +33,41 @@ from pydantic import BaseModel
 from .db import GraphDatabase
 from .parser import content_hash, parse_node_file, write_node_file
 
+# Built-in node templates exposed by GET /api/v1/templates.
+TEMPLATES = ["note", "active-http", "active-tcp", "active-service", "virtual", "diagram"]
+
 # ── APIRouter — handlers register here; create_app() includes the router ──────
 router = APIRouter()
-
-# Built-in node templates exposed via GET /api/v1/templates.
-TEMPLATES = ["note", "active-http", "active-tcp", "active-service", "virtual", "diagram"]
 
 
 # ── Pydantic request models ────────────────────────────────────────────────────
 
 
 class CreateNodeRequest(BaseModel):
+    """Body of ``POST /api/v1/nodes``. Only `title` is required.
+
+    An empty `path` means "derive the filename from the title"; a missing
+    `title` is rejected by FastAPI/Pydantic with 422 before the handler runs.
+    """
+
     title: str
     type: str = "note"
     content: str = ""
     tags: list[str] = []
-    path: str = ""  # Optional custom path within vault
+    path: str = ""  # optional vault-relative path, e.g. "ideas/spark.md"
 
 
 class UpdateNodeRequest(BaseModel):
+    """Body of ``PUT /api/v1/nodes/{id}`` — every field optional (patch style)."""
+
     title: str | None = None
     content: str | None = None
     tags: list[str] | None = None
 
 
 class CreateEdgeRequest(BaseModel):
+    """Body of ``POST /api/v1/edges`` — a manual typed edge between two nodes."""
+
     source_id: str
     target_id: str
     relation: str | None = None
@@ -65,16 +75,18 @@ class CreateEdgeRequest(BaseModel):
 
 
 # ── App state ──────────────────────────────────────────────────────────────────
+# Route handlers are plain functions — they cannot see create_app()'s locals.
+# The lifespan stores the open DB + vault root here; get_db() is the one
+# sanctioned accessor.
 
 _app_state: dict[str, Any] = {}
 
 
 def get_db() -> GraphDatabase:
-    """Return the shared GraphDatabase, failing LOUDLY if uninitialised.
+    """Return the shared GraphDatabase, failing LOUDLY if never initialized.
 
-    Route handlers are plain functions and cannot see create_app()'s
-    locals; the lifespan parks the open DB here. An explicit RuntimeError
-    beats a confusing KeyError deep inside a handler.
+    A clear RuntimeError at the accessor beats a confusing KeyError deep
+    inside a route handler when the lifespan never ran.
     """
     if "db" not in _app_state:
         raise RuntimeError("App not initialized. Call create_app() first.")
@@ -82,46 +94,63 @@ def get_db() -> GraphDatabase:
 
 
 def _vault_root() -> Path:
-    """The vault root, resolved once per call so symlinks are normalised."""
-    if "vault" not in _app_state:
-        raise RuntimeError("App not initialized. Call create_app() first.")
+    """The vault root, resolved once per call so symlinked tmp dirs compare equal."""
     return Path(_app_state["vault"]).resolve()
 
 
-def _safe_vault_path(candidate: str | Path, vault_root: Path) -> Path:
-    """SEC-02 gate: resolve *candidate* and require it stays in the vault.
+# ── Internal helpers ───────────────────────────────────────────────────────────
 
-    ``resolve()`` collapses ``..`` segments AND follows symlinks, and
-    ``joinpath`` with an absolute candidate discards the vault root
-    entirely — so the only safe check is on the fully resolved path.
-    Raises HTTP 400 on escape; returns the resolved path otherwise.
+
+def _node_dict(node: Any) -> dict[str, Any]:
+    """Convert a DB node (SimpleNamespace — not JSON-serializable) to a dict."""
+    return {
+        "id": node.id,
+        "title": node.title,
+        "type": node.type,
+        "tags": node.tags,
+        "path": str(node.path),
+    }
+
+
+def _safe_disk_path(raw_path: str) -> Path:
+    """SEC-02: resolve `raw_path` against the vault and verify containment.
+
+    ``joinpath`` + ``resolve`` + ``is_relative_to`` is the full defence:
+
+    - ``../../etc/passwd``  → resolves above the vault       → 400
+    - ``/etc/passwd``       → joinpath DISCARDS the vault    → 400
+    - ``link/x.md`` via a symlink out of the vault — resolve() follows
+      the symlink to the real location outside                → 400
+
+    Must be called BEFORE any write/delete; the symlink case otherwise
+    plants a file outside the vault.
     """
-    full_path = vault_root.joinpath(candidate).resolve()
+    vault_root = _vault_root()
+    full_path = vault_root.joinpath(raw_path).resolve()
     if not full_path.is_relative_to(vault_root):
         raise HTTPException(status_code=400, detail="Path escapes the vault (SEC-02)")
     return full_path
 
 
-def _node_dict(node: Any) -> dict[str, Any]:
-    """Convert a db SimpleNamespace node into a JSON-serializable dict."""
-    return {
-        "id": node.id,
-        "title": node.title,
-        "type": node.type,
-        "tags": list(node.tags),
-        "path": str(node.path),
-    }
+def _existing_node_or_404(node_id: str) -> Any:
+    """Fetch a node by UUID or abort with 404 — shared by all /{id} routes."""
+    node = get_db().get_node(node_id)
+    if node is None:
+        raise HTTPException(status_code=404, detail="Node not found")
+    return node
 
 
-def _node_disk_path(node: Any, vault_root: Path) -> Path:
-    """Resolve a node's stored path (vault-relative or absolute) to disk.
+def _index_node_file(full_path: Path) -> Any:
+    """Parse a freshly written node file and upsert it into the DB.
 
-    Re-validated through the SEC-02 gate even though it came from our own
-    DB — defence in depth against a row written by older/buggy code.
+    The DB stores the path RELATIVE to the vault root (same convention as
+    the Phase 2 indexer) so the index survives the vault being moved.
     """
-    stored = Path(str(node.path))
-    candidate = stored if stored.is_absolute() else vault_root / stored
-    return _safe_vault_path(candidate, vault_root)
+    node = parse_node_file(str(full_path))
+    node.content_hash = content_hash(str(full_path))
+    node.path = str(full_path.relative_to(_vault_root()))
+    get_db().upsert_node(node)
+    return node
 
 
 # ── App factory ────────────────────────────────────────────────────────────────
@@ -133,19 +162,27 @@ def create_app(
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
-    Wires up the lifespan (open/close the DB), the CORS allowlist, and
-    all ``/api/v1`` routes. Vault and DB locations come from the
-    arguments or the ``AKANGA_VAULT`` / ``AKANGA_DB`` environment
-    variables.
+    The factory pattern lets tests and the CLI spin up the app against
+    different vault/db paths without global state leaking between runs:
+    the DB is opened in the lifespan (TestClient's ``with`` block runs
+    it), not at import time.
     """
-    vault = vault or os.environ.get("AKANGA_VAULT", "./vault")
-    db_path = db_path or os.environ.get("AKANGA_DB", "./.akanga.db")
+    import os
+
+    resolved_vault = vault or os.environ.get("AKANGA_VAULT", "./vault")
+    resolved_db = db_path or os.environ.get("AKANGA_DB", "./.akanga.db")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        db = GraphDatabase(db_path)
+        """Open the DB on startup, close it on shutdown.
+
+        One ``check_same_thread=False`` connection (GraphDatabase's own
+        lock serializes access) shared by every request — opening a
+        connection per request would defeat WAL's snapshot semantics.
+        """
+        db = GraphDatabase(resolved_db)
         _app_state["db"] = db
-        _app_state["vault"] = vault
+        _app_state["vault"] = resolved_vault
         try:
             yield
         finally:
@@ -155,8 +192,9 @@ def create_app(
 
     app = FastAPI(title="Akanga Knowledge Graph API", lifespan=lifespan)
 
-    # S2: explicit localhost dev origins only — a wildcard would let ANY
-    # website the user's browser visits talk to this unauthenticated API.
+    # S2: explicit localhost dev origins only. NEVER allow_origins=["*"] —
+    # the API is unauthenticated, so a wildcard would let ANY website the
+    # browser visits read and write the personal knowledge graph.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -164,6 +202,7 @@ def create_app(
         allow_headers=["*"],
     )
 
+    # Without include_router zero routes are registered → every request 404s.
     app.include_router(router)
     return app
 
@@ -173,40 +212,44 @@ def create_app(
 
 @router.post("/api/v1/nodes", status_code=201)
 def create_node(body: CreateNodeRequest) -> dict[str, Any]:
-    """Create a node: validate the path (SEC-02), write the file, index it."""
-    db = get_db()
-    vault_root = _vault_root()
+    """Create a node: write the `.md` file into the vault, then index it.
 
-    relative = body.path or (body.title.lower().replace(" ", "_") + ".md")
-    full_path = _safe_vault_path(relative, vault_root)
+    SEC-02 validation happens FIRST — before any byte touches disk — so a
+    traversal/absolute/symlink path can never plant a file outside the
+    vault. The UUID is minted here and written into the frontmatter so a
+    later re-parse returns the same identity (no UUID churn).
+    """
+    raw_path = body.path or f"{body.title.lower().replace(' ', '-')}.md"
+    full_path = _safe_disk_path(raw_path)
 
     if full_path.exists():
         raise HTTPException(status_code=409, detail="A node already exists at this path")
 
-    # Mint the UUID up front and persist it in the frontmatter so a
-    # re-parse never churns the identity.
     fm = {"id": str(uuid4()), "title": body.title, "type": body.type, "tags": body.tags}
     write_node_file(str(full_path), fm, body.content)
-
-    node = parse_node_file(str(full_path))
-    node.content_hash = content_hash(str(full_path))
-    db.upsert_node(node)
-
-    created = db.get_node(node.id)
-    return _node_dict(created)
+    node = _index_node_file(full_path)
+    return _node_dict(get_db().get_node(node.id))
 
 
 @router.get("/api/v1/nodes")
 def list_nodes(
     query: str = "",
-    type: str = "",  # noqa: A002 — query-parameter name is part of the API contract
+    type: str = "",  # noqa: A002 — query-param name fixed by the API contract
     tag: str = "",
     limit: int = 100,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    """List nodes with optional FTS search, type/tag filters, and pagination."""
+    """List nodes — optional FTS5 search (`?query=`), filters, pagination.
+
+    Search goes through ``db.search_fts`` (SEC-06 quoting lives there);
+    type/tag filters are applied in Python on the result. Plain listing
+    delegates LIMIT/OFFSET to SQLite.
+    """
     db = get_db()
-    nodes = db.search_fts(query, limit=limit) if query else db.list_nodes(limit, offset)
+    if query:
+        nodes = db.search_fts(query, limit=limit)
+    else:
+        nodes = db.list_nodes(limit=limit, offset=offset)
     if type:
         nodes = [n for n in nodes if n.type == type]
     if tag:
@@ -214,72 +257,72 @@ def list_nodes(
     return [_node_dict(n) for n in nodes]
 
 
+@router.get("/api/v1/search")
+def search_nodes(q: str = "", limit: int = 20) -> list[dict[str, Any]]:
+    """Dedicated FTS5 search endpoint — same engine as ``GET /nodes?query=``.
+
+    Kept as a stable alias so non-browser clients (the Phase 8 MCP server)
+    can search without learning the node-listing parameter set.
+    """
+    if not q:
+        return []
+    return [_node_dict(n) for n in get_db().search_fts(q, limit=limit)]
+
+
 @router.get("/api/v1/nodes/{node_id}")
 def get_node(node_id: str) -> dict[str, Any]:
-    """Retrieve a single node by UUID; 404 when unknown."""
-    node = get_db().get_node(node_id)
-    if node is None:
-        raise HTTPException(status_code=404, detail="Node not found")
-    return _node_dict(node)
+    """Resolve a UUID to full node details; 404 when unknown."""
+    return _node_dict(_existing_node_or_404(node_id))
 
 
 @router.put("/api/v1/nodes/{node_id}")
 def update_node(node_id: str, body: UpdateNodeRequest) -> dict[str, Any]:
-    """Update title/content/tags in both the file and the DB.
+    """Update title/content/tags — rewrites the file, then re-indexes.
 
-    The body content is re-read from disk first — the DB stores no prose,
-    so writing without re-reading would silently blank the note whenever
-    the client sends only a title change.
+    The DB does not store prose, so the current body is read from disk
+    first; otherwise an update that only changes the title would wipe the
+    content. The stored path is re-validated (SEC-02) before writing —
+    never trust a path just because it sits in the index.
     """
-    db = get_db()
-    existing = db.get_node(node_id)
-    if existing is None:
-        raise HTTPException(status_code=404, detail="Node not found")
+    existing = _existing_node_or_404(node_id)
+    full_path = _safe_disk_path(str(existing.path))
 
-    vault_root = _vault_root()
-    path = _node_disk_path(existing, vault_root)
-
-    current = parse_node_file(str(path))
+    current = parse_node_file(str(full_path))
     fm = dict(current.frontmatter)
-    fm["id"] = existing.id  # never lose the UUID
+    fm["id"] = str(existing.id)  # never lose the UUID across rewrites
     fm["title"] = body.title if body.title is not None else existing.title
     fm["type"] = existing.type  # type is not updatable via this endpoint
     fm["tags"] = body.tags if body.tags is not None else existing.tags
     new_content = body.content if body.content is not None else current.content
 
-    write_node_file(str(path), fm, new_content)
-    node = parse_node_file(str(path))
-    node.content_hash = content_hash(str(path))
-    db.upsert_node(node)
-
-    return _node_dict(db.get_node(node_id))
+    write_node_file(str(full_path), fm, new_content)
+    _index_node_file(full_path)
+    return _node_dict(get_db().get_node(node_id))
 
 
 @router.delete("/api/v1/nodes/{node_id}", status_code=204)
 def delete_node(node_id: str) -> None:
-    """Delete a node's file and its DB row (edges included); 404 if unknown."""
-    db = get_db()
-    existing = db.get_node(node_id)
-    if existing is None:
-        raise HTTPException(status_code=404, detail="Node not found")
+    """Delete the vault file and the DB row (plus all touching edges).
 
-    path = _node_disk_path(existing, _vault_root())
-    if path.exists():
-        os.remove(path)
-    # GraphDatabase.delete_node removes the FTS row plus edges in BOTH
-    # directions (outgoing via CASCADE and explicitly, incoming explicitly).
-    db.delete_node(node_id)
+    File first, then DB: if the unlink fails the index still knows about
+    the node, and a re-scan converges. ``GraphDatabase.delete_node``
+    already removes outgoing (CASCADE) and incoming edges plus the FTS row.
+    """
+    existing = _existing_node_or_404(node_id)
+    full_path = _safe_disk_path(str(existing.path))
+    if full_path.exists():
+        full_path.unlink()
+    get_db().delete_node(node_id)
 
 
-# ── Edge / graph routes ────────────────────────────────────────────────────────
+# ── Graph routes ───────────────────────────────────────────────────────────────
 
 
 @router.get("/api/v1/nodes/{node_id}/edges")
 def get_node_edges(node_id: str) -> list[dict[str, Any]]:
-    """Raw edge rows where the node is source OR target."""
+    """All raw edge rows touching this node (as source OR target)."""
+    _existing_node_or_404(node_id)
     db = get_db()
-    if db.get_node(node_id) is None:
-        raise HTTPException(status_code=404, detail="Node not found")
     with db._lock:
         rows = db.conn.execute(
             "SELECT * FROM edges WHERE source_id = ? OR target_id = ?",
@@ -290,25 +333,28 @@ def get_node_edges(node_id: str) -> list[dict[str, Any]]:
 
 @router.get("/api/v1/nodes/{node_id}/neighbors")
 def get_node_neighbors(node_id: str) -> list[dict[str, Any]]:
-    """Immediate neighbours reachable via OUTGOING edges."""
-    db = get_db()
-    if db.get_node(node_id) is None:
-        raise HTTPException(status_code=404, detail="Node not found")
-    return [_node_dict(n) for n in db.get_neighbors(node_id)]
+    """Immediate neighbour nodes reachable via OUTGOING edges."""
+    _existing_node_or_404(node_id)
+    return [_node_dict(n) for n in get_db().get_neighbors(node_id)]
 
 
 @router.get("/api/v1/nodes/{node_id}/backlinks")
 def get_node_backlinks(node_id: str) -> list[dict[str, Any]]:
-    """Nodes that link TO this node (incoming edges)."""
-    db = get_db()
-    if db.get_node(node_id) is None:
-        raise HTTPException(status_code=404, detail="Node not found")
-    return [_node_dict(n) for n in db.get_backlinks(node_id)]
+    """Nodes that link TO this node (incoming edges, Obsidian-style)."""
+    _existing_node_or_404(node_id)
+    return [_node_dict(n) for n in get_db().get_backlinks(node_id)]
+
+
+# ── Edge routes ────────────────────────────────────────────────────────────────
 
 
 @router.post("/api/v1/edges", status_code=201)
 def create_edge(body: CreateEdgeRequest) -> dict[str, Any]:
-    """Create a manual typed edge between two EXISTING nodes (400 otherwise)."""
+    """Create a manual typed edge between two EXISTING nodes.
+
+    Both endpoints are validated with 400 (not 404): the missing node is
+    a problem with the request body, not with the URL the client hit.
+    """
     db = get_db()
     if db.get_node(body.source_id) is None:
         raise HTTPException(status_code=400, detail="source_id does not exist")
@@ -332,10 +378,12 @@ def create_edge(body: CreateEdgeRequest) -> dict[str, Any]:
 
 @router.delete("/api/v1/edges/{edge_id}", status_code=204)
 def delete_edge(edge_id: str) -> None:
-    """Delete an edge by UUID; 404 if unknown."""
+    """Delete a single edge row by UUID; 404 when it does not exist."""
     db = get_db()
     with db._lock, db.conn:
-        row = db.conn.execute("SELECT id FROM edges WHERE id = ?", (edge_id,)).fetchone()
+        row = db.conn.execute(
+            "SELECT id FROM edges WHERE id = ?", (edge_id,)
+        ).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="Edge not found")
         db.conn.execute("DELETE FROM edges WHERE id = ?", (edge_id,))
@@ -346,5 +394,5 @@ def delete_edge(edge_id: str) -> None:
 
 @router.get("/api/v1/templates")
 def list_templates() -> dict[str, list[str]]:
-    """Available node templates by name."""
-    return {"templates": list(TEMPLATES)}
+    """The built-in node template names (static in Phase 6)."""
+    return {"templates": TEMPLATES}

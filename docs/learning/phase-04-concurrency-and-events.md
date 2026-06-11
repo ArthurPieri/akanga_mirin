@@ -304,6 +304,28 @@ the watcher too, so its file rewrites don't fire change events mid-startup.
 
 **macOS delivers atomic writes as `on_moved`:** `write_node_file()` writes a temp file and `os.replace()`s it over the target. On macOS (FSEvents), that replace often arrives as a *move* event, not a modify. If your handler only implements `on_modified`/`on_created`, saves will silently produce no events on macOS while passing on Linux. Handle `on_moved` too, treating `event.dest_path` as the changed file (and still applying the temp-file filters to it).
 
+> **Sync services and real editors — write signatures your watcher will meet**
+>
+> Put the vault in Dropbox/iCloud/OneDrive, or edit it with vim, and the watcher
+> sees patterns the happy path never shows:
+>
+> - **Conflict copies.** Dropbox resolves a sync conflict by writing a *second*
+>   file (`note (conflicted copy).md`) that carries the **same frontmatter `id`**
+>   — one identity, two paths. The indexer warns loudly on a duplicate id and
+>   keeps the **oldest path**; resolving the conflict and deleting the copy is on
+>   the human.
+> - **iCloud eviction.** With "Optimize Mac Storage" on, iCloud can replace a
+>   local file with a placeholder stub — the file "changes" with no edit, and the
+>   body is gone until macOS re-downloads it. Don't index placeholder content as
+>   the node's truth.
+> - **vim rename-backups.** vim's default save strategy writes a backup and
+>   renames over the target — so every save can arrive as a **`file_deleted` for
+>   the real path** followed by a create/move.
+> - **Why deletes get a grace window.** Because of signatures like vim's, a
+>   delete event is not proof the note is gone. Deletes are debounced with a
+>   *create-cancels-delete* grace window: only a delete that **stays** deleted is
+>   treated as real.
+
 ---
 
 ## Deliverable
@@ -511,6 +533,13 @@ the MCP server (Phase 8) — git specifically is Phase 7.
 ---
 
 ## Reflect
+
+> **Break it on purpose:** Remove the `eventbus.set_loop(loop)` call from your
+> startup sequence. Before running anything, predict what happens to async
+> subscribers when the watcher publishes. Then observe: do events error, drop
+> silently, or buffer? Explain the buffering contract — where do pre-loop
+> publishes go, what drains them, and what happens to those events if
+> `set_loop` is *never* called? Put `set_loop` back when you're done.
 
 > **Solo:** Draw a timeline diagram showing: a file save event → OS notification → watchdog callback → deadline updated → debounce worker fires → EventBus publish → indexer subscriber → `node_updated` event. Where do thread boundaries occur?
 

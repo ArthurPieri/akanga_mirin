@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  check:
-    name: Lint + verify solutions
+  checks:
+    name: Lint + guards
     runs-on: ubuntu-latest
 
     steps:
@@ -17,7 +17,8 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
         with:
-          version: "latest"
+          version: "0.7.x"
+          enable-cache: true
 
       - name: Set up Python
         run: uv python install
@@ -64,27 +65,6 @@ jobs:
             fi
           done
 
-      - name: Run tests against solutions
-        run: |
-          FAILED=0
-          for n in 0 1 2 3 4 5 6 7 8; do
-            PHASE_PAD=$(printf "%02d" $n)
-            SOLUTION_SRC="solutions/phase_${PHASE_PAD}/src"
-            if [ -d "$SOLUTION_SRC" ] && [ -d "tests/phase_${PHASE_PAD}" ]; then
-              echo "── Phase ${PHASE_PAD} ──"
-              AKANGA_SRC="$SOLUTION_SRC" uv run pytest tests/phase_${PHASE_PAD}/ -v \
-                || FAILED=$((FAILED+1))
-            fi
-          done
-          if [ $FAILED -gt 0 ]; then
-            echo "$FAILED phase(s) failed."
-            exit 1
-          fi
-          echo ""
-          echo "NOTE: only phases with a solutions/phase_NN/src directory were tested."
-          TESTED=$(ls -d solutions/phase_*/src 2>/dev/null | wc -l)
-          echo "Solutions coverage: ${TESTED}/9 phases have a reference solution."
-
       - name: Phase completion status
         run: |
           echo ""
@@ -97,3 +77,77 @@ jobs:
             SOLN=$([ -d "solutions/phase_${PHASE_PAD}" ] && echo "yes" || echo "-")
             echo "${PHASE_PAD}    | ${SKEL}      | ${TEST}   | ${SOLN}"
           done
+
+  # The real integrity property: solution N must pass the CUMULATIVE suite
+  # 00..N, not just its own phase (adversarial-analysis-v3.md #12). The matrix
+  # makes the O(N²) check affordable: 9 parallel legs with a warm uv cache.
+  verify:
+    name: "Verify solution ${{ matrix.phase }} (cumulative 00..${{ matrix.phase }})"
+    needs: checks
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.7.x"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run tests 00..${{ matrix.phase }} against solutions/phase_0${{ matrix.phase }}
+        run: |
+          PHASE_PAD=$(printf "%02d" ${{ matrix.phase }})
+          SOLUTION_SRC="solutions/phase_${PHASE_PAD}/src"
+          if [ ! -d "$SOLUTION_SRC" ]; then
+            echo "::error::No reference solution at ${SOLUTION_SRC} — every phase must ship one."
+            exit 1
+          fi
+          FAILED=0
+          for m in $(seq 0 ${{ matrix.phase }}); do
+            M_PAD=$(printf "%02d" $m)
+            if [ -d "tests/phase_${M_PAD}" ]; then
+              echo "── tests/phase_${M_PAD} vs ${SOLUTION_SRC} ──"
+              AKANGA_SRC="$SOLUTION_SRC" uv run pytest "tests/phase_${M_PAD}/" -q \
+                || FAILED=$((FAILED+1))
+            fi
+          done
+          if [ $FAILED -gt 0 ]; then
+            echo "${FAILED} test phase(s) failed against ${SOLUTION_SRC}."
+            exit 1
+          fi
+          echo "Solution phase_${PHASE_PAD} is cumulative — all prior suites pass."
+
+  # Convergence gate (v3 #7): every should-be-identical cross-phase module copy
+  # must be byte-identical to its introduction-phase canonical, as declared in
+  # scripts/sync_manifest.toml. Runs after the solutions tests so a red gate
+  # always means drift, never a broken tree.
+  drift-gate:
+    name: Solution-tree convergence gate
+    needs: verify
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.7.x"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Cross-phase drift check (scripts/sync_manifest.toml)
+        run: uv run python scripts/sync_forward.py --check-all

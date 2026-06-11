@@ -8,6 +8,7 @@ exclude_docs: |
   README.md
   adversarial-analysis.md
   adversarial-analysis-v2.md
+  adversarial-analysis-v3.md
   analysis-and-enhancements.md
   implementation-plan.md
   plan-*.md

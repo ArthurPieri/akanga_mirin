@@ -1,0 +1,111 @@
+# sync_manifest.toml — canonical-source map for cross-phase module convergence
+#
+# Policy (adversarial-analysis-v3.md #7): each shared module is canonical in its
+# INTRODUCTION phase. Every later phase listed in `applies_to` must carry a
+# byte-identical copy of the introduction-phase file. Phases listed in
+# `excluded` intentionally diverge (or do not ship the file) — they are never
+# compared and never overwritten.
+#
+# Consumed by scripts/sync_forward.py:
+#   uv run python scripts/sync_forward.py --check-all          # audit (CI gate)
+#   uv run python scripts/sync_forward.py --base solutions FILE FROM --apply
+#
+# Paths are relative to a phase directory (solutions/phase_NN/ or
+# skeletons/phase_NN/). Phase numbers are integers 0-8.
+
+[manifest]
+version = 1
+phases = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+
+# ── Phase 2 family: persistence + parsing core ────────────────────────────────
+# parser.py/models.py also exist in phases 00-01 as smaller pre-introduction
+# forms — those layers are out of scope by design (applies_to starts at the
+# phase where the full module lands).
+
+[[modules]]
+file = "src/akanga_core/db.py"
+introduced_in = 2
+applies_to = [2, 3, 4, 5, 6, 7]
+excluded = [8]
+excluded_reason = "phase_08 db.py is intentionally divergent (MCP-era schema/API surface; see v3 findings #1/#13)"
+
+[[modules]]
+file = "src/akanga_core/parser.py"
+introduced_in = 2
+applies_to = [2, 3, 4, 5, 6, 7]
+excluded = [8]
+excluded_reason = "phase_08 parser.py diverges with the MCP tree"
+
+[[modules]]
+file = "src/akanga_core/models.py"
+introduced_in = 2
+applies_to = [2, 3, 4, 5, 6, 7]
+excluded = [8]
+excluded_reason = "phase_08 models.py diverges with the MCP tree"
+
+[[modules]]
+file = "src/akanga_core/sync_queue.py"
+introduced_in = 2
+applies_to = [2, 3, 4, 5, 6, 7]
+excluded = [8]
+excluded_reason = "phase_08 does not ship sync_queue.py"
+
+[[modules]]
+file = "src/akanga_core/indexer.py"
+introduced_in = 2
+applies_to = [2, 3, 4, 5, 6, 7]
+excluded = [8]
+excluded_reason = "phase_08 indexer.py diverges with the MCP tree"
+
+[[modules]]
+file = "src/akanga_core/links.py"
+introduced_in = 2
+applies_to = [2, 3, 4, 5, 6, 7]
+excluded = [8]
+excluded_reason = "phase_08 links.py diverges with the MCP tree"
+
+# ── Phase 3: graph traversal ─────────────────────────────────────────────────
+
+[[modules]]
+file = "src/akanga_core/graph.py"
+introduced_in = 3
+applies_to = [3, 4, 5, 6, 7, 8]
+excluded = []
+
+# ── Phase 4 family: events + filesystem watching ─────────────────────────────
+
+[[modules]]
+file = "src/akanga_core/eventbus.py"
+introduced_in = 4
+applies_to = [4, 5, 6, 7, 8]
+excluded = []
+
+[[modules]]
+file = "src/akanga_core/watcher.py"
+introduced_in = 4
+applies_to = [4, 5, 6, 7, 8]
+excluded = []
+
+[[modules]]
+file = "src/akanga_core/sync_worker.py"
+introduced_in = 4
+applies_to = [4, 5, 6, 7]
+excluded = [8]
+excluded_reason = "phase_08 does not ship sync_worker.py"
+
+# ── Phase 6: REST API ────────────────────────────────────────────────────────
+
+[[modules]]
+file = "src/akanga_core/server.py"
+introduced_in = 6
+applies_to = [6, 7]
+excluded = [8]
+excluded_reason = "phase_08 server.py is intentionally different (MCP-integrated app state/lifespan)"
+
+# ── Phase 7: git integration ─────────────────────────────────────────────────
+
+[[modules]]
+file = "src/akanga_core/gitmgr.py"
+introduced_in = 7
+applies_to = [7, 8]
+excluded = []

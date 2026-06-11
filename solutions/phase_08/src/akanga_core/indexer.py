@@ -58,3 +58,13 @@ def index_vault(db: GraphDatabase, vault: Path) -> int:
         index_file(db, Path(vault), md_file)
         count += 1
     return count
+
+
+def full_scan_and_index(vault_path: str, db: GraphDatabase) -> int:
+    """Compatibility alias matching the phase 02–07 lineage signature.
+
+    The phase-08 tree names this :func:`index_vault` with (db, vault)
+    argument order; cross-phase callers (and the cumulative test suites)
+    use the curriculum-wide ``full_scan_and_index(vault_path, db)``.
+    """
+    return index_vault(db, Path(vault_path))

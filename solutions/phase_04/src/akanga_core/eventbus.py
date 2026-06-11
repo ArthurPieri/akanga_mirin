@@ -13,25 +13,40 @@ called, async dispatches are NOT silently dropped and NOT called directly.
 They are BUFFERED into ``self._buffer`` (a deque) and drained by set_loop()
 the moment the loop is registered. Direct (immediate) calls are only ever
 made for synchronous handlers.
+
+Lock discipline (the subtle part): publish() makes its buffer-vs-schedule
+decision and the buffer append under ONE lock acquisition, and set_loop()
+stores the loop under that same lock BEFORE draining. Checking ``_loop``
+outside the lock looks harmless but is a TOCTOU race: publish() could see
+"no loop", get descheduled, set_loop() could drain an (empty) buffer, and
+only then would publish() append — stranding the event in a buffer nothing
+will ever drain again. That is exactly the silent loss this class exists
+to prevent.
 """
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import threading
 from collections import defaultdict, deque
-from typing import Callable
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def _log_future_exception(future: "asyncio.Future") -> None:
+def _log_future_exception(future: concurrent.futures.Future) -> None:
     """Done-callback that surfaces an async handler's exception in the log.
 
-    Without retrieving ``future.exception()`` the error vanishes silently
-    (asyncio only warns about never-retrieved exceptions at GC time) —
-    which would violate the bus's error-isolation invariant for async
-    handlers. Cancellation is not an error and is ignored.
+    ``run_coroutine_threadsafe`` returns a ``concurrent.futures.Future``
+    (not an ``asyncio.Future`` — the caller is on a plain thread). Without
+    retrieving ``future.exception()`` the error vanishes silently (asyncio
+    only warns about never-retrieved exceptions at GC time) — which would
+    violate the bus's error-isolation invariant for async handlers.
+    Cancellation is not an error and is ignored: ``future.exception()``
+    would RAISE CancelledError on a cancelled future instead of returning
+    it, so the guard must come first.
     """
     if future.cancelled():
         return
@@ -52,6 +67,8 @@ class EventBus:
     def __init__(self) -> None:
         self._handlers: dict[str, list[Callable]] = defaultdict(list)
         self._lock = threading.Lock()
+        # _loop is only ever read or written while holding _lock — see the
+        # module docstring for why an unlocked read in publish() loses events.
         self._loop: asyncio.AbstractEventLoop | None = None
         # Pending async dispatches recorded by publish() before set_loop():
         # (handler, kwargs) pairs, drained in FIFO order by set_loop().
@@ -67,13 +84,24 @@ class EventBus:
         exactly once, is required behaviour: a bare ``self._loop = loop``
         loses those events.
 
+        Ordering matters: the loop is stored UNDER the lock *before* the
+        drain starts. Any publish() that acquired the lock earlier and saw
+        no loop has already appended to the buffer (same critical
+        section), so the drain below picks it up; any publish() acquiring
+        the lock later sees the loop and schedules directly. There is no
+        window in which an event can land in the buffer after the final
+        drain pass.
+
         Call this as early as possible in startup — BEFORE starting the
         filesystem watcher. The buffer makes early events safe, not free:
         they are delayed until the loop exists.
         """
-        self._loop = loop
-        # Drain FIFO; schedule OUTSIDE the lock (same lock discipline as
-        # publish() — never run scheduling/user code while holding it).
+        with self._lock:
+            self._loop = loop
+        # Drain FIFO; pop under the lock, schedule OUTSIDE it (same lock
+        # discipline as publish() — never run scheduling/user code while
+        # holding the bus lock). Each entry is popped exactly once, so a
+        # buffered event can never be replayed.
         while True:
             with self._lock:
                 if not self._buffer:
@@ -104,7 +132,7 @@ class EventBus:
             if handlers and handler in handlers:
                 handlers.remove(handler)
 
-    def publish(self, event: str, **kwargs) -> None:
+    def publish(self, event: str, **kwargs: Any) -> None:
         """Dispatch an event to all registered handlers.
 
         A SNAPSHOT of the handler list is taken under the lock, then the
@@ -122,6 +150,12 @@ class EventBus:
         - sync:               called directly; this direct call is the
           ONLY no-loop fallback.
 
+        The loop check and the buffer append happen inside ONE lock
+        acquisition: reading ``self._loop`` outside the lock would race
+        set_loop() and could strand the event in the buffer forever (see
+        the module docstring). The actual scheduling call still happens
+        OUTSIDE the lock.
+
         Error isolation: each dispatch is wrapped in its own try/except —
         a failing subscriber is logged and never crashes the bus or
         skips later subscribers.
@@ -132,16 +166,18 @@ class EventBus:
         for handler in handlers:
             try:
                 if asyncio.iscoroutinefunction(handler):
-                    if self._loop is not None:
-                        future = asyncio.run_coroutine_threadsafe(
-                            handler(**kwargs), self._loop
-                        )
-                        future.add_done_callback(_log_future_exception)
-                    else:
-                        # Startup window: no loop yet — buffer, never drop,
-                        # never call the coroutine directly.
-                        with self._lock:
+                    with self._lock:
+                        loop = self._loop
+                        if loop is None:
+                            # Startup window: no loop yet — buffer, never
+                            # drop, never call the coroutine directly. The
+                            # append shares the critical section with the
+                            # loop check, so set_loop()'s drain (which sets
+                            # _loop first, under this lock) cannot miss it.
                             self._buffer.append((handler, dict(kwargs)))
+                    if loop is not None:
+                        future = asyncio.run_coroutine_threadsafe(handler(**kwargs), loop)
+                        future.add_done_callback(_log_future_exception)
                 else:
                     handler(**kwargs)
             except Exception:

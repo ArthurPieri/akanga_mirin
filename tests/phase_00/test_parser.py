@@ -22,6 +22,7 @@ the AKANGA_SRC sys.path insertion from conftest runs first.
 from __future__ import annotations
 
 import hashlib
+import os
 import uuid
 from pathlib import Path
 from textwrap import dedent
@@ -302,6 +303,82 @@ def test_write_is_atomic(tmp_path, parse_fn, write_fn):
     assert tmp_files == [], (
         f"Temp file(s) left behind after write: {tmp_files}.\n"
         "Use os.replace(tmp, target) to atomically move the temp file."
+    )
+
+
+def test_failed_replace_preserves_original_file(tmp_path, parse_fn, write_fn, monkeypatch):
+    """A write that dies at the rename step must leave the previous version intact.
+
+    Fault injection (adversarial-analysis-v3 finding #11): round 3 showed that
+    a plain ``write_text()`` passes the leftover-tmp atomicity check — this
+    test makes atomicity falsifiable. We patch os.replace / os.rename /
+    Path.replace / Path.rename to raise (simulating a crash or full disk at
+    the commit step), attempt to overwrite an EXISTING file with NEW content,
+    and assert the original bytes survive. Patching os.replace itself keeps
+    the test universal: it works whether the temp file lives in the same
+    directory, /tmp, or anywhere else.
+    """
+    node_file = _make_md(
+        tmp_path,
+        id="e9f0a1b2-3456-7890-abcd-ef1234567890",
+        title="Original Title",
+        type="note",
+    )
+    original_text = node_file.read_text(encoding="utf-8")
+
+    node = parse_fn(str(node_file))
+
+    # Mutate the node (best effort across Node shapes) so a NON-atomic write
+    # would visibly change the file — writing back identical bytes would let
+    # a plain write_text() implementation pass undetected.
+    new_title = "DESTROYED BY FAILED WRITE"
+    try:
+        node.title = new_title
+    except Exception:
+        try:
+            object.__setattr__(node, "title", new_title)
+        except Exception:
+            pass
+    fm = getattr(node, "frontmatter", None)
+    if isinstance(fm, dict):
+        fm["title"] = new_title
+
+    def _boom(*args, **kwargs):
+        raise OSError("Injected fault: power loss at the rename step")
+
+    # Patch every rename/replace spelling so the commit step fails no matter
+    # how the implementation moves the temp file into place.
+    monkeypatch.setattr(os, "replace", _boom)
+    monkeypatch.setattr(os, "rename", _boom)
+    monkeypatch.setattr(Path, "replace", _boom)
+    monkeypatch.setattr(Path, "rename", _boom)
+
+    def _call_write():
+        try:
+            write_fn(node, str(node_file))
+        except TypeError:
+            # Alternate signature: write_node_file(path, frontmatter_dict, content)
+            fm_alt = _node_field(node, "frontmatter")
+            body = _node_field(node, "body", "content")
+            write_fn(str(node_file), fm_alt, body)
+
+    # The injected OSError may propagate (correct: the caller learns the save
+    # failed) or be handled internally — either way the file must be intact.
+    try:
+        _call_write()
+    except Exception:
+        pass
+
+    assert node_file.read_text(encoding="utf-8") == original_text, (
+        "The original file was corrupted or overwritten when the rename step "
+        "failed.\n"
+        "a failed write must never destroy the previous version — that is the "
+        "whole point of temp+rename: write the FULL new content to a temp "
+        "file (same directory, same filesystem), then os.replace(tmp, target) "
+        "as the single atomic commit step. If this test changed your file, "
+        "you are writing directly to the target (e.g. write_text) — a crash "
+        "mid-write leaves a truncated or half-new note, and a crash before "
+        "the write leaves you with nothing."
     )
 
 

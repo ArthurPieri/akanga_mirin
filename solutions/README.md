@@ -1,16 +1,7 @@
 # Reference Solutions
 
-Solutions for all 9 phases will be published here after Sprint 3.
-
-**Why they're not here yet:** The curriculum is in Sprint 1 (infrastructure + phase docs).
-Solutions are Sprint 3 work. Publishing them early would defeat the learning purpose.
-
-**Until solutions are available:** Use the reference implementation at
-https://github.com/arthurpieri/noteapp (the full Akanga app) as a guide.
-The code there is the system you are building — phases 0–8 each correspond
-to one layer of that codebase.
-
-## Layout (when published)
+Reference implementations for **all 9 phases** live here, on `main` (decision D1).
+Each `phase_NN/` tree passes its own suite and every suite before it:
 
     solutions/
       phase_00/src/akanga_core/parser.py
@@ -18,3 +9,34 @@ to one layer of that codebase.
       ...
       phase_08/src/akanga_core/...
       phase_08/src/akanga_mcp/...
+
+Run them with `make test-solution PHASE=N`; `make status` shows the full matrix.
+
+## How to use these without wasting your own learning
+
+The value of this curriculum is in writing the code yourself. The solutions
+exist so you can check your work, get unstuck, and study a worked reference —
+not so you can skip the work. CS50-style norms:
+
+**Reasonable:**
+
+- Diffing your code against the reference **after your tests pass**.
+- Peeking at **one function** after 30+ minutes stuck on a single test, **if**
+  you record what you learned — `make peek` does exactly this (shows one
+  function and appends a note to your learner-local `PEEKS.md`).
+- Reading a phase's solution after you have finished that phase, to compare
+  approaches.
+
+**Not reasonable:**
+
+- Copying from the reference before attempting the implementation yourself.
+- Copying a solution wholesale — ever. A green suite you didn't earn teaches
+  nothing, and the conceptual gate (`make vault-check`) will show it.
+
+## The post-green ritual
+
+When a phase's tests go green: **diff your implementation against the
+reference, then write one vault node about a difference and why it exists.**
+Maybe you locked at a different granularity, ordered shutdown differently, or
+budgeted the RAG context another way. The diff is where the learning compounds —
+a copied solution has no diff, which is the point.

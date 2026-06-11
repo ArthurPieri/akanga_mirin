@@ -14,9 +14,12 @@ having hit them yourself.
 
 ## Honest limitations — read this before promising anything
 
-> - **Reference solutions exist for Phase 8 only.** Solutions for phases 0–7 are in
->   progress (`make status` shows the live matrix). Your stuck-participant strategy
->   cannot be "look at the solution" — see the stuck protocol below.
+> - **Reference solutions exist for all 9 phases** (`make status` shows the live
+>   matrix; `make test-solution PHASE=N` proves any of them on your machine). That
+>   means "look at the solution" is now *possible* at any moment — which is why the
+>   stuck protocol below treats it as the **last** layer, governed by the peek
+>   policy in `solutions/README.md`: peek one function after 30+ minutes stuck,
+>   and record what you learned (`make peek` does both).
 > - **Phase 5 (Textual TUI) is not workshop material.** It is 12–20 hours of solo
 >   work. Assign it as post-workshop homework using its internal checkpoints
 >   (5.1 / 5.2 / 5.3) — never schedule it into a workshop day.
@@ -235,6 +238,12 @@ Two gates per phase, in order:
 
 **Gate 1 — tests (objective).** `AKANGA_SRC=./src make test PHASE=N` green. This is
 binary and self-serve; do not spend facilitator time re-reviewing code that passes.
+Since the reference solutions are published, a green run no longer proves the code
+was *earned* — Gate 2 and the pair-review are what distinguish earned green from
+copied green. After Gate 1, have each participant run the post-green ritual from
+`solutions/README.md`: **diff your implementation against the reference, write one
+vault node about a difference and why.** That node cannot be faked with a copied
+solution — there is no diff.
 
 **Gate 2 — vault (conceptual).** Every phase ends with a "Vault Nodes to Create"
 table — the vault is the proof of understanding, not the tests. Check it with:
@@ -322,7 +331,9 @@ you will get "it's broken" replies.
 |---|---|
 | `uv: command not found` | Installed but not on PATH — re-open the shell, or `source $HOME/.local/bin/env` |
 | `make setup` hangs or fails resolving packages | Corporate proxy / offline room. Have everyone run `make setup` at home; uv's cache makes day-1 re-syncs offline-safe |
+| `make setup` fails *downloading a Python interpreter* (not packages) | uv fetches interpreters from GitHub releases, which corporate proxies block even when PyPI works. Fix: point uv at a system Python that satisfies the pin (`uv python pin $(which python3)`), or pre-run `uv python install` on an unrestricted network before day 1 |
 | Tests error (not fail) with import errors | They skipped `make skeleton PHASE=0`, or `AKANGA_SRC` points at the wrong directory — `make where-is-my-src` |
+| ImportError at a **phase transition** (phase N was green, phase N+1 errors on import) | Later phases add new stubs *inside files the participant already owns* (e.g. phase 1 adds symbols to `parser.py`), and skip-existing preserved the old file without them. Fix: re-run `make skeleton PHASE=N+1` — it now reports the missing symbols in preserved files and merges the new stubs in |
 | `direnv: error … is blocked` | Run `direnv allow` once in the repo — or skip direnv entirely, it's optional |
 | `make study` exits with a missing-dependency error | tmux/nvim/glow not installed — fine; use a plain editor and `make docs-phase PHASE=N` is replaced by reading the doc in the editor |
 | Windows machine | The Makefile and study script assume a POSIX shell. WSL2 works; native Windows does not. Flag this in the email |
@@ -331,9 +342,10 @@ you will get "it's broken" replies.
 
 ## 5. When participants get stuck
 
-Reference solutions currently exist **only for Phase 8**, so "compare with the
-solution" is not available for the phases you'll actually run. The curriculum is
-designed for this — use the remediation layers in order:
+Reference solutions exist for **every phase**, so "compare with the solution" is
+always available — which makes the discipline of the remediation ladder more
+important, not less. Use the layers in order; the solution is the last layer,
+never the first:
 
 1. **The test failure message.** The suites are written so failure messages are
    hints by design — the test names and assertions describe the missing behavior
@@ -350,7 +362,14 @@ designed for this — use the remediation layers in order:
 5. **The foundation docs.** Gaps in prerequisites (asyncio, SQLite, threading) are
    self-remediation material: `make foundations TOPIC=sqlite-basics` etc. Send the
    participant there during a break, not mid-exercise.
-6. **You.** If layers 1–5 failed on a phase-critical item, give the answer
+6. **The reference solution — one function, logged.** After 30+ minutes stuck on
+   a single test and layers 1–5 exhausted, have the participant run `make peek`
+   (or open `solutions/phase_NN/` themselves) for the **one** function blocking
+   them — on the condition that they record what they learned (`make peek`
+   appends the note to a learner-local `PEEKS.md`). Never project a whole
+   solution file to the room; wholesale copying is the one not-reasonable move
+   (`solutions/README.md` has the full norms list).
+7. **You.** If layers 1–6 failed on a phase-critical item, give the answer
    directly and move on — protect the schedule. Note what stalled them; if two
    or more people hit the same wall, stop the room and whiteboard it.
 
@@ -370,8 +389,8 @@ make where-is-my-src                 # what AKANGA_SRC resolves to
 make vault-init                      # scaffold ./vault + akanga.yaml
 make vault-check PHASE=N             # conceptual gate per phase
 make vault-check FULL=1              # end-of-path ≥50-node check
-make test-solution PHASE=8           # reference solution (Phase 8 only, for the MCP demo)
-make verify PHASE=N                  # cumulative check of a solution (works only where solutions exist)
+make test-solution PHASE=N           # reference solution (all 9 phases)
+make verify PHASE=N                  # cumulative check of a solution (suites 0..N)
 make docs-phase PHASE=N              # phase doc in glow (PHASE=1a / 1b for the split phase)
 make example PHASE=N                 # run the phase's standalone ~30-line concept demo
 ```

@@ -1,7 +1,7 @@
 # Akanga Mirin
 
-> **Status:** Phase docs, skeletons, and test suites are complete for all 9 phases.
-> Reference solutions are in progress (Phase 8 only so far). Run `make status` for the live completion matrix.
+> **Status:** Phase docs, skeletons, test suites, and reference solutions are complete
+> for all 9 phases. Run `make status` for the live completion matrix.
 
 Akanga Mirin is an open-source, project-based learning path for Python developers who want to understand how real systems are built — not by following a tutorial, but by building one themselves. Across nine phases, you construct a personal, offline-first knowledge graph: from atomic file writes and UUID identity through SQLite indexing, graph algorithms, a Textual TUI, a FastAPI server, GitPython version control, and finally an AI layer using the Model Context Protocol. At the end of every phase, you have a working artifact you can use — not a checkpoint in someone else's codebase.
 
@@ -79,7 +79,7 @@ AKANGA_SRC=./src make test PHASE=2
 
 If `AKANGA_SRC` is not set, tests will fail with a clear error message telling you to set it. Use `AKANGA_SRC=./src make test PHASE=N` to test your own code.
 
-**Reference solutions.** Reference implementations are being written phase by phase (currently Phase 8 only — run `make status` to see what exists). When a solution exists, `make test-solution PHASE=N` runs the suite against it. Look at solutions after you've written your own version, not before.
+**Reference solutions.** Reference implementations for all 9 phases live in `solutions/phase_NN/`. `make test-solution PHASE=N` runs the suite against them. Look at solutions after you've written your own version, not before — [solutions/README.md](solutions/README.md) spells out what counts as reasonable use and the post-green diff ritual.
 
 **Foundation docs.** `docs/foundations/` has 15 optional explainers (SQLite basics, asyncio primer, git basics, JSON-RPC, and more). Skip them if you already know the topic; read them if you're unfamiliar. They are not blocking prerequisites.
 
@@ -126,7 +126,7 @@ akanga_mirin/
 │   └── deployment.md               # launchd, systemd, tmux deployment guide
 ├── tests/                          # phase test suites (run against your code)
 ├── skeletons/                      # starting point for each phase (all 9 phases)
-├── solutions/                      # reference implementations (in progress — Phase 8 only)
+├── solutions/                      # reference implementations (all 9 phases)
 ├── examples/                       # runnable examples per phase (all 9 phases)
 ├── templates/
 │   └── project-makefile            # learner's own project Makefile template

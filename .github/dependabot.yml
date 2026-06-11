@@ -1,0 +1,20 @@
+# Dependabot — weekly dependency freshness channel (adversarial-analysis-v3.md #12).
+# The "uv" ecosystem updates pyproject.toml + uv.lock; "github-actions" keeps
+# the workflow action pins (setup-uv, checkout) current.
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"

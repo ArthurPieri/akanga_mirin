@@ -76,7 +76,7 @@ make foundations TOPIC=sqlite-basics  # open a foundation doc in glow
 make vault-init         # create ./vault + canonical akanga.yaml
 make vault-check PHASE=2  # validate the vault (per-phase node manifest)
 make lint               # ruff check
-make sync-forward FROM=2 FILE=src/akanga_core/parser.py  # propagate bug fix
+make sync-forward FROM=2 FILE=src/akanga_core/parser.py BASE=solutions  # propagate bug fix (BASE is explicit: solutions|skeletons)
 ```
 
 ---

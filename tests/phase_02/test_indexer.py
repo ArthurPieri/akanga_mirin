@@ -230,3 +230,238 @@ def test_index_missing_file_raises(tmp_db: str, tmp_vault: Path):
 
     with pytest.raises(Exception):
         index_file(missing, db, str(tmp_vault))
+
+
+# ---------------------------------------------------------------------------
+# 5. Re-index idempotency (adversarial-analysis-v3 finding #1)
+#
+# The indexer's own docstring promises idempotence; round 3 reproduced the
+# opposite (2 → 4 → 6 edge rows across three identical scans). These tests
+# make that promise falsifiable: scan twice, nothing changes; edit one file,
+# only that node's edges change; delete a file, its node is tombstoned.
+# ---------------------------------------------------------------------------
+
+def _node_count(db_path: str) -> int:
+    """Count node rows via a fresh read connection (WAL-safe, like _snapshot)."""
+    conn = sqlite3.connect(db_path)
+    try:
+        return conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def _edge_row_count(db_path: str) -> int:
+    """Count RAW edge rows — duplicates that DISTINCT would mask still count."""
+    conn = sqlite3.connect(db_path)
+    try:
+        return conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def _edge_pairs(db_path: str) -> list[tuple[str, str]]:
+    """All (source_id, target_id) edge rows, duplicates included."""
+    conn = sqlite3.connect(db_path)
+    try:
+        return conn.execute("SELECT source_id, target_id FROM edges").fetchall()
+    finally:
+        conn.close()
+
+
+def _three_node_vault(tmp_vault: Path) -> tuple[str, str, str]:
+    """alpha → [[Beta]], beta → [[Gamma]], gamma plain. Returns the three ids."""
+    id_alpha = "1d1d0001-0000-0000-0000-000000000001"
+    id_beta  = "1d1d0002-0000-0000-0000-000000000002"
+    id_gamma = "1d1d0003-0000-0000-0000-000000000003"
+    _write_md(tmp_vault, "a-alpha.md", id_alpha, "Alpha", body="Links to [[Beta]].")
+    _write_md(tmp_vault, "b-beta.md",  id_beta,  "Beta",  body="Links to [[Gamma]].")
+    _write_md(tmp_vault, "c-gamma.md", id_gamma, "Gamma")
+    return id_alpha, id_beta, id_gamma
+
+
+def test_rescan_unchanged_vault_is_noop(tmp_db: str, tmp_vault: Path):
+    """Scanning the SAME unchanged vault twice must not change node or edge counts.
+
+    This is the missing test class round 3 exposed: the reference indexer
+    duplicated every edge on every re-scan (2 → 4 → 6 rows, reproduced),
+    while its docstring claimed idempotence.
+    """
+    full_scan_and_index = _indexer_mod.full_scan_and_index
+
+    db = GraphDatabase(tmp_db)
+    _three_node_vault(tmp_vault)
+
+    full_scan_and_index(str(tmp_vault), db)
+    nodes_first = _node_count(tmp_db)
+    edges_first = _edge_row_count(tmp_db)
+    assert nodes_first == 3, "Precondition: all 3 nodes must be indexed by the first scan."
+    assert edges_first >= 2, "Precondition: both wikilink edges must exist after the first scan."
+
+    # Nothing on disk changed — this scan must be a complete no-op.
+    full_scan_and_index(str(tmp_vault), db)
+    nodes_second = _node_count(tmp_db)
+    edges_second = _edge_row_count(tmp_db)
+    db.close()
+
+    assert nodes_second == nodes_first, (
+        f"Node count changed on a re-scan of an UNCHANGED vault: "
+        f"{nodes_first} → {nodes_second}.\n"
+        "every re-scan must be a no-op on an unchanged vault — add "
+        "UNIQUE(source_id,target_id,relation) / INSERT OR IGNORE and skip "
+        "unchanged files"
+    )
+    assert edges_second == edges_first, (
+        f"Edge ROW count grew on a re-scan of an UNCHANGED vault: "
+        f"{edges_first} → {edges_second}.\n"
+        "every re-scan must be a no-op on an unchanged vault — add "
+        "UNIQUE(source_id,target_id,relation) / INSERT OR IGNORE and skip "
+        "unchanged files\n"
+        "(A blind INSERT with a fresh uuid4 PK duplicates every edge on every "
+        "scan: weekly refreshes for a year ≈ 243k duplicate rows. DISTINCT in "
+        "get_neighbors only masks it — ego graphs and RAG triples surface it.)"
+    )
+
+
+def test_rescan_after_editing_one_file_changes_only_that_nodes_edges(
+    tmp_db: str, tmp_vault: Path
+):
+    """Editing ONE file between scans must update only that node's outgoing edges.
+
+    The fix contract (v3 #1): per-changed-node `DELETE FROM edges WHERE
+    source_id = ?` then re-derive — stale edges from the edited node must
+    disappear, and untouched nodes' edges must neither change nor duplicate.
+    """
+    full_scan_and_index = _indexer_mod.full_scan_and_index
+
+    db = GraphDatabase(tmp_db)
+    id_alpha, id_beta, id_gamma = _three_node_vault(tmp_vault)
+
+    full_scan_and_index(str(tmp_vault), db)
+
+    # Edit alpha only: its link now points at Gamma instead of Beta.
+    _write_md(tmp_vault, "a-alpha.md", id_alpha, "Alpha", body="Links to [[Gamma]].")
+    full_scan_and_index(str(tmp_vault), db)
+
+    pairs = _edge_pairs(tmp_db)
+    db.close()
+
+    alpha_edges = [p for p in pairs if p[0] == id_alpha]
+    beta_edges  = [p for p in pairs if p[0] == id_beta]
+
+    assert alpha_edges == [(id_alpha, id_gamma)], (
+        f"After editing alpha.md ([[Beta]] → [[Gamma]]) and re-scanning, "
+        f"alpha's outgoing edges are {alpha_edges!r}; expected exactly "
+        f"[(alpha, gamma)].\n"
+        "Re-indexing a changed node must DELETE its old edge rows before "
+        "re-deriving — otherwise the stale Alpha→Beta edge survives forever "
+        "(or the new edge piles onto the old as a duplicate)."
+    )
+    assert beta_edges == [(id_beta, id_gamma)], (
+        f"Beta was NOT edited, but its edges changed: {beta_edges!r}; "
+        f"expected exactly [(beta, gamma)].\n"
+        "An unchanged node's edges must survive a re-scan exactly once — "
+        "neither dropped nor duplicated. Skip unchanged files (hash check "
+        "BEFORE parse) and make edge inserts idempotent "
+        "(UNIQUE(source_id,target_id,relation) / INSERT OR IGNORE)."
+    )
+
+
+def test_rescan_after_deleting_file_tombstones_node(tmp_db: str, tmp_vault: Path):
+    """Deleting a .md file then re-scanning must remove its node (and its edges).
+
+    The DB is a derived index of the files — a note deleted on disk must not
+    live in the index (or FTS, or RAG context) forever.
+    """
+    full_scan_and_index = _indexer_mod.full_scan_and_index
+
+    db = GraphDatabase(tmp_db)
+    id_alpha, id_beta, _ = _three_node_vault(tmp_vault)
+
+    full_scan_and_index(str(tmp_vault), db)
+    assert db.get_node(id_beta) is not None, "Precondition: Beta indexed by first scan."
+
+    (tmp_vault / "b-beta.md").unlink()
+    full_scan_and_index(str(tmp_vault), db)
+
+    ghost = db.get_node(id_beta)
+    pairs = _edge_pairs(tmp_db)
+    db.close()
+
+    assert ghost is None, (
+        "b-beta.md was deleted from disk, but its node is still in the DB "
+        "after a full re-scan.\n"
+        "full_scan_and_index needs a tombstone pass: any node whose path no "
+        "longer exists under the vault must be deleted from nodes (and FTS). "
+        "Without it, deleted notes haunt search results and RAG context "
+        "forever — the DB is supposed to be derivable from the files."
+    )
+    referencing = [p for p in pairs if id_beta in p]
+    assert referencing == [], (
+        f"Edges still reference the deleted node Beta: {referencing!r}.\n"
+        "Tombstoning a node must also remove its edges (ON DELETE CASCADE "
+        "covers source_id; edges TARGETING the dead node must go too — "
+        "alpha's [[Beta]] wikilink no longer resolves, so re-derivation must "
+        "not keep the old row)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# 6. UUID write-back stability (adversarial-analysis-v3 finding #1e)
+# ---------------------------------------------------------------------------
+
+def test_minted_uuid_is_written_back_and_stable_across_rescans(
+    tmp_db: str, tmp_vault: Path
+):
+    """A no-id file gets its minted UUID written back to disk — once, forever.
+
+    Round 3 measured the failure mode: an Obsidian-style vault with no `id:`
+    fields gets fresh UUIDs re-minted on EVERY scan, orphaning every edge
+    that pointed at the previous id. The contract: mint once, persist the id
+    into the file's frontmatter during indexing, never re-mint.
+    """
+    full_scan_and_index = _indexer_mod.full_scan_and_index
+
+    db = GraphDatabase(tmp_db)
+    no_id_file = tmp_vault / "no-id.md"
+    no_id_file.write_text(
+        "---\ntitle: No Id Note\ntype: note\ntags: []\n---\n\nBody text.\n",
+        encoding="utf-8",
+    )
+
+    full_scan_and_index(str(tmp_vault), db)
+
+    nodes = list(db.list_nodes(limit=100))
+    assert len(nodes) == 1, f"Precondition: exactly one node indexed, got {len(nodes)}."
+    minted_id = nodes[0].id
+
+    on_disk = no_id_file.read_text(encoding="utf-8")
+    assert minted_id in on_disk, (
+        f"The indexer minted id {minted_id!r} for no-id.md but never wrote it "
+        "back to the file's frontmatter.\n"
+        "Mint once, persist immediately: write the minted UUID back into the "
+        ".md file (write_node_file) during indexing. A UUID that lives only "
+        "in the DB is re-minted on the next scan, orphaning every edge that "
+        "pointed at the old id."
+    )
+
+    # Re-scan: the persisted id must be parsed back, not re-minted.
+    full_scan_and_index(str(tmp_vault), db)
+    nodes_after = list(db.list_nodes(limit=100))
+    db.close()
+
+    assert len(nodes_after) == 1, (
+        f"Re-scanning the same vault produced {len(nodes_after)} node rows "
+        "for a single file.\n"
+        "If the minted UUID is written back to frontmatter, the second scan "
+        "parses the SAME id — it must never mint a second one."
+    )
+    assert nodes_after[0].id == minted_id, (
+        f"The node's id changed across re-scans: {minted_id!r} → "
+        f"{nodes_after[0].id!r}.\n"
+        "Identity must be stable: the first scan mints and writes back, every "
+        "later scan reads the same id from the file."
+    )
+    assert minted_id in no_id_file.read_text(encoding="utf-8"), (
+        "The on-disk id changed (or vanished) on the second scan — write-back "
+        "must happen exactly once; an unchanged file must not be rewritten."
+    )

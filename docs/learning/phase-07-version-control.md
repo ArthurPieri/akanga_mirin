@@ -323,6 +323,22 @@ The watcher fires on every file change, but committing on every keystroke would 
 
 This is the same per-key timer pattern from Phase 4, applied to the vault path as the key. `GitManager.commit` is non-fatal — if git fails, log and continue.
 
+> **`.git` on a synced folder — read this if your vault lives in Dropbox/iCloud**
+>
+> - **Exclude `.git/` from sync.** Sync services corrupt git's object store
+>   (partial uploads, conflicted-copy pack files) and re-upload every loose
+>   object file-by-file. Dropbox: add the folder to ignored paths; iCloud: keep
+>   the repository outside the synced tree (e.g. `git --separate-git-dir`) or use
+>   a `.nosync` strategy.
+> - **gc is on you.** GitPython never auto-packs. Two years of auto-commits on an
+>   actively edited vault means tens of thousands of loose objects — gigabytes —
+>   each one a separate file the sync service uploads. Run `git gc --auto`
+>   periodically (or schedule `git gc`) on any long-lived auto-committing vault.
+> - **Batch your commits.** The debounced commit batcher above is not just
+>   history hygiene: fewer commits means fewer loose objects landing on the sync
+>   service. An idle-interval batcher (commit only after the vault has been quiet)
+>   is the difference between hundreds and tens of thousands of commits a year.
+
 ---
 
 ## Deliverable

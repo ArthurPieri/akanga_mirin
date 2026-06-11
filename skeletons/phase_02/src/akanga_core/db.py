@@ -26,8 +26,11 @@ CREATE TABLE IF NOT EXISTS edges (
     target_id TEXT,
     relation TEXT,
     relation_id TEXT,
+    UNIQUE (source_id, target_id, relation),
     FOREIGN KEY (source_id) REFERENCES nodes(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_id);
+CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
     title,
     tags,
@@ -82,12 +85,18 @@ class GraphDatabase:
         )
 
     def close(self) -> None:
-        """Close the underlying SQLite connection.
+        """WHAT: Close the underlying SQLite connection — under the lock.
 
-        Implement this by calling `self.conn.close()`.
-        Once `__init__` is done, `self.conn` is the sqlite3.Connection object.
+        WHY: Every write path serializes behind `self._lock`. Taking the
+        same lock here means shutdown WAITS for an in-flight operation
+        instead of yanking the connection out from under another thread
+        (which would surface as `sqlite3.ProgrammingError: Cannot operate
+        on a closed database` in THAT thread, far from the real cause).
+
+        HOW:
+        1. Inside `with self._lock:`, call `self.conn.close()`.
         """
-        raise NotImplementedError("self.conn.close()")
+        raise NotImplementedError("with self._lock: self.conn.close()")
 
     def __enter__(self) -> "GraphDatabase":
         return self
@@ -137,6 +146,17 @@ class GraphDatabase:
                 )
            Note: 'delete' requires ORIGINAL content values. Using the wrong values corrupts the index.
            All steps a–e must be inside the same with self._lock, self.conn: transaction.
+
+        Two edge-case guards worth teaching yourself (the reference
+        solution implements both — neither is required by the tests):
+        - Same id, DIFFERENT path: a file move — or a sync-conflict copy
+          (Dropbox "conflicted copy") carrying a duplicated id. The DB
+          cannot see the disk, so log a LOUD warning here and let the
+          indexer (which can check the disk) decide which file wins.
+        - Same path, DIFFERENT id: INSERT OR REPLACE silently deletes the
+          displaced row to satisfy UNIQUE(path), orphaning its FTS tokens
+          (ghost search matches). Delete the displaced node through the
+          front door first — FTS 'delete' command and its edges included.
         """
         raise NotImplementedError(
             "SELECT old rowid+title+tags; INSERT OR REPLACE INTO nodes ...; "
@@ -267,25 +287,41 @@ class GraphDatabase:
         relation: str | None = None,
         relation_id: str | None = None,
     ) -> str:
-        """WHAT: Insert a new edge row and return its generated UUID.
+        """WHAT: Insert an edge unless it already exists; return the edge's UUID.
 
-        WHY: Edges are created by the link extractor (wikilinks → edges) and
-        can also be created manually via the API. Returning the id lets callers
-        store or log it.
+        WHY: Edges are RE-DERIVED from wikilinks on every scan. A blind
+        INSERT with a fresh uuid4 primary key makes the index append-only:
+        every re-scan duplicates every edge (2 → 4 → 6 rows for the same
+        two links — measured). The schema's
+        `UNIQUE (source_id, target_id, relation)` plus `INSERT OR IGNORE`
+        makes the name honest: upserting the same edge twice leaves
+        exactly one row. Returning an id either way lets callers (the
+        Phase 6 create-edge route) store or log it.
 
         HOW:
-        1. Generate a new UUID with `str(uuid4())` and call it `edge_id`.
-        2. Inside `with self._lock, self.conn:`, execute:
-             INSERT INTO edges (id, source_id, target_id, relation, relation_id)
+        1. Normalise `relation = relation or ""` and
+           `relation_id = relation_id or ""` — SQL treats NULLs as
+           DISTINCT under UNIQUE, which would silently defeat the dedupe
+           for untyped edges.
+        2. Generate a new UUID with `str(uuid4())` and call it `edge_id`.
+        3. Inside `with self._lock, self.conn:`, execute:
+             INSERT OR IGNORE INTO edges (id, source_id, target_id, relation, relation_id)
              VALUES (?, ?, ?, ?, ?)
-        3. Return `edge_id`.
+        4. If `cursor.rowcount == 0` the insert was ignored — the edge
+           already exists. SELECT the EXISTING row's id and return it:
+             SELECT id FROM edges
+             WHERE source_id = ? AND target_id IS ? AND relation = ?
+           (`IS ?` instead of `= ?` so a NULL target_id still matches.)
+        5. Otherwise return `edge_id`.
 
         Callers always pass the positional/keyword arguments shown in the
         signature — there is no dict-based calling convention.
         """
         raise NotImplementedError(
-            "Generate edge_id = str(uuid4()); INSERT INTO edges VALUES (?, ?, ?, ?, ?); "
-            "return edge_id."
+            "Normalise relation/relation_id to ''; edge_id = str(uuid4()); "
+            "INSERT OR IGNORE INTO edges VALUES (?, ?, ?, ?, ?); "
+            "if cursor.rowcount == 0, SELECT and return the existing row's id; "
+            "else return edge_id."
         )
 
     def get_neighbors(self, node_id: str) -> list[Any]:

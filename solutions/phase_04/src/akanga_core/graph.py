@@ -1,21 +1,19 @@
-"""Phase 03 — graph algorithms: the BFS ego-graph and its ASCII renderer.
+"""Phase 03 — Graph algorithms: BFS ego-graph construction + ASCII rendering.
 
 The ego-graph is Akanga's primary navigation mechanism: instead of the
-whole vault graph it shows the LOCAL neighbourhood of one node — what it
-links to, what links to it, and (at depth 2) what those nodes link to.
+whole vault graph, show the local neighbourhood of one node — what it
+links to, what links to it, and (at depth 2) what *those* nodes touch.
 
-Two invariants carry through to later phases:
+Two invariants matter throughout this module:
 
 - NATURAL DIRECTION: every `EgoEdge` stores `source_id → target_id`
-  exactly as the edge exists in the DB `edges` table, regardless of
-  whether BFS discovered it walking outward or inward. `direction` only
-  records which side the BFS frontier was on (UI emphasis); it is never
-  used to flip endpoints, rename relations, or render `<-` arrows.
-- DEDUPLICATION: BFS discovers the same logical edge twice whenever it
-  visits both endpoints (once OUTGOING from the source, once INCOMING at
-  the target), so edges are deduped by `(source_id, target_id, relation)`
-  before appending. Keying on relation preserves two DIFFERENT relations
-  between the same pair as two distinct edges.
+  exactly as the edge exists in the DB `edges` table, no matter whether
+  BFS discovered it walking forwards (outgoing) or backwards (incoming).
+  `direction` is presentation metadata only.
+- REAL RELATIONS: edges carry the relation label and registry id pulled
+  from `db.get_edges_from` / `db.get_edges_to`. Phase 8 serializes these
+  edges as `src -[rel]-> tgt` triples for an LLM — a hardcoded
+  `relation=""` here would gut the 71-type vocabulary downstream.
 """
 from __future__ import annotations
 
@@ -24,7 +22,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover — import only for type checkers
     from akanga_core.db import GraphDatabase
 
 # ---------------------------------------------------------------------------
@@ -84,19 +82,36 @@ class EgoGraph:
 
 def build_ego_graph(
     root_id: str,
-    db: "GraphDatabase",
+    db: GraphDatabase,
     max_depth: int = 2,
 ) -> EgoGraph:
-    """Build the subgraph centred on `root_id` using breadth-first search.
+    """WHAT: Build the subgraph centred on `root_id` using breadth-first search.
 
-    Depth 1 is "immediate neighbours"; depth 2 is "friends-of-friends";
-    depth 0 returns the root alone. Both edge directions are explored —
-    a node that merely POINTS AT the root is still part of its
-    neighbourhood. Cycles terminate naturally because the `visited` set
-    prevents any node from being enqueued twice.
+    WHY: Depth 1 is "immediate neighbours"; depth 2 is "friends-of-friends".
+    The visited set is checked AT ENQUEUE TIME — the moment a neighbour is
+    first seen — so each node enters the queue exactly once even in cyclic
+    graphs (cycles are legal data in Akanga: A supports B, B supports A).
+
+    HOW (the three load-bearing decisions):
+
+    - Depth boundary: a node dequeued at `depth >= max_depth` is INCLUDED
+      in `nodes` (it was added when first seen) but is NOT expanded — its
+      own edges stay outside the ego-graph. `max_depth=0` therefore yields
+      just the root with no edges.
+    - Both directions: each expanded node contributes its outgoing edges
+      (`db.get_edges_from`) AND its incoming edges (`db.get_edges_to`).
+      Without the incoming half, nothing that merely points AT the root
+      would ever appear. Incoming edges keep their natural direction —
+      source is the other node — with `direction=INCOMING` as metadata.
+    - Edge deduplication (CORE requirement): when BFS visits both
+      endpoints of an edge it encounters the same row twice — once as
+      OUTGOING from the source, once as INCOMING at the target. The
+      `seen_edges` set keyed by `(source_id, target_id, relation)` drops
+      the second sighting. Relation belongs in the key: two DIFFERENT
+      relations between the same pair are two real edges, both kept.
 
     Raises:
-        ValueError: when `root_id` does not exist in the database.
+        ValueError: if `root_id` does not exist in the database.
     """
     root = db.get_node(root_id)
     if root is None:
@@ -104,13 +119,13 @@ def build_ego_graph(
 
     ego_nodes: dict[str, object] = {root_id: root}
     ego_edges: list[EgoEdge] = []
-    seen_edges: set[tuple[str, str, str]] = set()  # (source_id, target_id, relation)
+    seen_edges: set[tuple[str, str, str]] = set()
     visited: set[str] = {root_id}
     queue: deque[tuple[str, int]] = deque([(root_id, 0)])
 
-    def _add_edge(source_id: str, target_id: str, relation: str,
-                  relation_id: str, direction: EdgeDirection) -> None:
-        """Append the edge in its natural direction unless already recorded."""
+    def _record(source_id: str, target_id: str, relation: str, relation_id: str,
+                direction: EdgeDirection) -> None:
+        """Append the edge in natural direction unless it was already seen."""
         key = (source_id, target_id, relation)
         if key in seen_edges:
             return
@@ -128,54 +143,60 @@ def build_ego_graph(
     while queue:
         current_id, depth = queue.popleft()
         if depth >= max_depth:
-            continue  # frontier node — do not expand further
+            continue  # boundary node: included above, never expanded
 
         # Outgoing: current → neighbour, already in natural direction.
-        for neighbour, relation, relation_id in db.get_edges_from(current_id):
-            if neighbour.id not in visited:
-                visited.add(neighbour.id)
-                ego_nodes[neighbour.id] = neighbour
-                queue.append((neighbour.id, depth + 1))
-            _add_edge(current_id, neighbour.id, relation, relation_id,
-                      EdgeDirection.OUTGOING)
+        for node, relation, relation_id in db.get_edges_from(current_id):
+            if node.id not in visited:
+                visited.add(node.id)
+                ego_nodes[node.id] = node
+                queue.append((node.id, depth + 1))
+            _record(current_id, node.id, relation, relation_id, EdgeDirection.OUTGOING)
 
-        # Incoming: source → current. The OTHER node is the edge's source —
-        # never swapped (natural-direction rule).
-        for source, relation, relation_id in db.get_edges_to(current_id):
-            if source.id not in visited:
-                visited.add(source.id)
-                ego_nodes[source.id] = source
-                queue.append((source.id, depth + 1))
-            _add_edge(source.id, current_id, relation, relation_id,
-                      EdgeDirection.INCOMING)
+        # Incoming: neighbour → current. The OTHER node is the source —
+        # natural direction is preserved, never swapped.
+        for node, relation, relation_id in db.get_edges_to(current_id):
+            if node.id not in visited:
+                visited.add(node.id)
+                ego_nodes[node.id] = node
+                queue.append((node.id, depth + 1))
+            _record(node.id, current_id, relation, relation_id, EdgeDirection.INCOMING)
 
     return EgoGraph(root=root, nodes=ego_nodes, edges=ego_edges)
 
 
 def render_ascii(ego: EgoGraph) -> str:
-    """Render the ego-graph as a human-readable ASCII string.
+    """WHAT: Render the ego-graph as a human-readable ASCII string.
 
-    Every edge — OUTGOING and INCOMING alike — renders in its natural
-    direction as `source --[relation]--> target`; a reversed `<-` arrow
-    is never emitted and an inverse relation name is never invented
-    (`edge.direction` is for UI emphasis only, not serialization).
-    Unlabeled wikilink edges fall back to the literal `links` label, and
-    missing node titles fall back to the raw UUID string.
+    WHY: The TUI needs a text-mode graph view for terminals that cannot
+    render graphical widgets. A flat edge list is readable up to ~12 nodes
+    — a ceiling of the medium, not of the implementation — so no layout
+    algorithm is attempted.
+
+    HOW: One header line, then one line per edge in NATURAL direction:
+
+        [ROOT] <root.title>
+          <source_title> -[<relation or 'links'>]-> <target_title>
+
+    Both OUTGOING and INCOMING edges render identically because EgoEdge
+    already stores source/target as asserted in the DB — there is no
+    reversed `<-` arrow style and no invented inverse relation. This is
+    the same `-[rel]->` serialization Phase 8 hands to the LLM. Unlabeled
+    edges fall back to the generic 'links'; titles fall back to the raw
+    UUID when a node is somehow absent from `ego.nodes`. With no edges at
+    all, the body is the single line `  (no connections)`.
     """
-    title = getattr(ego.root, "title", "") or "(untitled)"
-    lines = [f"[ROOT] {title}"]
-
-    def _title_of(node_id: str) -> str:
+    def _title(node_id: str) -> str:
         node = ego.nodes.get(node_id)
-        return getattr(node, "title", None) or node_id
+        return getattr(node, "title", node_id) if node is not None else node_id
 
-    for edge in ego.edges:
-        relation = edge.relation or "links"
-        lines.append(
-            f"  {_title_of(edge.source_id)} --[{relation}]--> {_title_of(edge.target_id)}"
-        )
-
+    lines = [f"[ROOT] {ego.root.title}"]
     if not ego.edges:
         lines.append("  (no connections)")
-
+    else:
+        for edge in ego.edges:
+            relation = edge.relation or "links"
+            lines.append(
+                f"  {_title(edge.source_id)} -[{relation}]-> {_title(edge.target_id)}"
+            )
     return "\n".join(lines)

@@ -100,6 +100,15 @@ single 10 MB node body must not produce gigabytes of LLM context. FTS5 + BFS is
 sufficient for Phase 8 MVP — vector embeddings improve only the seed retrieval step
 and can be added later without changing the architecture.
 
+**Density math at real scale:** at 1,000+ nodes, a depth-2 ego graph around a
+well-connected node is **~170 nodes** (measured on a 1,000-node / 4,681-edge
+benchmark vault). At that density your budget strategy — not your traversal —
+decides what the LLM sees: emit entities first at ~500 chars each and roughly 22
+of the 170 consume the whole 12,000-char budget, with zero relations surviving —
+flat RAG with arbitrary selection, the exact failure mode this phase exists to
+beat. The reference emits **relations first**, then the root node's snippet at
+500 chars, then neighbor snippets at 120 chars each.
+
 > Akanga node: `Graph RAG`
 
 ### Triple Serialization
@@ -481,7 +490,11 @@ def mcp_server(
 > `pyproject.toml`, so `uv run akanga mcp-server` does not work out of the box. Until
 > you add one, the real invocation is the module form used below.
 
-**Claude Desktop config** (`~/.config/claude/claude_desktop_config.json`):
+**Claude Desktop config** — the file lives at
+`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS and
+`~/.config/Claude/claude_desktop_config.json` on Linux (on Windows it is
+`%APPDATA%\Claude\claude_desktop_config.json`, but the learning path assumes a
+POSIX shell). Config block current as of **fastmcp 3.x, June 2026**:
 
 ```json
 {
@@ -538,11 +551,10 @@ The complete test suites are in `tests/phase_08/test_rag.py` and
 - `test_context_with_no_edges` — an isolated node produces a valid delimited context with zero triple lines
 - `test_build_context_nonexistent_node_raises_or_returns_empty` — error path (CCR-9)
 
-The direction and cap tests are being strengthened to assert the **whole triple
-line** in natural direction (so inverse-label or flipped-arrow rendering fails) and
-to pin `MAX_CONTEXT_CHARS == 12_000` (so redefining your own cap fails). Implement
-to the direction and budget rules above, not to the loosest assertion that passes
-today.
+The direction and cap tests assert the **whole triple line** in natural direction
+(so inverse-label or flipped-arrow rendering fails) and pin
+`MAX_CONTEXT_CHARS == 12_000` (so redefining your own cap fails). Implement to the
+direction and budget rules above.
 
 **`test_mcp.py` — MCP server tools** (called as plain functions after
 `init_server(vault, db_path)`):

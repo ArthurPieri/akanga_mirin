@@ -11,6 +11,8 @@ import asyncio
 import threading
 import time
 
+from tests.phase_04.conftest import _load_eventbus
+
 
 def _wait_until(predicate, timeout: float = 2.0) -> bool:
     """Poll *predicate* until it is truthy or *timeout* seconds elapse."""
@@ -199,6 +201,87 @@ class TestAsyncBridge:
                 f"Buffered events must be flushed exactly once, got {len(called)} calls.\n"
                 "Clear the buffer after flushing it in set_loop()."
             )
+        finally:
+            loop.call_soon_threadsafe(loop.stop)
+            loop_thread.join(timeout=2)
+            loop.close()
+
+
+class TestSetLoopInterleaving:
+    """TOCTOU stress (adversarial-analysis-v3 finding #3).
+
+    publish() that checks self._loop OUTSIDE the lock races set_loop(): an
+    event published in that window lands in the buffer AFTER set_loop already
+    flushed it — and nothing ever drains it again. That is the exact "silent
+    loss" the docstring promises cannot happen. The contract: set/check _loop
+    and buffer-append under ONE lock; flush inside set_loop() under the same
+    lock; every event is delivered exactly once.
+    """
+
+    N_EVENTS = 200
+
+    def test_publish_racing_set_loop_delivers_every_event_exactly_once(self) -> None:
+        """Hammer publish() from a thread while set_loop() lands mid-stream.
+
+        Three rounds with different set_loop offsets so some events buffer,
+        some race the flush, and some go straight through — all 200 must
+        arrive, each exactly once, in every round.
+        """
+        EventBus = _load_eventbus()
+
+        loop = asyncio.new_event_loop()
+        loop_thread = threading.Thread(target=loop.run_forever, daemon=True)
+        loop_thread.start()
+        try:
+            for round_no, set_loop_delay in enumerate((0.0, 0.001, 0.005)):
+                bus = EventBus()
+                delivered: list[int] = []
+
+                async def handler(**kwargs):
+                    # Runs only on the loop thread → appends are serialized.
+                    delivered.append(kwargs.get("seq"))
+
+                bus.subscribe("stress", handler)
+
+                def hammer():
+                    for i in range(self.N_EVENTS):
+                        bus.publish("stress", seq=i)
+
+                publisher = threading.Thread(target=hammer)
+                publisher.start()
+                time.sleep(set_loop_delay)
+                bus.set_loop(loop)  # races publish() — the TOCTOU window
+                publisher.join(timeout=5)
+                assert not publisher.is_alive(), (
+                    f"Round {round_no}: publish() deadlocked while racing "
+                    "set_loop(). Never hold the lock while CALLING handlers "
+                    "or run_coroutine_threadsafe — take it only around the "
+                    "loop-check + buffer-append, then release."
+                )
+
+                assert _wait_until(
+                    lambda: len(delivered) >= self.N_EVENTS, timeout=5.0
+                ), (
+                    f"Round {round_no} (set_loop after {set_loop_delay}s): only "
+                    f"{len(delivered)}/{self.N_EVENTS} events were delivered — "
+                    "the rest are stranded in the pre-loop buffer forever.\n"
+                    "This is the TOCTOU: publish() checked self._loop outside "
+                    "the lock, lost the race to set_loop()'s flush, and "
+                    "appended to a buffer nothing will ever drain. Set/check "
+                    "_loop AND append-to-buffer under one lock, and flush the "
+                    "buffer inside set_loop() under that same lock."
+                )
+
+                time.sleep(0.1)  # let any (incorrect) double-delivery surface
+                assert sorted(delivered) == list(range(self.N_EVENTS)), (
+                    f"Round {round_no}: events were lost or delivered more "
+                    f"than once ({len(delivered)} deliveries of "
+                    f"{self.N_EVENTS} events).\n"
+                    "Exactly-once is the contract: buffered events are "
+                    "flushed once by set_loop() and the buffer is cleared "
+                    "under the lock — a publish that already went through "
+                    "run_coroutine_threadsafe must not ALSO sit in the buffer."
+                )
         finally:
             loop.call_soon_threadsafe(loop.stop)
             loop_thread.join(timeout=2)

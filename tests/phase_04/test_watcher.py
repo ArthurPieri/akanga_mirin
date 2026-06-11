@@ -209,6 +209,136 @@ class TestWatcherFilters:
             watcher.stop()
 
 
+class TestWatcherReschedule:
+    """Deadline re-check on re-touch (adversarial-analysis-v3 finding #3).
+
+    Round 3 graded the `_fire` copies: phase_04 re-checks the deadline,
+    phase_07 fires EARLY on re-schedule, phase_05/06 resurrect cancelled
+    events. This test pins the canonical contract: a re-touch inside the
+    debounce window pushes the deadline back — one event, after the LAST
+    deadline, never before.
+    """
+
+    def test_retouch_inside_window_postpones_fire(self, tmp_vault: Path) -> None:
+        """Touch, re-touch inside the window → exactly ONE event after the LAST deadline.
+
+        Timeline (debounce = 500ms):
+          t=0      first write  → deadline ≈ t=500ms
+          t≈250ms  re-touch     → deadline pushed to ≈ t=750ms
+        The single event must fire no earlier than ~debounce after the
+        RE-TOUCH (measured, so raw-event delivery latency cannot skew it).
+        """
+        debounce_ms = 500
+        bus = EventBus()
+        events: list[tuple[float, dict]] = []
+        ready = threading.Event()
+
+        def capture(**kwargs):
+            events.append((time.monotonic(), kwargs))
+            ready.set()
+
+        bus.subscribe("file_changed", capture)
+        watcher = VaultWatcher(tmp_vault, bus, debounce_ms=debounce_ms)
+        target = tmp_vault / "reschedule.md"
+        watcher.start()
+        try:
+            time.sleep(0.2)  # let the observer arm before timing starts
+
+            _atomic_write(target, "v1")          # t = 0: schedules the first deadline
+            time.sleep(0.25)
+            t_retouch = time.monotonic()
+            _atomic_write(target, "v2")          # t ≈ 250ms: re-touch INSIDE the window
+
+            assert ready.wait(timeout=TIMEOUT_S + 1), (
+                "No event arrived after the LAST deadline — re-scheduling must "
+                "postpone the fire, never cancel it. The final state of the "
+                "file must still be delivered exactly once."
+            )
+            time.sleep(0.4)  # settle: let any (incorrect) second fire surface
+
+            fire_delay = events[0][0] - t_retouch
+            assert fire_delay >= (debounce_ms / 1000) - 0.05, (
+                f"The watcher fired {fire_delay * 1000:.0f}ms after the "
+                f"re-touch — BEFORE the re-touched {debounce_ms}ms deadline. "
+                "That is the early-fire bug.\n"
+                "A re-touch inside the debounce window must push the deadline "
+                "back. When the timer wakes, _fire must RE-CHECK the current "
+                "deadline for the path and go back to sleep if a later touch "
+                "moved it — firing on the original schedule delivers a "
+                "half-written file to the indexer."
+            )
+            assert len(events) == 1, (
+                f"Expected exactly ONE coalesced event after the last deadline, "
+                f"got {len(events)}.\n"
+                "Both touches are saves of the same file inside one debounce "
+                "window — they must coalesce into a single file_changed."
+            )
+        finally:
+            watcher.stop()
+
+
+class TestWatcherDeleteGrace:
+    """Create-cancels-pending-delete (adversarial-analysis-v3 findings #3c/#5).
+
+    Real editors delete-and-recreate on save (vim's rename-backup makes every
+    save a delete for the real path; sync clients flap files the same way).
+    The adopted contract: deletes get a debounce grace window, and a create/
+    modify of the same path INSIDE that window cancels the pending delete —
+    the world sees one file_changed, never a spurious file_deleted.
+    """
+
+    def test_recreate_within_grace_window_cancels_pending_delete(
+        self, tmp_vault: Path
+    ) -> None:
+        """delete → immediate recreate must publish file_changed and NO file_deleted."""
+        debounce_ms = 300
+        target = tmp_vault / "flapper.md"
+        _atomic_write(target, "v1")  # exists BEFORE the watcher starts → no event
+
+        bus = EventBus()
+        changed: list[dict] = []
+        deleted: list[dict] = []
+        changed_ready = threading.Event()
+
+        def on_changed(**kwargs):
+            changed.append(kwargs)
+            changed_ready.set()
+
+        def on_deleted(**kwargs):
+            deleted.append(kwargs)
+
+        bus.subscribe("file_changed", on_changed)
+        bus.subscribe("file_deleted", on_deleted)
+
+        watcher = VaultWatcher(tmp_vault, bus, debounce_ms=debounce_ms)
+        watcher.start()
+        try:
+            time.sleep(0.2)  # let the observer arm
+
+            target.unlink()                      # vim-style delete...
+            _atomic_write(target, "v2")          # ...recreated within the grace window
+
+            assert changed_ready.wait(timeout=TIMEOUT_S), (
+                "The recreated file never surfaced as file_changed — "
+                "cancelling the pending delete must not swallow the create. "
+                "The net effect of delete+recreate is a CHANGE."
+            )
+            # Give any (incorrectly) un-cancelled pending delete time to fire.
+            time.sleep(debounce_ms / 1000 + 0.4)
+
+            assert deleted == [], (
+                f"file_deleted was published for a file that exists: "
+                f"{[str(e.get('path')) for e in deleted]!r}.\n"
+                "Deletes must be debounced too ('deletions never arrive in "
+                "bursts' is false — vim's rename-backup save is a delete), "
+                "and a create of the same path inside the grace window must "
+                "CANCEL the pending delete. A spurious file_deleted tombstones "
+                "a live note out of the index."
+            )
+        finally:
+            watcher.stop()
+
+
 class TestWatcherLifecycle:
     def test_watcher_stop_and_start(self, tmp_vault: Path) -> None:
         """start() then stop() must complete without raising an exception."""

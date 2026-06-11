@@ -426,6 +426,14 @@ The vault is the proof of understanding, not just the tests.
 
 ## Reflect
 
+> **Break it on purpose:** Replace your atomic write with a plain
+> `path.write_text(content)`. Predict which test fails — write the name down
+> before you run anything. Then run the suite. One new fault-injection test
+> should catch it — and if your suite predates that test, **none** do. Either
+> way, explain what the old suite couldn't see: checking for leftover tmp files
+> proves nothing about what a reader observes if the process dies mid-write.
+> Restore the atomic version before moving on.
+
 > **Solo:** You wrote `os.replace(temp, target)` instead of streaming directly to the file. Without looking at the code, explain to yourself in one sentence why this matters. If you can't explain it without using the word "atomic," try again.
 
 > **Group:** The file is described as "the source of truth — never derived from anything else." But the `content_hash` in the DB is derived from the file. Is the hash part of the source of truth, or part of the derived index? Where exactly is the boundary, and does the distinction matter for how you reason about correctness?

@@ -23,6 +23,7 @@ PHASE_PAD    := $(shell printf "%02d" "$(PHASE_NUM)" 2>/dev/null)
 
 FROM         ?= 0
 TO           ?= 8
+BASE         ?= solutions
 
 TOPIC        ?=
 PYTEST_ARGS  ?=
@@ -47,7 +48,8 @@ GLOW         := glow
         verify verify-all \
         example examples-all \
         skeleton skeleton-check \
-        setup setup-phase \
+        setup setup-phase setup-workshop \
+        resume checkpoint peek \
         lint typecheck check \
         status where-is-my-src sync-forward \
         commit-progress push \
@@ -87,7 +89,11 @@ help: ## Show this help message
 		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
 	@printf '\n'
 	@printf '  \033[1;33mSetup workflow\033[0m\n'
-	@grep -E '^(setup|setup-phase)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
+	@grep -E '^(setup|setup-phase|setup-workshop)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
+		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
+	@printf '\n'
+	@printf '  \033[1;33mYour progress\033[0m\n'
+	@grep -E '^(resume|checkpoint|peek)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
 		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
 	@printf '\n'
 	@printf '  \033[1;33mQuality workflow\033[0m\n'
@@ -107,7 +113,7 @@ help: ## Show this help message
 	@grep -E '^(status|where-is-my-src|sync-forward)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
 		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
 	@printf '\n'
-	@printf '  \033[2mVariables: PHASE=N (default 0)  FROM=N  TO=N  FILE=path  TOPIC=name\033[0m\n'
+	@printf '  \033[2mVariables: PHASE=N (default 0)  FROM=N  TO=N  FILE=path  TOPIC=name  BASE=solutions|skeletons\033[0m\n'
 	@printf '\n'
 
 # =============================================================================
@@ -230,11 +236,21 @@ test: ## Run tests for one phase against AKANGA_SRC (PHASE=2)
 	if [ "$(AKANGA_SRC)" = "./src" ] && [ "$(origin AKANGA_SRC)" = "default" ]; then \
 		printf '\n\033[1;33m⚠  WARNING: AKANGA_SRC is not set — defaulting to ./src\033[0m\n'; \
 		printf '\033[1;33m   If ./src is empty or missing, you are NOT testing your code.\033[0m\n'; \
-		printf '\033[1;33m   To test your code:      AKANGA_SRC=/path/to/src make test PHASE=%d\033[0m\n' "$(PHASE)"; \
-		printf '\033[1;33m   To test the solution:   make test-solution PHASE=%d\033[0m\n\n' "$(PHASE)"; \
+		printf '\033[1;33m   To test your code:      AKANGA_SRC=/path/to/src make test PHASE=%s\033[0m\n\n' "$(PHASE)"; \
 	fi; \
 	printf 'Testing phase \033[1m%s\033[0m against \033[36m%s\033[0m ...\n' "$${PHASE_PAD}" "$(AKANGA_SRC)"; \
-	AKANGA_SRC="$(AKANGA_SRC)" $(PYTEST) tests/phase_$${PHASE_PAD}/ -v $(PYTEST_ARGS)
+	if AKANGA_SRC="$(AKANGA_SRC)" $(PYTEST) tests/phase_$${PHASE_PAD}/ -v $(PYTEST_ARGS); then \
+		echo "PHASE=$(PHASE_NUM) $$(date +%Y-%m-%d) green" >> .akanga-progress; \
+		printf '\n\033[0;32mRecorded in .akanga-progress\033[0m — \033[36mmake resume\033[0m remembers where you are.\n'; \
+	else \
+		echo "PHASE=$(PHASE_NUM) $$(date +%Y-%m-%d) red" >> .akanga-progress; \
+		printf '\n\033[1;33mStuck? Work the ladder before reaching for the answer key:\033[0m\n'; \
+		printf '  1) Read the failing test'"'"'s message — it is a hint by design.\n'; \
+		printf '  2) Re-read the skeleton docstring (the HOW section) for the failing function.\n'; \
+		printf '  3) Check the Pitfalls section of the phase doc: \033[36mmake docs-phase PHASE=%s\033[0m\n' "$(PHASE)"; \
+		printf '  4) After 30+ minutes stuck: \033[36mmake peek PHASE=%s FILE=akanga_core/<file>.py\033[0m\n' "$(PHASE)"; \
+		exit 1; \
+	fi
 
 test-solution: ## Run tests for one phase against the reference solution (PHASE=2)
 	@PHASE_PAD="$(PHASE_PAD)"; \
@@ -390,7 +406,8 @@ skeleton: ## Copy skeleton for a phase into ./src/ as the learner's starting poi
 	printf 'Copied %d new file(s).\n' "$$COPIED"; \
 	if [ "$$SKIPPED" -gt 0 ]; then \
 		printf '\033[0;33mPreserved %d existing file(s) in src/ — your implementations were NOT overwritten.\033[0m\n' "$$SKIPPED"; \
-		printf 'To inspect what the new skeleton ships: \033[36mls %s/src\033[0m\n' "$$SKEL"; \
+		echo "Merging new stubs this phase adds inside your preserved files ..."; \
+		$(PYTHON) scripts/skeleton_merge.py "$$SKEL/src" src; \
 	fi; \
 	echo "Done. Edit src/ to complete the implementation."; \
 	printf 'Next: \033[36mmake test PHASE=%d\033[0m\n' "$(PHASE)"
@@ -417,6 +434,16 @@ setup-phase: ## Install only the dependencies needed through a given phase (PHAS
 	@echo "Installing dependencies for phases 0–$(PHASE) ..."; \
 	uv sync; \
 	printf '\033[0;32mDone.\033[0m\n'
+
+setup-workshop: ## Lean day-1 install: core deps + test runner, no heavy extras
+	@echo "Installing workshop dependencies (core + dev test tooling) via uv ..."; \
+	uv sync --extra dev; \
+	printf '\033[0;32mDone.\033[0m Run \033[36mmake test PHASE=0\033[0m to verify.\n'; \
+	echo ""; \
+	echo "Skipped (install later if you need them):"; \
+	echo "  graph extras — Phase 5 stretch-goal renderer (textual-kitty, textual-canvas,"; \
+	echo "                 networkx, matplotlib, pillow). Install: uv sync --all-extras"; \
+	echo "  docs extras  — MKDocs site tooling. Install: uv sync --extra docs"
 
 # =============================================================================
 # QUALITY — lint, typecheck, full gate
@@ -449,8 +476,8 @@ check: ## Full quality gate: lint + test-all (run before a facilitator commit)
 # DIAGNOSTICS — understand the current state of the repo
 # =============================================================================
 
-status: ## Show phase completion matrix (skeleton / tests / solution per phase)
-	@printf '\n  \033[1;36mPhase Completion Status\033[0m\n\n'; \
+status: ## Repo authoring status: which skeletons/tests/solutions are shipped
+	@printf '\n  \033[1;36mRepo authoring status (skeletons/tests/solutions shipped)\033[0m\n\n'; \
 	printf '  %-8s %-12s %-10s %-12s\n' 'Phase' 'Skeleton' 'Tests' 'Solution'; \
 	printf '  %-8s %-12s %-10s %-12s\n' '-----' '--------' '-----' '--------'; \
 	for n in 0 1 2 3 4 5 6 7 8; do \
@@ -460,7 +487,7 @@ status: ## Show phase completion matrix (skeleton / tests / solution per phase)
 		SOLN=$$([ -d "solutions/phase_$${PHASE_PAD}" ] && echo "✓ done" || echo "- todo"); \
 		printf '  %-8s %-12s %-10s %-12s\n' "$$PHASE_PAD" "$$SKEL" "$$TEST" "$$SOLN"; \
 	done; \
-	printf '\n'
+	printf '\n  \033[2mLooking for your own progress? → make resume\033[0m\n\n'
 
 where-is-my-src: ## Show which source directory 'make test' is pointing at
 	@if [ -d "$(AKANGA_SRC)" ]; then \
@@ -472,13 +499,94 @@ where-is-my-src: ## Show which source directory 'make test' is pointing at
 		printf 'Set it: export AKANGA_SRC=/path/to/your/src\n'; \
 	fi
 
-sync-forward: ## Preview or apply a fix from phase FROM to all later phases (FROM=2 FILE=src/...)
+sync-forward: ## Preview or apply a fix from phase FROM forward (FROM=2 FILE=src/... BASE=solutions|skeletons)
 	@if [ -z "$(FILE)" ]; then \
-		echo "Usage: make sync-forward FROM=2 FILE=src/akanga_core/parser.py"; \
-		echo "       make sync-forward FROM=2 FILE=src/akanga_core/parser.py APPLY=1"; \
+		echo "Usage: make sync-forward FROM=2 FILE=src/akanga_core/parser.py BASE=solutions"; \
+		echo "       make sync-forward FROM=2 FILE=src/akanga_core/parser.py BASE=solutions APPLY=1"; \
+		echo "Audit every canonical pair (CI gate): uv run python scripts/sync_forward.py --check-all"; \
+		exit 2; \
+	fi; \
+	$(PYTHON) scripts/sync_forward.py --base $(BASE) "$(FILE)" $(FROM) $(if $(APPLY),--apply,)
+
+# =============================================================================
+# LEARNER PROGRESS — resume, checkpoint, peek
+# =============================================================================
+# State lives in three gitignored, learner-local artifacts:
+#   .akanga-progress  one line per `make test` run: "PHASE=N YYYY-MM-DD green|red"
+#   PEEKS.md          honor-system log of every solution peek
+#   .learner-git/     a private git repo (separate from this course repo)
+#                     holding your src/ + vault/ — your 35-55h of work, backed up.
+
+LEARNER_GIT := git --git-dir=.learner-git --work-tree=.
+
+resume: ## Show your last green phase and the commands to continue (3-week-return friendly)
+	@if [ ! -s .akanga-progress ]; then \
+		echo "No test runs recorded yet (.akanga-progress is empty)."; \
+		printf 'Start here: \033[36mmake skeleton PHASE=0\033[0m then \033[36mmake test PHASE=0\033[0m\n'; \
+		exit 0; \
+	fi; \
+	N=$$(grep ' green$$' .akanga-progress 2>/dev/null | sed 's/^PHASE=//; s/ .*//' | sort -n | tail -1); \
+	if [ -z "$$N" ]; then \
+		LAST=$$(tail -1 .akanga-progress); \
+		echo "No green phases yet — last attempt: $$LAST"; \
+		PH=$$(echo "$$LAST" | sed 's/^PHASE=//; s/ .*//'); \
+		printf 'Keep going: \033[36mmake test PHASE=%s\033[0m (the failing message is a hint by design)\n' "$$PH"; \
+		exit 0; \
+	fi; \
+	WHEN=$$(grep "^PHASE=$$N " .akanga-progress | grep ' green$$' | tail -1 | awk '{print $$2}'); \
+	printf '\n  \033[1;36mYour progress\033[0m\n\n'; \
+	printf '  Last green phase: \033[0;32m%s\033[0m (on %s)\n' "$$N" "$$WHEN"; \
+	NEXT=$$((N+1)); \
+	if [ "$$NEXT" -gt 8 ]; then \
+		printf '  Phase 8 is green — you have finished the build. Try \033[36mmake vault-check FULL=1\033[0m\n\n'; \
+	else \
+		printf '  Next up: phase %s\n\n' "$$NEXT"; \
+		printf '    \033[36mmake docs-phase PHASE=%s\033[0m   # read the phase spec\n' "$$NEXT"; \
+		printf '    \033[36mmake skeleton PHASE=%s\033[0m     # pull the new stubs into src/\n' "$$NEXT"; \
+		printf '    \033[36mmake test PHASE=%s\033[0m         # run that phase'"'"'s tests\n\n' "$$NEXT"; \
+	fi
+
+checkpoint: ## Commit src/ + vault/ into your private learner repo (.learner-git, separate from this repo)
+	@if [ ! -d .learner-git ]; then \
+		$(LEARNER_GIT) init -q; \
+		echo "Initialized your private learner repo at .learner-git/ (independent of the course repo)."; \
+	fi; \
+	FOUND=0; \
+	for p in src vault .akanga-progress PEEKS.md; do \
+		if [ -e "$$p" ]; then $(LEARNER_GIT) add -f "$$p"; FOUND=1; fi; \
+	done; \
+	if [ "$$FOUND" -eq 0 ]; then \
+		echo "Nothing to checkpoint — no src/ or vault/ yet. Run make skeleton PHASE=0 first."; \
+		exit 0; \
+	fi; \
+	if $(LEARNER_GIT) diff --cached --quiet 2>/dev/null; then \
+		echo "No changes since your last checkpoint."; \
+	else \
+		$(LEARNER_GIT) commit -q -m "checkpoint: $$(date +%Y-%m-%dT%H:%M)"; \
+		printf '\033[0;32mCheckpoint committed.\033[0m History: \033[36mgit --git-dir=.learner-git log --oneline\033[0m\n'; \
+	fi
+
+peek: ## Look at one solution file after an honest attempt (PHASE=2 FILE=akanga_core/parser.py) — logged in PEEKS.md
+	@PHASE_PAD="$(PHASE_PAD)"; \
+	if [ -z "$(FILE)" ]; then \
+		echo "Usage: make peek PHASE=2 FILE=akanga_core/parser.py"; exit 2; \
+	fi; \
+	if [ ! -s .akanga-progress ]; then \
+		echo "Attempt first."; \
+		echo "No test runs are recorded yet — the failing test output is designed to teach,"; \
+		printf 'so give it an honest try: \033[36mmake test PHASE=%s\033[0m\n' "$(PHASE)"; \
+		echo "Peeking unlocks after your first recorded attempt."; \
 		exit 1; \
 	fi; \
-	$(PYTHON) scripts/sync_forward.py "$(FILE)" $(FROM) $(if $(APPLY),--apply,)
+	REL="$(FILE)"; REL="$${REL#src/}"; \
+	SOL="solutions/phase_$${PHASE_PAD}/src/$$REL"; \
+	if [ ! -f "$$SOL" ]; then \
+		echo "error: no solution file at $$SOL"; exit 2; \
+	fi; \
+	echo "$$(date +%Y-%m-%d) peeked phase_$${PHASE_PAD} $$REL" >> PEEKS.md; \
+	printf '\n\033[1;33m── %s ──\033[0m\n' "$$SOL"; \
+	printf '\033[2mLogged in PEEKS.md. Afterwards: diff this against your version and write one vault note on a difference you found.\033[0m\n\n'; \
+	cat "$$SOL"
 
 # =============================================================================
 # GIT — facilitator workflow

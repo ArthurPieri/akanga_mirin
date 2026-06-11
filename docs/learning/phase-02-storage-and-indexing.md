@@ -408,6 +408,13 @@ Plus 7 vault nodes with typed edges.
 
 ## Reflect
 
+> **Break it on purpose:** Delete the `threading.Lock` from your `Database`.
+> Predict which test fails. Run the suite. **None do.** Explain why — what would
+> a test have to *do* to catch a missing lock? Then construct the concrete
+> two-thread scenario (two specific threads, two specific operations) where the
+> missing Lock corrupts data even with WAL on, and write that limit of the test
+> suite into your `Thread Safety` vault node. Restore the Lock.
+
 > **Solo:** The content hash skip means `upsert_node` is effectively idempotent for unchanged nodes. But the FTS5 virtual table must stay in sync with the `nodes` table. If you skip the upsert on hash match, when does FTS5 get updated? Is there a scenario where a hash match causes FTS5 to fall out of sync with the nodes table, and how would you detect it?
 
 > **Group:** WAL mode and `threading.Lock` both address concurrency — but at different layers. Map out the two layers: what does WAL prevent, and what does `Lock` prevent that WAL does not? Can you construct a concrete scenario (with two specific threads doing specific operations) where WAL alone is insufficient and `Lock` is the only thing preventing corruption?

@@ -15,15 +15,27 @@ Concurrency model, in two layers:
 
 One connection is shared across threads (`check_same_thread=False`);
 the lock guarantees only one thread touches it at a time.
+
+Idempotence: the edges table carries `UNIQUE(source_id, target_id,
+relation)` and `upsert_edge` uses `INSERT OR IGNORE`, so re-deriving the
+same wikilink on every re-scan converges to ONE row instead of appending
+duplicates (the append-only index grew linearly with every scan before
+this constraint existed). NOTE: the schema runs under `CREATE TABLE IF
+NOT EXISTS`, so a `.db` file created before the constraint never gains
+it retroactively — delete the file and re-scan. The DB being expendable
+IS the migration path.
 """
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 import types
 from typing import Any
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Schema reference (do not modify)
@@ -44,8 +56,11 @@ CREATE TABLE IF NOT EXISTS edges (
     target_id TEXT,
     relation TEXT,
     relation_id TEXT,
+    UNIQUE (source_id, target_id, relation),
     FOREIGN KEY (source_id) REFERENCES nodes(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_id);
+CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
     title,
     tags,
@@ -101,8 +116,16 @@ class GraphDatabase:
             self.conn.executescript(DB_SCHEMA)
 
     def close(self) -> None:
-        """Close the underlying SQLite connection."""
-        self.conn.close()
+        """Close the underlying SQLite connection — under the lock.
+
+        Every write path serializes behind `self._lock`; taking the same
+        lock here means shutdown WAITS for an in-flight operation instead
+        of yanking the connection out from under it (which would surface
+        as `sqlite3.ProgrammingError: Cannot operate on a closed database`
+        on the other thread).
+        """
+        with self._lock:
+            self.conn.close()
 
     def __enter__(self) -> GraphDatabase:
         return self
@@ -125,6 +148,20 @@ class GraphDatabase:
         title/tags values (an external-content table cannot know which
         tokens to remove otherwise), and INSERT OR REPLACE assigns a NEW
         rowid, so the fresh tokens are inserted against the new rowid.
+
+        Two same-id / same-path guards:
+
+        - Same id, DIFFERENT path: logged loudly. Either the file moved,
+          or a sync-conflict copy (Dropbox "conflicted copy") carries a
+          duplicated id. The DB cannot see the disk, so the disk-aware
+          policy (first-indexed file wins while both exist) lives in the
+          indexer; here the upsert proceeds and the warning is the audit
+          trail.
+        - Same path, DIFFERENT id: `INSERT OR REPLACE` would silently
+          delete the displaced row to satisfy `UNIQUE(path)`, orphaning
+          its FTS tokens (ghost search matches) and stranding its edges.
+          The displaced node is removed through the front door first —
+          FTS tokens and edges included.
         """
         def _field(name: str) -> Any:
             return node[name] if isinstance(node, dict) else getattr(node, name)
@@ -135,8 +172,30 @@ class GraphDatabase:
 
         with self._lock, self.conn:
             old = self.conn.execute(
-                "SELECT rowid, title, tags FROM nodes WHERE id = ?", (values["id"],)
+                "SELECT rowid, path, title, tags FROM nodes WHERE id = ?", (values["id"],)
             ).fetchone()
+            if old is not None and old["path"] != values["path"]:
+                logger.warning(
+                    "Node %s path changed: %r -> %r (file move — or a sync-conflict "
+                    "copy carrying a duplicated id; see the indexer's duplicate-id "
+                    "policy)",
+                    values["id"],
+                    old["path"],
+                    values["path"],
+                )
+            displaced = self.conn.execute(
+                "SELECT rowid, id, title, tags FROM nodes WHERE path = ? AND id != ?",
+                (values["path"], values["id"]),
+            ).fetchone()
+            if displaced is not None:
+                self.conn.execute(
+                    "INSERT INTO nodes_fts(nodes_fts, rowid, title, tags) "
+                    "VALUES('delete', ?, ?, ?)",
+                    (displaced["rowid"], displaced["title"], displaced["tags"]),
+                )
+                self.conn.execute("DELETE FROM nodes WHERE id = ?", (displaced["id"],))
+                self.conn.execute("DELETE FROM edges WHERE source_id = ?", (displaced["id"],))
+                self.conn.execute("DELETE FROM edges WHERE target_id = ?", (displaced["id"],))
             self.conn.execute(
                 "INSERT OR REPLACE INTO nodes (id, path, title, type, tags, content_hash) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
@@ -190,6 +249,21 @@ class GraphDatabase:
             ).fetchone()
         return None if row is None else _row_to_node(row)
 
+    def get_node_by_path(self, path: str) -> Any | None:
+        """Fetch one node by its stored path; return None when missing.
+
+        The indexer's idempotence fast-path: hash the file, look the row
+        up by path, and skip parsing entirely when the stored
+        `content_hash` matches. The lookup must be by path (UNIQUE) —
+        looking up by id would require parsing the frontmatter first,
+        which is exactly the cost the fast-path avoids.
+        """
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT * FROM nodes WHERE path = ?", (path,)
+            ).fetchone()
+        return None if row is None else _row_to_node(row)
+
     def list_nodes(self, limit: int = 100, offset: int = 0) -> list[Any]:
         """Return a paginated list of all nodes (insertion-rowid order)."""
         with self._lock:
@@ -236,15 +310,78 @@ class GraphDatabase:
         relation: str | None = None,
         relation_id: str | None = None,
     ) -> str:
-        """Insert a new edge row and return its generated UUID."""
+        """Insert an edge unless it already exists; return the edge's UUID.
+
+        `UNIQUE(source_id, target_id, relation)` + `INSERT OR IGNORE`
+        makes this honestly idempotent: re-deriving the same wikilink on
+        every re-scan converges to ONE row instead of appending a fresh
+        duplicate per scan. When the edge already exists, the EXISTING
+        row's id is returned, so callers (e.g. the Phase 6 create-edge
+        route) always get a usable id either way.
+
+        `relation` / `relation_id` are normalised to `""`: SQL treats
+        NULLs as distinct under UNIQUE, which would silently defeat the
+        dedupe for untyped edges. First writer wins for `relation_id` —
+        a duplicate insert never overwrites the stored registry id.
+        """
+        relation = relation or ""
+        relation_id = relation_id or ""
         edge_id = str(uuid4())
         with self._lock, self.conn:
-            self.conn.execute(
-                "INSERT INTO edges (id, source_id, target_id, relation, relation_id) "
+            cursor = self.conn.execute(
+                "INSERT OR IGNORE INTO edges (id, source_id, target_id, relation, relation_id) "
                 "VALUES (?, ?, ?, ?, ?)",
                 (edge_id, source_id, target_id, relation, relation_id),
             )
+            if cursor.rowcount == 0:  # ignored — the edge already exists
+                row = self.conn.execute(
+                    "SELECT id FROM edges "
+                    "WHERE source_id = ? AND target_id IS ? AND relation = ?",
+                    (source_id, target_id, relation),
+                ).fetchone()
+                if row is not None:
+                    return row["id"]
         return edge_id
+
+    def delete_edge(self, edge_id: str) -> bool:
+        """Delete one edge by UUID; return True when a row was removed.
+
+        Exists so the API layer never reaches into `db.conn` with
+        hand-written SQL (exemplar honesty): a route handler calls this
+        and maps False to a 404.
+        """
+        with self._lock, self.conn:
+            cursor = self.conn.execute("DELETE FROM edges WHERE id = ?", (edge_id,))
+        return cursor.rowcount > 0
+
+    def delete_edges_from(self, node_id: str) -> int:
+        """Delete every OUTGOING edge of `node_id`; return how many died.
+
+        The indexer's delete-then-rederive step: a changed file's stale
+        wikilinks must not survive in the DB, so its outgoing edges are
+        wiped and rebuilt from the current body. Incoming edges belong to
+        OTHER files and are never touched here.
+        """
+        with self._lock, self.conn:
+            cursor = self.conn.execute(
+                "DELETE FROM edges WHERE source_id = ?", (node_id,)
+            )
+        return cursor.rowcount
+
+    def get_edges_touching(self, node_id: str) -> list[dict[str, Any]]:
+        """Raw edge rows where `node_id` is source OR target, as dicts.
+
+        Returns plain dicts (JSON-ready) because the consumer is the API
+        layer's `/nodes/{id}/edges` route, which previously hand-wrote
+        this exact SQL against `db.conn` — the query belongs here, behind
+        the lock, not in a route handler.
+        """
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM edges WHERE source_id = ? OR target_id = ?",
+                (node_id, node_id),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def get_neighbors(self, node_id: str) -> list[Any]:
         """Return the nodes that `node_id` has outgoing edges pointing TO."""
