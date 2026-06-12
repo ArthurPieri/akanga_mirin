@@ -25,7 +25,7 @@ trees; only the docs are split.
 |---|---|
 | "What am I supposed to build?" / requirements, exercises | `docs/learning/phase-$ARGUMENTS-*.md` |
 | Background concepts (SQLite, asyncio, HTTP, YAML, git, …) | `docs/foundations/<topic>.md` — full list in `docs/index.md` |
-| The 71 relation types | `docs/foundations/relation-vocabulary.md` |
+| The 72 relation types | `docs/foundations/relation-vocabulary.md` |
 | How the whole system fits together | `docs/architecture-overview.md`, then `docs/architecture-detailed.md` |
 | "Why is my test failing?" | The test file in `tests/phase_NN/` + the learner's code in `./src` |
 | Stub structure, what goes in which file | `skeletons/phase_NN/` — WHAT/WHY/HOW docstrings |

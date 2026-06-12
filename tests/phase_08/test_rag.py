@@ -212,7 +212,8 @@ class TestBuildContextCaps:
                 "id": nid, "title": f"Sat{i}", "type": "note", "tags": [],
                 "path": str(nfile), "content": "", "content_hash": f"h_{i}",
             })
-            # upsert_edge is positional: (source_id, target_id, relation, relation_id)
+            # Real signature: upsert_edge(source_id, target_id=None,
+            # relation=None, relation_id=None) — keyword calls equally valid.
             db.upsert_edge(hub_id, nid, "links_to", "")
 
         hub_node = db.get_node(hub_id)

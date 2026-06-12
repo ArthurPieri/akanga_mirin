@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._helpers import load_attr
+
 
 
 @pytest.fixture()
@@ -27,17 +29,21 @@ def tmp_git_repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def _load_git_manager():
+    """Import GitManager, trying flat layout then package layout."""
+    return load_attr(
+        ("gitmgr", "GitManager"),
+        ("akanga_core.gitmgr", "GitManager"),
+        hint="GitManager (gitmgr.py or akanga_core/gitmgr.py)",
+    )
+
+
 @pytest.fixture()
 def git_manager(tmp_git_repo: Path):
     """A GitManager instance pointing at a freshly initialized git repo.
 
-    Imported inside the fixture so the AKANGA_SRC sys.path insertion runs
+    Loaded inside the fixture so the AKANGA_SRC sys.path insertion runs
     first (guaranteed by the session-scoped _akanga_src_guard fixture in the
     root conftest).
     """
-    try:
-        from gitmgr import GitManager
-    except ImportError:
-        from akanga_core.gitmgr import GitManager
-
-    return GitManager(str(tmp_git_repo))
+    return _load_git_manager()(str(tmp_git_repo))

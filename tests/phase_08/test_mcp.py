@@ -30,6 +30,7 @@ from textwrap import dedent
 
 import pytest
 from tests._helpers import load_attr
+from tests.phase_08.conftest import _load_db
 
 
 # ---------------------------------------------------------------------------
@@ -75,22 +76,15 @@ def _bootstrap_db(server_mod, vault: Path, db_path: Path,
     Tries server_mod.init_server(vault, db_path) first; falls back to
     setting server_mod.db directly.
     """
-    # Dual-layout import: flat 'db' first, then 'akanga_core.db' (package layout)
-    try:
-        from db import GraphDatabase  # noqa: PLC0415
-    except ModuleNotFoundError:
-        try:
-            from akanga_core.db import GraphDatabase  # noqa: PLC0415
-        except ModuleNotFoundError:
-            pytest.fail("Cannot import GraphDatabase from 'db' or 'akanga_core.db'")
-
+    GraphDatabase = _load_db()
     db = GraphDatabase(str(db_path))
     for node in nodes:
         fpath = vault / node["fname"]
         fpath.write_text(node["content"], encoding="utf-8")
         db.upsert_node({k: v for k, v in node.items() if k != "fname" and k != "content"})
     for src_id, tgt_id, relation, relation_id in edges:
-        # upsert_edge is positional: (source_id, target_id, relation, relation_id)
+        # Real signature: upsert_edge(source_id, target_id=None, relation=None,
+        # relation_id=None) — keyword calls are equally valid (phase 3 uses them).
         db.upsert_edge(src_id, tgt_id, relation, relation_id)
 
     # Try the official init path first

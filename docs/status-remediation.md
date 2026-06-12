@@ -1,7 +1,7 @@
-# STATUS — Adversarial-Analysis Remediation (V2 + V3 + V4)
+# STATUS — Adversarial-Analysis Remediation (V2 + V3 + V4 + V5)
 
-> **Audience:** contributors / future Claude Code sessions. Updated 2026-06-12 (Rounds 2 and 3 complete — 27/27 findings resolved; Round 4 in progress, see the ROUND 4 section below).
-> Handoff doc for the remediation of `docs/adversarial-analysis-v2.md` (complete), `docs/adversarial-analysis-v3.md` (complete), and `docs/adversarial-analysis-v4.md` (in progress) findings.
+> **Audience:** contributors / future Claude Code sessions. Updated 2026-06-12 (ALL rounds complete — Rounds 2+3: 27/27, Round 4: 14/14, Round 5: 9/9 findings resolved).
+> Handoff doc for the remediation of `docs/adversarial-analysis-v2.md`, `-v3.md`, `-v4.md`, and `-v5.md` findings (all complete).
 > Authoritative finding-by-finding status: the Resolution Log at the end of each doc.
 
 ## Commits
@@ -121,7 +121,7 @@ D11 phase-5: doc keymap canonical; Kitty renderer = stretch goal (`uv sync --ext
 
 ---
 
-# ROUND 4 — Adversarial-Analysis-V4 Remediation (2026-06-12, IN PROGRESS)
+# ROUND 4 — Adversarial-Analysis-V4 Remediation (2026-06-12, COMPLETE — 14/14 findings resolved)
 
 > Findings: `docs/adversarial-analysis-v4.md` — "verify the verifiers": 5 parallel
 > agents attacked the remediation layer itself (tests, tooling, CI, doc patches)
@@ -322,3 +322,29 @@ E10 (3.12 floor) is **CLOSED** — verified, not remediated: 177 tests green on 
 - `check_doc_contracts.py` → warnings only (pre-existing), exit 0
 - `skeleton_check.py skeletons/phase_02/src` → OK
 - Smoke: `env -u AKANGA_SRC pytest tests/phase_02/` → curated message, exit 1
+
+## Round 5 verification audit (2026-06-12, post-close)
+
+Five parallel audit dimensions re-verified the round (V1 test-lane, V2
+scripts/CI, V3 solutions/skeletons, V4 docs truthfulness, V5 fresh gate
+battery + new-defect hunt). All W1–W9 mechanical claims verified TRUE; all
+12 gates green. 11 residual findings surfaced and ALL FIXED same day:
+
+- 3 surviving hand-rolled dual-try loaders (phase_07 conftest fixture,
+  phase_08 conftest rag_context, test_mcp _bootstrap_db) → load_attr/conftest
+- 2 surviving false "positional" comments (test_mcp, test_rag) → corrected
+- 2 hand-enumerated rosters inside ci.yml (status table, transition job) →
+  derived from `make -s print-max-phase`
+- phase-06 doc taught SimpleNamespace + `vars(node)` (crashes on slots
+  NodeRecord) → rewritten to NodeRecord/asdict
+- phase-01b doc referenced renamed `tmp_db` fixture → `sync_queue_conn`
+- this file's own header claimed Round 4 in progress → all rounds complete
+- CLAUDE.md + tutor.md said "71 relation types" vs registry's 72 → 72
+- load_attr silently discarded a broken-but-present earlier candidate when a
+  later candidate succeeded → now emits a stderr warning naming the broken
+  file (probe-verified)
+
+Known-latent (logged, not fixed): NodeRecord(frozen) generates __hash__ but
+`tags: list[str]` makes hashing raise at call time — no current call site
+hashes records; if a `set[NodeRecord]` is ever needed, change tags to
+`tuple[str, ...]` first.

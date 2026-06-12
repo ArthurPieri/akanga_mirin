@@ -142,9 +142,9 @@ versions and runs the suites, opening an issue on failure.
 
 ---
 
-## The 71 relation types
+## The 72 relation types
 
-All 71 built-in relation types live in `docs/foundations/relation-vocabulary.md`.
+All 72 built-in relation types live in `docs/foundations/relation-vocabulary.md`.
 11 categories with prefix codes: EP, HT, SC, CT, AP, DR, CC, EV, PA, SO, TC.
 Phase 1 builds the relation registry. Phase 8's `list_relation_types()` MCP tool exposes it.
 

@@ -91,7 +91,8 @@ jobs:
           echo ""
           echo "Phase | Skeleton | Tests | Solution"
           echo "------|----------|-------|--------"
-          for n in 0 1 2 3 4 5 6 7 8; do
+          # Roster derived from the Makefile single source (adversarial-analysis-v5 #5)
+          for n in $(seq 0 "$(make -s print-max-phase)"); do
             PHASE_PAD=$(printf "%02d" $n)
             SKEL=$([ -d "skeletons/phase_${PHASE_PAD}" ] && echo "yes" || echo "-")
             TEST=$([ -d "tests/phase_${PHASE_PAD}" ] && echo "yes" || echo "-")
@@ -130,7 +131,8 @@ jobs:
       - name: Walk every skeleton transition N-1 → N
         run: |
           FAILED=0
-          for N in 1 2 3 4 5 6 7 8; do
+          # Roster derived from the Makefile single source (adversarial-analysis-v5 #5)
+          for N in $(seq 1 "$(make -s print-max-phase)"); do
             PREV_PAD=$(printf "%02d" $((N - 1)))
             N_PAD=$(printf "%02d" "$N")
             echo ""

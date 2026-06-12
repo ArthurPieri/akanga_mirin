@@ -22,20 +22,13 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from tests._helpers import load_attr
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _load_git_manager():
-    """Import GitManager, trying flat layout then package layout."""
-    return load_attr(
-        ("gitmgr", "GitManager"),
-        ("akanga_core.gitmgr", "GitManager"),
-        hint="GitManager (gitmgr.py or akanga_core/gitmgr.py)",
-    )
+from tests.phase_07.conftest import _load_git_manager  # noqa: E402
 
 
 def _make_initial_commit(repo_path: Path) -> None:

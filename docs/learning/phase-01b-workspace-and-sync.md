@@ -312,7 +312,7 @@ These are the tests, by name:
 
 The contract your functions are tested against — note that `db` is a **raw
 `sqlite3.Connection`**, not a `GraphDatabase` (which doesn't exist until Phase 2).
-The `tmp_db` fixture in `tests/phase_01/conftest.py` pre-creates the table:
+The `sync_queue_conn` fixture in `tests/phase_01/conftest.py` pre-creates the table:
 
 ```python
 # tests/phase_01/conftest.py (excerpt) — what your functions receive as `db`
@@ -332,9 +332,9 @@ conn.commit()
 And the shape of a typical test (illustrative — the real suite is `tests/phase_01/`):
 
 ```python
-def test_enqueue_creates_row(tmp_db):           # tmp_db is a sqlite3.Connection
-    enqueue_title_sync(tmp_db, node_id="node-001", new_title="New Title")
-    rows = tmp_db.execute("SELECT * FROM sync_queue").fetchall()
+def test_enqueue_creates_row(sync_queue_conn):  # an open sqlite3.Connection
+    enqueue_title_sync(sync_queue_conn, node_id="node-001", new_title="New Title")
+    rows = sync_queue_conn.execute("SELECT * FROM sync_queue").fetchall()
     assert len(rows) == 1
 ```
 

@@ -371,9 +371,13 @@ and "the markdown body" all name the same thing — the prose below the YAML
 frontmatter; the docs use the three terms interchangeably.
 
 **Responses are plain dicts**, not Pydantic models: `db.get_node()` returns a
-`SimpleNamespace`, so convert before returning (`vars(node)` or an explicit
-`{"id": ..., "title": ..., "type": ..., "tags": ..., "path": ...}` dict — see the
-skeleton's HOW steps).
+small frozen record object (the reference solution names it `NodeRecord`). It
+is not JSON-serializable and has no `content`/`frontmatter` fields, so build
+the response dict explicitly
+(`{"id": node.id, "title": node.title, "type": node.type, "tags": node.tags,
+"path": str(node.path)}`) or use `dataclasses.asdict(node)`. Do **not** use
+`vars(node)` — slots classes have no `__dict__`, so it raises `TypeError`.
+See the skeleton's record-object note.
 
 **WebSocket connection manager (stretch — untested, see Deliverable):**
 

@@ -189,15 +189,11 @@ def tmp_vault_with_nodes(tmp_path: Path):
 @pytest.fixture()
 def rag_context(tmp_vault_with_nodes):
     """Pre-built RAG context string for the Cognition root node."""
-    GraphDatabase = _load_db()  # noqa: F841 — kept for layout compatibility
-
     ctx = tmp_vault_with_nodes
 
-    # Import build_context — try flat layout then package layout
-    try:
-        from rag import build_context  # noqa: PLC0415
-    except ImportError:
-        from akanga_core.rag import build_context  # noqa: PLC0415
+    build_context = load_attr(
+        ("rag", "build_context"), ("akanga_core.rag", "build_context")
+    )
 
     # Retrieve the root node object from the DB so we can pass it to build_context
     root_node = ctx.db.get_node(ctx.id_cognition)

@@ -13,6 +13,8 @@ delegations to :func:`load_attr`, and the policy decisions live here, once:
   candidate's real error is included in the failure message — a module that
   *exists but is broken* is reported with its actual traceback text instead
   of a misleading "cannot import" (the worst of the pre-consolidation forks).
+  When a LATER candidate succeeds after an earlier broken-but-present one, the
+  broken candidate is reported as a stderr warning rather than discarded.
 - **Guards are explicit**: ``guard=`` rejects same-name impostors (e.g. an
   unrelated ``parser`` package from site-packages) with a clear message.
 - **Search order is the caller's choice** and therefore visible at the call
@@ -29,6 +31,7 @@ safe during collection.
 from __future__ import annotations
 
 import importlib
+import sys
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -55,11 +58,16 @@ def load_attr(
     broken" are distinguishable at a glance.
     """
     errors: list[str] = []
+    masked_broken: list[str] = []
     for module_name, attr_name in candidates:
         try:
             module = importlib.import_module(module_name)
         except ImportError as exc:  # includes ModuleNotFoundError
             errors.append(f"{module_name}: {type(exc).__name__}: {exc}")
+            if not isinstance(exc, ModuleNotFoundError):
+                # The module EXISTS but is broken — if a later candidate
+                # succeeds, silently using it would mask this real defect.
+                masked_broken.append(f"{module_name}: {exc}")
             continue
         target = module if attr_name is None else getattr(module, attr_name, None)
         if target is None:
@@ -71,6 +79,16 @@ def load_attr(
                 f"{guard_desc or 'failed the loader guard (wrong module of the same name?)'}"
             )
             continue
+        if masked_broken:
+            # Succeeding on a later candidate while an earlier one exists but
+            # failed to import deserves a loud note, not silence — the learner
+            # may believe the broken file is the one under test.
+            print(
+                f"\nWARNING: loaded {module_name!r}, but an earlier-candidate "
+                f"module exists and is BROKEN (it was skipped):\n  "
+                + "\n  ".join(masked_broken),
+                file=sys.stderr,
+            )
         return target
 
     wanted = hint or (candidates[0][1] or candidates[0][0])
