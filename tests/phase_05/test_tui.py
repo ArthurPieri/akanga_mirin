@@ -18,6 +18,7 @@ is not installed.
 from __future__ import annotations
 
 import pytest
+from tests._helpers import load_attr
 
 
 # ---------------------------------------------------------------------------
@@ -36,28 +37,12 @@ def _load_tui_class():
     """
     textual = pytest.importorskip("textual", reason="textual not installed — skipping TUI tests")  # noqa: F841
 
-    candidates = [
+    return load_attr(
         ("akanga_tui.app", "AkangaTUI"),
         ("akanga_tui.app", "AkangaApp"),
         ("tui", "AkangaTUI"),
         ("tui", "AkangaApp"),
-    ]
-    for module_name, class_name in candidates:
-        try:
-            import importlib
-            mod = importlib.import_module(module_name)
-            cls = getattr(mod, class_name, None)
-            if cls is not None:
-                return cls
-        except ImportError:
-            continue
-
-    pytest.fail(
-        "Could not import a TUI App class from AKANGA_SRC.\n"
-        "Expected one of:\n"
-        "  akanga_tui/app.py  →  class AkangaTUI(App) or AkangaApp(App)\n"
-        "  tui.py             →  class AkangaTUI(App) or AkangaApp(App)\n"
-        "Make sure your file exists and has no syntax errors."
+        hint="a TUI App class (akanga_tui/app.py or tui.py, class AkangaTUI or AkangaApp)",
     )
 
 

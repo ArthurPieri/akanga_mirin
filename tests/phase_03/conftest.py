@@ -3,6 +3,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from tests._helpers import load_attr
 
 
 
@@ -12,28 +13,12 @@ import pytest
 
 def _load_db():
     """Import GraphDatabase from 'db' or 'akanga_core.db'."""
-    try:
-        from db import GraphDatabase  # noqa: PLC0415
-        return GraphDatabase
-    except ModuleNotFoundError:
-        try:
-            from akanga_core.db import GraphDatabase  # noqa: PLC0415
-            return GraphDatabase
-        except ModuleNotFoundError:
-            pytest.fail("Cannot import GraphDatabase from 'db' or 'akanga_core.db'")
+    return load_attr(("db", "GraphDatabase"), ("akanga_core.db", "GraphDatabase"))
 
 
 def _load_graph():
     """Import the graph module from 'graph' or 'akanga_core.graph'."""
-    try:
-        import graph as m  # noqa: PLC0415
-        return m
-    except ModuleNotFoundError:
-        try:
-            from akanga_core import graph as m  # noqa: PLC0415
-            return m
-        except ModuleNotFoundError:
-            pytest.fail("Cannot import 'graph' or 'akanga_core.graph'")
+    return load_attr(("graph", None), ("akanga_core.graph", None), hint="the graph module")
 
 
 def _make_node_id() -> str:

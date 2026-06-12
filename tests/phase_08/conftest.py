@@ -4,6 +4,7 @@ from pathlib import Path
 from textwrap import dedent
 
 import pytest
+from tests._helpers import load_attr
 
 
 
@@ -13,15 +14,7 @@ import pytest
 
 def _load_db():
     """Import GraphDatabase from 'db' or 'akanga_core.db'."""
-    try:
-        from db import GraphDatabase  # noqa: PLC0415
-        return GraphDatabase
-    except ModuleNotFoundError:
-        try:
-            from akanga_core.db import GraphDatabase  # noqa: PLC0415
-            return GraphDatabase
-        except ModuleNotFoundError:
-            pytest.fail("Cannot import GraphDatabase from 'db' or 'akanga_core.db'")
+    return load_attr(("db", "GraphDatabase"), ("akanga_core.db", "GraphDatabase"))
 
 
 # Stable UUIDs used across all phase-08 fixtures

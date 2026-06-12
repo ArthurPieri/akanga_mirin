@@ -52,6 +52,12 @@ import sys
 import tomllib
 from pathlib import Path
 
+# Skeleton reference-marker convention — shared definition in _common (a
+# sibling module, resolvable because scripts run as `python scripts/x.py`)
+# so the drift gate and the skeleton merger can never disagree about what a
+# marker is (adversarial-analysis-v5 #4).
+from _common import is_marker_file
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MANIFEST_PATH = REPO_ROOT / "scripts" / "sync_manifest.toml"
 MANIFEST_LABEL = "scripts/sync_manifest.toml"
@@ -61,21 +67,9 @@ EXIT_OK = 0
 EXIT_DRIFT = 1
 EXIT_USAGE = 2
 
-# Later-phase skeletons ship 3-line placeholder files that intentionally do NOT
-# contain an implementation. Overwriting them with a prior phase's full file —
-# or treating them as drift to "fix" — would defeat their purpose.
-MARKER_SNIPPETS = (
-    "intentionally left as a reference marker",
-    "Copy your Phase",
-)
-
 # Noise that the completeness walk must never count as a "copy".
 COMPLETENESS_SKIP_PARTS = {"__pycache__", ".DS_Store"}
 COMPLETENESS_SKIP_SUFFIXES = {".pyc", ".pyo"}
-
-
-def is_marker_file(content: str) -> bool:
-    return any(snippet in content for snippet in MARKER_SNIPPETS)
 
 
 def usage_error(message: str) -> None:

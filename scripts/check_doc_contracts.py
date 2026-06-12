@@ -456,6 +456,11 @@ def parse_skeleton_phase(phase_dir: Path) -> dict[str, list[SkeletonSignature]]:
             tree = ast.parse(py.read_text(encoding="utf-8"))
         except SyntaxError:
             continue  # malformed skeleton is skeleton_check.py's problem
+        # Deliberately NOT _common.is_marker_file: this lint needs "carries no
+        # code at all", which also covers empty __init__.py — a superset of
+        # the prose-marker convention. tests/test_scripts_markers.py pins that
+        # every prose marker is AST-empty, so the two heuristics agree on
+        # every real marker file (adversarial-analysis-v5 #4).
         if not tree.body:
             continue  # comment-only reference-marker file ("copy phase N here")
         for node in ast.walk(tree):

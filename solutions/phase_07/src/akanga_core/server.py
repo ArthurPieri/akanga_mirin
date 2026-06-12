@@ -333,15 +333,14 @@ def delete_node(node_id: str) -> None:
 
 @router.get("/api/v1/nodes/{node_id}/edges")
 def get_node_edges(node_id: str) -> list[dict[str, Any]]:
-    """All raw edge rows touching this node (as source OR target)."""
+    """All raw edge rows touching this node (as source OR target).
+
+    The SQL lives in `GraphDatabase.get_edges_touching`, behind the DB's
+    lock — route handlers never reach into `db.conn` with hand-written
+    queries (exemplar honesty; adversarial-analysis-v5 #7).
+    """
     _existing_node_or_404(node_id)
-    db = get_db()
-    with db._lock:
-        rows = db.conn.execute(
-            "SELECT * FROM edges WHERE source_id = ? OR target_id = ?",
-            (node_id, node_id),
-        ).fetchall()
-    return [dict(row) for row in rows]
+    return get_db().get_edges_touching(node_id)
 
 
 @router.get("/api/v1/nodes/{node_id}/neighbors")
@@ -391,15 +390,14 @@ def create_edge(body: CreateEdgeRequest) -> dict[str, Any]:
 
 @router.delete("/api/v1/edges/{edge_id}", status_code=204)
 def delete_edge(edge_id: str) -> None:
-    """Delete a single edge row by UUID; 404 when it does not exist."""
-    db = get_db()
-    with db._lock, db.conn:
-        row = db.conn.execute(
-            "SELECT id FROM edges WHERE id = ?", (edge_id,)
-        ).fetchone()
-        if row is None:
-            raise HTTPException(status_code=404, detail="Edge not found")
-        db.conn.execute("DELETE FROM edges WHERE id = ?", (edge_id,))
+    """Delete a single edge row by UUID; 404 when it does not exist.
+
+    `GraphDatabase.delete_edge` owns the SQL and reports via its return
+    value whether a row died — the route only maps False to a 404
+    (exemplar honesty; adversarial-analysis-v5 #7).
+    """
+    if not get_db().delete_edge(edge_id):
+        raise HTTPException(status_code=404, detail="Edge not found")
 
 
 # ── Templates ──────────────────────────────────────────────────────────────────

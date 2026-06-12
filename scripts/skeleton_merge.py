@@ -38,11 +38,10 @@ import pathlib
 import re
 import sys
 
-# Same marker convention as sync_forward.py — placeholders carry no stubs.
-MARKER_SNIPPETS = (
-    "intentionally left as a reference marker",
-    "Copy your Phase",
-)
+# Marker convention shared with sync_forward.py via _common (a sibling
+# module) — placeholders carry no stubs, and the two tools must never
+# disagree about what a marker is (adversarial-analysis-v5 #4).
+from _common import is_marker_file
 
 RED = "\033[31m"
 YELLOW = "\033[33m"
@@ -53,10 +52,6 @@ def _color(text: str, code: str) -> str:
     if sys.stdout.isatty():
         return f"{code}{text}{RESET}"
     return text
-
-
-def is_marker_file(content: str) -> bool:
-    return any(snippet in content for snippet in MARKER_SNIPPETS)
 
 
 # ---------------------------------------------------------------------------

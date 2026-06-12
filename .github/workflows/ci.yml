@@ -48,6 +48,12 @@ jobs:
       - name: Doc-contract lint (doc ↔ skeleton signature drift)
         run: uv run python scripts/check_doc_contracts.py
 
+      # Welds the marker-file prose to scripts/_common.MARKER_SNIPPETS and to
+      # check_doc_contracts' AST-empty heuristic (adversarial-analysis-v5 #4).
+      # Needs no AKANGA_SRC — it imports no learner code.
+      - name: Marker-convention pinning test
+        run: uv run pytest tests/test_scripts_markers.py -q
+
       - name: No gitignored files may be tracked
         run: |
           BAD=$(git ls-files -i -c --exclude-standard)

@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 import pytest
+from tests._helpers import load_attr
 
 
 
@@ -27,67 +28,27 @@ def _wait_until(predicate, timeout: float = 2.0) -> bool:
 
 def _load_eventbus():
     """Import EventBus from 'eventbus' or 'akanga_core.eventbus'."""
-    try:
-        from eventbus import EventBus  # noqa: PLC0415
-        return EventBus
-    except ModuleNotFoundError:
-        try:
-            from akanga_core.eventbus import EventBus  # noqa: PLC0415
-            return EventBus
-        except ModuleNotFoundError:
-            pytest.fail("Cannot import EventBus from 'eventbus' or 'akanga_core.eventbus'")
+    return load_attr(("eventbus", "EventBus"), ("akanga_core.eventbus", "EventBus"))
 
 
 def _load_watcher():
     """Import VaultWatcher from 'watcher' or 'akanga_core.watcher'."""
-    try:
-        from watcher import VaultWatcher  # noqa: PLC0415
-        return VaultWatcher
-    except ModuleNotFoundError:
-        try:
-            from akanga_core.watcher import VaultWatcher  # noqa: PLC0415
-            return VaultWatcher
-        except ModuleNotFoundError:
-            pytest.fail("Cannot import VaultWatcher from 'watcher' or 'akanga_core.watcher'")
+    return load_attr(("watcher", "VaultWatcher"), ("akanga_core.watcher", "VaultWatcher"))
 
 
 def _load_sync_worker():
     """Import SyncWorker from 'sync_worker' or 'akanga_core.sync_worker'."""
-    try:
-        from sync_worker import SyncWorker  # noqa: PLC0415
-        return SyncWorker
-    except ModuleNotFoundError:
-        try:
-            from akanga_core.sync_worker import SyncWorker  # noqa: PLC0415
-            return SyncWorker
-        except ModuleNotFoundError:
-            pytest.fail("Cannot import SyncWorker from 'sync_worker' or 'akanga_core.sync_worker'")
+    return load_attr(("sync_worker", "SyncWorker"), ("akanga_core.sync_worker", "SyncWorker"))
 
 
 def _load_db():
     """Import GraphDatabase from 'db' or 'akanga_core.db' (built in Phase 02)."""
-    try:
-        from db import GraphDatabase  # noqa: PLC0415
-        return GraphDatabase
-    except ModuleNotFoundError:
-        try:
-            from akanga_core.db import GraphDatabase  # noqa: PLC0415
-            return GraphDatabase
-        except ModuleNotFoundError:
-            pytest.fail("Cannot import GraphDatabase from 'db' or 'akanga_core.db'")
+    return load_attr(("db", "GraphDatabase"), ("akanga_core.db", "GraphDatabase"))
 
 
 def _load_sync_queue():
     """Import the sync_queue module from 'sync_queue' or 'akanga_core.sync_queue'."""
-    try:
-        import sync_queue as m  # noqa: PLC0415
-        return m
-    except ModuleNotFoundError:
-        try:
-            from akanga_core import sync_queue as m  # noqa: PLC0415
-            return m
-        except ModuleNotFoundError:
-            pytest.fail("Cannot import 'sync_queue' or 'akanga_core.sync_queue'")
+    return load_attr(("sync_queue", None), ("akanga_core.sync_queue", None), hint="the sync_queue module")
 
 
 @pytest.fixture()

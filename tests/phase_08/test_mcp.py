@@ -29,6 +29,7 @@ from pathlib import Path
 from textwrap import dedent
 
 import pytest
+from tests._helpers import load_attr
 
 
 # ---------------------------------------------------------------------------
@@ -38,27 +39,15 @@ import pytest
 def _load_mcp_server():
     """Import the learner's MCP server module.
 
-    Tries akanga_mcp.server first (package layout), then mcp_server (flat).
-    Returns the module object.
+    Deliberately PACKAGE-FIRST — the opposite of every other loader in the
+    suite: Phase 8 recommends shipping the server as the akanga_mcp/ package,
+    so the recommended layout wins when both exist; flat mcp_server.py is the
+    fallback (adversarial-analysis-v5 #1 made this divergence explicit).
     """
-    try:
-        import akanga_mcp.server as _s  # noqa: PLC0415
-        return _s
-    except ImportError:
-        pass
-
-    try:
-        import mcp_server as _s  # noqa: PLC0415
-        return _s
-    except ImportError:
-        pass
-
-    pytest.fail(
-        "Could not import the MCP server module from AKANGA_SRC.\n"
-        "Expected one of:\n"
-        "  $AKANGA_SRC/akanga_mcp/server.py\n"
-        "  $AKANGA_SRC/mcp_server.py\n"
-        "Make sure your file exists and has no syntax errors."
+    return load_attr(
+        ("akanga_mcp.server", None),
+        ("mcp_server", None),
+        hint="the MCP server module (akanga_mcp/server.py or mcp_server.py)",
     )
 
 

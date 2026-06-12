@@ -22,6 +22,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from tests._helpers import load_attr
 
 
 # ---------------------------------------------------------------------------
@@ -30,24 +31,10 @@ import pytest
 
 def _load_git_manager():
     """Import GitManager, trying flat layout then package layout."""
-    try:
-        from gitmgr import GitManager  # noqa: PLC0415
-        return GitManager
-    except ImportError:
-        pass
-
-    try:
-        from akanga_core.gitmgr import GitManager  # noqa: PLC0415
-        return GitManager
-    except ImportError:
-        pass
-
-    pytest.fail(
-        "Could not import GitManager from AKANGA_SRC.\n"
-        "Expected one of:\n"
-        "  $AKANGA_SRC/gitmgr.py\n"
-        "  $AKANGA_SRC/akanga_core/gitmgr.py\n"
-        "Make sure your file exists and has no syntax errors."
+    return load_attr(
+        ("gitmgr", "GitManager"),
+        ("akanga_core.gitmgr", "GitManager"),
+        hint="GitManager (gitmgr.py or akanga_core/gitmgr.py)",
     )
 
 

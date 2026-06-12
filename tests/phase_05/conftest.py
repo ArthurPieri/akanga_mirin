@@ -6,6 +6,7 @@ from pathlib import Path
 from textwrap import dedent
 
 import pytest
+from tests._helpers import load_attr
 
 
 
@@ -15,28 +16,19 @@ import pytest
 
 def _load_db():
     """Import GraphDatabase from 'db' or 'akanga_core.db'."""
-    try:
-        from db import GraphDatabase  # noqa: PLC0415
-        return GraphDatabase
-    except ModuleNotFoundError:
-        try:
-            from akanga_core.db import GraphDatabase  # noqa: PLC0415
-            return GraphDatabase
-        except ModuleNotFoundError:
-            pytest.fail("Cannot import GraphDatabase from 'db' or 'akanga_core.db'")
+    return load_attr(("db", "GraphDatabase"), ("akanga_core.db", "GraphDatabase"))
 
 
 def _load_indexer():
-    """Import full_scan_and_index from 'indexer' or 'akanga_core.indexer'."""
-    try:
-        from indexer import full_scan_and_index  # noqa: PLC0415
-        return full_scan_and_index
-    except (ModuleNotFoundError, ImportError):
-        try:
-            from akanga_core.indexer import full_scan_and_index  # noqa: PLC0415
-            return full_scan_and_index
-        except (ModuleNotFoundError, ImportError):
-            pytest.fail("Cannot import full_scan_and_index from 'indexer' or 'akanga_core.indexer'")
+    """Import full_scan_and_index from 'indexer' or 'akanga_core.indexer'.
+
+    NOTE: unlike phase_02's _load_indexer (which returns the MODULE), this
+    returns the FUNCTION — phase-5 call sites take the callable directly.
+    """
+    return load_attr(
+        ("indexer", "full_scan_and_index"),
+        ("akanga_core.indexer", "full_scan_and_index"),
+    )
 
 
 # ---------------------------------------------------------------------------

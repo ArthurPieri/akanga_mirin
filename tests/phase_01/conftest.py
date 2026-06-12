@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from tests.conftest import MINIMAL_VAULT_CONFIG
+from tests._helpers import load_attr
 
 
 @pytest.fixture()
@@ -18,20 +19,8 @@ def tmp_vault(tmp_path: Path) -> Path:
 
 
 def _load_sync_queue():
-    """Import the learner's sync_queue module.
-
-    Tries ``sync_queue`` first (flat layout), then ``akanga_core.sync_queue``
-    (package layout).  Fails with a clear message if neither is found.
-    """
-    try:
-        import sync_queue as m  # noqa: PLC0415
-        return m
-    except ModuleNotFoundError:
-        try:
-            from akanga_core import sync_queue as m  # noqa: PLC0415
-            return m
-        except ModuleNotFoundError:
-            pytest.fail("Cannot import sync_queue module.")
+    """Import the learner's sync_queue module (flat, then package layout)."""
+    return load_attr(("sync_queue", None), ("akanga_core.sync_queue", None), hint="the sync_queue module")
 
 
 @pytest.fixture()

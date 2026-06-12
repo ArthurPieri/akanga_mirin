@@ -6,6 +6,7 @@ from pathlib import Path
 from textwrap import dedent
 
 import pytest
+from tests._helpers import load_attr
 
 
 
@@ -68,24 +69,8 @@ def test_client(tmp_vault: Path, tmp_path: Path):
 
 def _load_create_app():
     """Import the learner's ``create_app`` factory from server module."""
-    candidates = [
+    return load_attr(
         ("server", "create_app"),
         ("akanga_core.server", "create_app"),
-    ]
-    for module_name, fn_name in candidates:
-        try:
-            import importlib
-            mod = importlib.import_module(module_name)
-            fn = getattr(mod, fn_name, None)
-            if fn is not None:
-                return fn
-        except ImportError:
-            continue
-
-    pytest.fail(
-        "Could not import a 'create_app' factory from AKANGA_SRC.\n"
-        "Expected one of:\n"
-        "  $AKANGA_SRC/server.py          →  def create_app(...) -> FastAPI\n"
-        "  $AKANGA_SRC/akanga_core/server.py  →  def create_app(...) -> FastAPI\n"
-        "Make sure your file exists and has no syntax errors."
+        hint="a 'create_app' FastAPI factory (server.py or akanga_core/server.py)",
     )

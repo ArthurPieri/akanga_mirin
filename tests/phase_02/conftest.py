@@ -5,6 +5,7 @@ import pytest
 import yaml
 
 from tests.conftest import MINIMAL_VAULT_CONFIG
+from tests._helpers import load_attr
 
 
 # ---------------------------------------------------------------------------
@@ -13,57 +14,28 @@ from tests.conftest import MINIMAL_VAULT_CONFIG
 
 def _load_db():
     """Import GraphDatabase from 'db' or 'akanga_core.db'."""
-    try:
-        from db import GraphDatabase  # noqa: PLC0415
-        return GraphDatabase
-    except ModuleNotFoundError:
-        try:
-            from akanga_core.db import GraphDatabase  # noqa: PLC0415
-            return GraphDatabase
-        except ModuleNotFoundError:
-            pytest.fail("Cannot import GraphDatabase from 'db' or 'akanga_core.db'")
+    return load_attr(("db", "GraphDatabase"), ("akanga_core.db", "GraphDatabase"))
 
 
 def _load_indexer():
     """Import the indexer module from 'indexer' or 'akanga_core.indexer'."""
-    try:
-        import indexer as m  # noqa: PLC0415
-        return m
-    except ModuleNotFoundError:
-        try:
-            from akanga_core import indexer as m  # noqa: PLC0415
-            return m
-        except ModuleNotFoundError:
-            pytest.fail("Cannot import 'indexer' or 'akanga_core.indexer'")
+    return load_attr(("indexer", None), ("akanga_core.indexer", None), hint="the indexer module")
 
 
 def _load_links():
     """Import the links module from 'links' or 'akanga_core.links'."""
-    try:
-        import links as m  # noqa: PLC0415
-        return m
-    except ModuleNotFoundError:
-        try:
-            from akanga_core import links as m  # noqa: PLC0415
-            return m
-        except ModuleNotFoundError:
-            pytest.fail("Cannot import 'links' or 'akanga_core.links'")
+    return load_attr(("links", None), ("akanga_core.links", None), hint="the links module")
 
 
 def _load_parser():
     """Import the parser module from 'parser' or 'akanga_core.parser'."""
-    try:
-        import parser as m  # noqa: PLC0415
-        # Guard: built-in 'parser' module has no Node class
-        if not hasattr(m, "Node"):
-            raise ModuleNotFoundError
-        return m
-    except (ModuleNotFoundError, AttributeError):
-        try:
-            from akanga_core import parser as m  # noqa: PLC0415
-            return m
-        except ModuleNotFoundError:
-            pytest.fail("Cannot import 'parser' or 'akanga_core.parser'")
+    return load_attr(
+        ("parser", None),
+        ("akanga_core.parser", None),
+        guard=lambda m: hasattr(m, "Node"),
+        guard_desc="no Node class — not the learner's parser",
+        hint="the parser module",
+    )
 
 
 @pytest.fixture()

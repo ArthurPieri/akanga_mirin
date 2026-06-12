@@ -45,7 +45,7 @@ def _resolve_akanga_src(phase: int) -> Path:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _akanga_src_guard(request) -> Path:
+def _akanga_src_guard(request) -> Path | None:
     """Fail fast with guidance when AKANGA_SRC is unset or missing, and purge
     previously-imported akanga modules so learner code takes precedence.
 
@@ -59,12 +59,12 @@ def _akanga_src_guard(request) -> Path:
 
     The phase number in the error message is derived from the first collected
     test's path; in multi-phase sessions (`make test-mine`) it names the first
-    suite, which is hint enough.
+    suite, which is hint enough. Sessions containing no phase tests at all
+    (e.g. tests/test_scripts_markers.py, which imports no learner code) skip
+    the guard entirely — they have no use for AKANGA_SRC.
     """
-    phase = 0
     for item in request.session.items:
         m = re.search(r"phase_(\d+)", str(getattr(item, "nodeid", "")))
         if m:
-            phase = int(m.group(1))
-            break
-    return _resolve_akanga_src(phase)
+            return _resolve_akanga_src(int(m.group(1)))
+    return None

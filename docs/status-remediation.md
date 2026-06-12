@@ -216,19 +216,53 @@ E10 (3.12 floor) is **CLOSED** — verified, not remediated: 177 tests green on 
   `[manifest].phases` max. CI `checks` job cross-checks the verify matrix
   against `make -s print-max-phase`.
 
+- **W4 (#7)** Edge SQL lives in db.py, behind the lock — the Phase 6 server's
+  `/nodes/{id}/edges` and `DELETE /edges/{id}` routes now call
+  `db.get_edges_touching` / `db.delete_edge` (whose docstrings are therefore
+  true again); propagated 7–8. Skeleton phase_06 teaches the same two
+  CANONICAL names (no more invented `*_for_node` variants, no inline-SQL
+  option) and drops the redundant edge-cleanup step in delete_node
+  (`db.delete_node` already removes all touching edges).
+- **W5 (#4)** Marker convention single-sourced in `scripts/_common.py`
+  (`MARKER_SNIPPETS` + `is_marker_file`, match anchored to the first 3 lines
+  to kill the whole-file substring exemption); sync_forward + skeleton_merge
+  import it; check_doc_contracts' AST-empty heuristic documented as
+  deliberately different. `tests/test_scripts_markers.py` (3 tests, no
+  AKANGA_SRC needed — the root guard now skips sessions with no phase tests)
+  welds prose markers ⇔ snippets ⇔ AST-empty; runs in CI's checks job.
+- **W6 (#1)** Dual-layout import policy single-sourced in
+  `tests/_helpers.py::load_attr`; all 23 loaders are now one-line wrappers
+  (names and call sites unchanged). Unified policy: catch ImportError
+  (superset), report every candidate's REAL error (broken-but-present files
+  no longer masquerade as missing), explicit guards with descriptions
+  (phase_01's unguarded parser load now guards on Edge), deliberate
+  divergences kept and documented in place (phase_05 returns the function;
+  phase_08 MCP loader is package-first with the why). test_rag's gratuitous
+  _load_db copy deleted (imports the conftest's).
+
 ## Finding status (Round 5)
 
 | # | Finding | Severity | Status |
 |---|---|---|---|
-| 1 | Dual-try loader family: 23 forked copies, 4 live divergences | STRUCTURAL | **Accepted-pending** — Tier 2; fix via `tests/_helpers.py::load_attr` after #2 settles |
+| 1 | Dual-try loader family: 23 forked copies, 4 live divergences | STRUCTURAL | **Resolved (W6)** |
 | 2 | False fixture docstring; phases 02–04 bypass AKANGA_SRC diagnostics | SERIOUS | **Resolved (W2)** |
 | 3 | Fixture name collisions; contradictory upsert contracts; false "positional" comment | MODERATE | **Accepted-pending** — Tier 3 batch |
-| 4 | Marker convention defined 4 ways; zero script tests | SERIOUS | **Accepted-pending** — Tier 2; `scripts/_common.py` + pinning test |
+| 4 | Marker convention defined 4 ways; zero script tests | SERIOUS | **Resolved (W5)** |
 | 5 | Phase roster hand-enumerated ×9; silent-green loop guards | SERIOUS | **Resolved (W3)** |
 | 6 | No scripts/ shared core; 1A/1B convention in 5 parsers; help double-registration | MODERATE | **Accepted-pending** — Tier 3 batch |
-| 7 | Dead delete_edge/get_edges_touching with false docstrings; server hand-writes their SQL | SERIOUS | **Accepted-pending** — Tier 2; route-body swaps + skeleton HOW |
+| 7 | Dead delete_edge/get_edges_touching with false docstrings; server hand-writes their SQL | SERIOUS | **Resolved (W4)** |
 | 8 | links.py missing parser.py's fence strip → phantom edges from fenced examples | SERIOUS | **Resolved (W1)** |
 | 9 | Ten Any-typed DB APIs; phantom second Node type | MODERATE | **Accepted-pending** — Tier 3; NodeRecord dataclass |
+
+## Verification gate for Tier 2 (all green 2026-06-12)
+
+- `make test-all` → all 9 phases passed; `make verify PHASE=8` → cumulative green
+- `sync_forward.py --check-all` → converged (post server.py propagation)
+- `pytest tests/test_scripts_markers.py` → 3/3 (no AKANGA_SRC)
+- `ruff check tests/ scripts/` → clean; doc-contract lint exit 0;
+  `skeleton_check` phase_06 OK
+- Smoke: broken db.py under AKANGA_SRC → failure message includes the real
+  ImportError from inside the file, identically in every phase
 
 ## Verification gate for Tier 1 (all green 2026-06-12)
 

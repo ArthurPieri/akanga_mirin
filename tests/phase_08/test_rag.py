@@ -31,18 +31,8 @@ from pathlib import Path
 
 import pytest
 
-
-def _load_db():
-    """Import GraphDatabase from 'db' or 'akanga_core.db'."""
-    try:
-        from db import GraphDatabase  # noqa: PLC0415
-        return GraphDatabase
-    except ModuleNotFoundError:
-        try:
-            from akanga_core.db import GraphDatabase  # noqa: PLC0415
-            return GraphDatabase
-        except ModuleNotFoundError:
-            pytest.fail("Cannot import GraphDatabase from 'db' or 'akanga_core.db'")
+from tests._helpers import load_attr
+from tests.phase_08.conftest import _load_db
 
 
 # ---------------------------------------------------------------------------
@@ -51,26 +41,12 @@ def _load_db():
 
 def _load_rag():
     """Import the learner's rag module, trying flat then package layout."""
-    try:
-        import rag as _r  # noqa: PLC0415
-        if hasattr(_r, "build_context"):
-            return _r
-        raise ImportError("rag module has no build_context")
-    except ImportError:
-        pass
-
-    try:
-        import akanga_core.rag as _r  # noqa: PLC0415
-        return _r
-    except ImportError:
-        pass
-
-    pytest.fail(
-        "Could not import a rag module from AKANGA_SRC.\n"
-        "Expected one of:\n"
-        "  $AKANGA_SRC/rag.py\n"
-        "  $AKANGA_SRC/akanga_core/rag.py\n"
-        "Make sure your file exists and exports build_context."
+    return load_attr(
+        ("rag", None),
+        ("akanga_core.rag", None),
+        guard=lambda m: hasattr(m, "build_context"),
+        guard_desc="no build_context — not the learner's rag module",
+        hint="the rag module (rag.py or akanga_core/rag.py)",
     )
 
 

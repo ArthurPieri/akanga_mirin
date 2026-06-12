@@ -3,6 +3,7 @@ from pathlib import Path
 from textwrap import dedent
 
 import pytest
+from tests._helpers import load_attr
 
 
 # ---------------------------------------------------------------------------
@@ -21,24 +22,16 @@ def _get_parse_fn(m):
 
 
 def _load_module():
-    """Import the learner's parser module.
-
-    Tries ``parser`` first (flat layout), then ``akanga_core.parser``
-    (package layout).  Fails with a clear message if neither is found.
-    """
-    try:
-        import parser as m  # noqa: PLC0415
-        return m
-    except ModuleNotFoundError:
-        # Try akanga_core.parser
-        try:
-            from akanga_core import parser as m  # noqa: PLC0415
-            return m
-        except ModuleNotFoundError:
-            pytest.fail(
-                "Cannot import parser module. "
-                "Set AKANGA_SRC to a directory containing either parser.py or akanga_core/parser.py"
-            )
+    """Import the learner's parser module (flat, then package layout)."""
+    return load_attr(
+        ("parser", None),
+        ("akanga_core.parser", None),
+        # This suite exercises the edge schema — an unrelated same-name
+        # module never has the Edge dataclass.
+        guard=lambda m: hasattr(m, "Edge"),
+        guard_desc="no Edge dataclass — not the learner's parser",
+        hint="the parser module (parser.py or akanga_core/parser.py)",
+    )
 
 
 # ---------------------------------------------------------------------------

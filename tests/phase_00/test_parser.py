@@ -28,6 +28,7 @@ from pathlib import Path
 from textwrap import dedent
 
 import pytest
+from tests._helpers import load_attr
 
 
 # ---------------------------------------------------------------------------
@@ -35,34 +36,15 @@ import pytest
 # ---------------------------------------------------------------------------
 
 def _load_parser():
-    """Import the learner's parser module.
-
-    Tries ``parser`` first (flat layout), then ``akanga_core.parser``
-    (package layout).  Raises ImportError with a helpful message if neither
-    is found.
-    """
-    try:
-        import parser as _p  # noqa: PLC0415
-        # Guard against accidentally importing the built-in 'parser' module
-        # that existed in Python < 3.9 — it never had a 'parse' function.
-        if not hasattr(_p, "parse") and not hasattr(_p, "parse_node_file"):
-            raise ImportError("built-in parser stub, not learner code")
-        return _p
-    except ImportError:
-        pass
-
-    try:
-        import akanga_core.parser as _p  # noqa: PLC0415
-        return _p
-    except ImportError:
-        pass
-
-    pytest.fail(
-        "Could not import a parser module from AKANGA_SRC.\n"
-        "Expected one of:\n"
-        "  $AKANGA_SRC/parser.py\n"
-        "  $AKANGA_SRC/akanga_core/parser.py\n"
-        "Make sure your file exists and has no syntax errors."
+    """Import the learner's parser module (flat, then package layout)."""
+    return load_attr(
+        ("parser", None),
+        ("akanga_core.parser", None),
+        # An unrelated 'parser' module (e.g. a stale site-packages install)
+        # never has the phase-0 entry points.
+        guard=lambda m: hasattr(m, "parse") or hasattr(m, "parse_node_file"),
+        guard_desc="has neither 'parse' nor 'parse_node_file' — not the learner's parser",
+        hint="the learner parser module (parser.py or akanga_core/parser.py)",
     )
 
 

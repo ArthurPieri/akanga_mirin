@@ -274,28 +274,17 @@ def delete_node(node_id: str):
     3. SEC-02: Before removing, verify path:
        vault_root = Path(_app_state["vault"]).resolve()
        if not Path(path).resolve().is_relative_to(vault_root): raise HTTPException(400)
-    4. get_db().delete_edges_for_node(node_id)  — clean up edges first
-       Note: GraphDatabase does not have a delete_edges_for_node method by default.
-       Either add one to your db.py as part of this phase's deliverable:
-           def delete_edges_for_node(self, node_id: str) -> None:
-               with self._lock, self.conn:
-                   self.conn.execute(
-                       "DELETE FROM edges WHERE source_id = ? OR target_id = ?",
-                       (node_id, node_id)
-                   )
-       Or execute the SQL inline here directly:
-           with get_db()._lock, get_db().conn:
-               get_db().conn.execute(
-                   "DELETE FROM edges WHERE source_id = ? OR target_id = ?",
-                   (node_id, node_id)
-               )
-    5. If os.path.exists(path): os.remove(path)
-    6. get_db().delete_node(node_id)
-    7. Return HTTP 204 No Content (no body)
+    4. If os.path.exists(path): os.remove(path)
+    5. get_db().delete_node(node_id)
+       Note: no separate edge-cleanup step — your Phase 2 delete_node already
+       removes ALL touching edges (outgoing via ON DELETE CASCADE, incoming
+       via its explicit target_id cleanup). Edge SQL stays in db.py; route
+       handlers never reach into db.conn with hand-written queries.
+    6. Return HTTP 204 No Content (no body)
     """
     raise NotImplementedError(
-        "Raise 404 if missing. delete_edges_for_node, os.remove file, "
-        "delete_node from DB. Return 204."
+        "Raise 404 if missing. os.remove file, delete_node from DB "
+        "(it cleans up touching edges itself). Return 204."
     )
 
 
@@ -308,21 +297,22 @@ def get_node_edges(node_id: str):
 
     HOW:
     1. existing = get_db().get_node(node_id)  — raise 404 if None
-    2. edges = get_db().get_edges_for_node(node_id)
-       Note: GraphDatabase does not have a get_edges_for_node method by default.
-       Add one to your db.py as part of this phase's deliverable:
-           def get_edges_for_node(self, node_id: str) -> list[dict]:
+    2. edges = get_db().get_edges_touching(node_id)
+       Note: GraphDatabase does not have a get_edges_touching method by
+       default. Add one to your db.py as part of this phase's deliverable —
+       the query belongs behind the DB's lock, never hand-written in a
+       route handler:
+           def get_edges_touching(self, node_id: str) -> list[dict]:
                with self._lock:
                    rows = self.conn.execute(
                        "SELECT * FROM edges WHERE source_id = ? OR target_id = ?",
                        (node_id, node_id)
                    ).fetchall()
-                   return [dict(row) for row in rows]
-       (You will also need delete_edges_for_node — see delete_node HOW above.)
+               return [dict(row) for row in rows]
     3. Return JSONResponse(content=edges)
     """
     raise NotImplementedError(
-        "Raise 404 if node missing. Call db.get_edges_for_node(node_id). "
+        "Raise 404 if node missing. Call db.get_edges_touching(node_id). "
         "Return JSONResponse."
     )
 
@@ -423,11 +413,19 @@ def delete_edge(edge_id: str):
     WHY: Users need to remove incorrect or stale explicit edges.
 
     HOW:
-    1. Query the DB: SELECT * FROM edges WHERE id = ?
-    2. If no row: raise HTTPException(status_code=404, detail="Edge not found")
-    3. DELETE FROM edges WHERE id = ?
-    4. Return HTTP 204 No Content
+    1. if not get_db().delete_edge(edge_id):
+           raise HTTPException(status_code=404, detail="Edge not found")
+       Note: GraphDatabase does not have a delete_edge method by default.
+       Add one to your db.py as part of this phase's deliverable — it owns
+       the SQL and reports via its return value whether a row died:
+           def delete_edge(self, edge_id: str) -> bool:
+               with self._lock, self.conn:
+                   cursor = self.conn.execute(
+                       "DELETE FROM edges WHERE id = ?", (edge_id,)
+                   )
+               return cursor.rowcount > 0
+    2. Return HTTP 204 No Content
     """
     raise NotImplementedError(
-        "SELECT edge by id → 404 if missing → DELETE FROM edges → return 204."
+        "db.delete_edge(edge_id) → False means 404 → otherwise return 204."
     )
