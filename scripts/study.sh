@@ -124,11 +124,14 @@ PANE_RIGHT=$(tmux split-window -t "$PANE_LEFT" -h -p 34 -P -F "#{pane_id}")
 # through the full phase learning document without it wrapping off-screen.
 tmux send-keys -t "$PANE_RIGHT" "glow -p '$PHASE_DOC'" Enter
 
-# ── 9. Bottom-right pane — Claude Code ───────────────────────────────────────
+# ── 9. Bottom-right pane — Claude Code in tutor mode ─────────────────────────
 # Split the top-right pane vertically 50/50 to create the bottom-right slot.
 # -v = vertical split (top / bottom), -p 50 = equal halves
+# Claude launches with the /tutor command (.claude/commands/tutor.md) so the
+# session knows the current phase and follows the learning-assistant brief
+# (doc routing, anti-spoiler rules) instead of the contributor CLAUDE.md focus.
 PANE_BOTTOM=$(tmux split-window -t "$PANE_RIGHT" -v -p 50 -P -F "#{pane_id}")
-tmux send-keys -t "$PANE_BOTTOM" "cd '$CODE_DIR' && claude" Enter
+tmux send-keys -t "$PANE_BOTTOM" "cd '$CODE_DIR' && claude '/tutor ${PADDED}${SUB}'" Enter
 
 # ── 10. Return focus to the editor ────────────────────────────────────────────
 # After all the splits the active pane is PANE_BOTTOM. Move focus back to

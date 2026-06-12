@@ -18,9 +18,12 @@ wheels/
 
 # Runtime artifacts created by learners (root-level only, not skeleton src/)
 /src/
-# Learner-local progress state (make test / make peek / make checkpoint)
+# Learner-local progress state (make test / make peek / make checkpoint / tutor FAQ)
 /.akanga-progress
 /PEEKS.md
+/FAQ.md
+# Claude Code session-local state (the tutor command in .claude/commands/ IS tracked)
+/.claude/worktrees/
 /.learner-git/
 # Author's personal phase work — lives on the arthur/phase-work branch, not main
 /my_implementations/

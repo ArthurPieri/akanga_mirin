@@ -5,6 +5,19 @@ repository (the learning path).
 
 ---
 
+## Two kinds of sessions: contributor vs learner
+
+This file is written for **contributor** sessions (working on the curriculum
+itself). **Learner** sessions — someone studying a phase — run under the tutor
+brief in `.claude/commands/tutor.md` instead: doc routing, a hint ladder, and
+hard anti-spoiler rules (never open `solutions/` for the learner's current or
+future phases; `make peek` is the only sanctioned escape hatch). `make study`
+launches Claude with `/tutor <phase>` automatically. If someone is clearly
+asking learning questions about a phase and `/tutor` hasn't run, suggest they
+run `/tutor <phase>` and follow the tutor brief, not the contributor focus below.
+
+---
+
 ## What this repo is
 
 A structured build-to-learn curriculum that teaches Python developers systems-level
