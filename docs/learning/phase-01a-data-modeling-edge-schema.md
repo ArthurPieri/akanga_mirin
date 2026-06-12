@@ -1,6 +1,6 @@
 # Phase 1A — Data Modeling: Edge Schema and Inline Shorthand
 
-**Estimated time: 2–3h**
+**Estimated time: 2–3h + ~1h vault/reflect**
 
 **Core concept:** Deciding how to represent a *connection* between two nodes as plain
 text. Phase 0 gave you a file with metadata and a body. Phase 1A asks: what does a
@@ -195,6 +195,15 @@ edge does not override a resolved `target_id` in frontmatter.
 ---
 
 ## Deliverable
+
+The snippets below are illustrative — the shipped suite is
+`tests/phase_01/test_schema.py` (15 tests; the names differ):
+`test_extract_inline_edges_basic` / `_multiple` / `_ignores_code_blocks` /
+`_ignores_regular_wikilinks` / `_empty_body`, `test_merge_edges_deduplicates` /
+`_adds_new` / `_empty_inputs` / `_conflicting_target_id_keeps_existing`,
+`test_merge_is_not_order_sensitive`, `test_edge_dataclass_fields`,
+`test_write_back_moves_inline_to_frontmatter` / `_idempotent` /
+`_preserves_existing_edges` / `_malformed_edges_yaml_raises`.
 
 ```python
 def test_inline_edge_extraction():

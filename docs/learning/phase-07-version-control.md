@@ -1,6 +1,6 @@
 # Phase 7 — Version Control as a Feature
 
-**Estimated time:** 2–3 hours
+**Estimated time:** 2–3 hours + ~1h vault/reflect
 
 **Core concept:** The vault is a directory of Markdown files that change over time.
 That is exactly what git was built for. The insight is treating git not as optional
@@ -61,7 +61,7 @@ ever running a git command.
 
 > Akanga node: `Git as User Feature`
 
-→ Foundation doc: `docs/foundations/git-basics.md`
+> → Foundation doc: `docs/foundations/git-basics.md`
 
 ### GitPython
 
@@ -83,7 +83,7 @@ Install: `pip install gitpython` / `uv add gitpython`.
 
 > Akanga node: `GitPython`
 
-→ Foundation doc: `docs/foundations/git-basics.md`
+> → Foundation doc: `docs/foundations/git-basics.md`
 
 ### Git Commit Model
 

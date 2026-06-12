@@ -2,7 +2,7 @@
 """check_doc_contracts.py — CI lint for doc <-> skeleton contract drift.
 
 WHAT
-    Mechanically detects three classes of documentation drift that previously
+    Mechanically detects five classes of documentation drift that previously
     had to be caught by eyeball review:
 
     1. SIGNATURE DRIFT — a function signature shown in a phase doc
@@ -16,6 +16,15 @@ WHAT
        but `X` is not a target in the repo Makefile.
     3. MISSING FOUNDATION DOC — a doc references `docs/foundations/X.md`
        that does not exist on disk.
+    4. TEST-NAME CONTRACT (adversarial-analysis-v4 #5) — every backticked
+       `test_*` token in a doc's "## Deliverable" section must exist as a
+       test function in tests/phase_NN/ (phantom names are findings, exit 1);
+       and every shipped `def test_*` the doc does NOT name is reported as a
+       warning (exit 0 unless --strict-coverage).
+    5. DOC FUNCTION MISSING FROM SKELETON (adversarial-analysis-v4 #11) — a
+       non-test, non-private, top-level function the doc presents as a
+       contract that exists NOWHERE in the phase skeleton (the rename case).
+       Skipped when the phase skeleton is all reference markers.
 
 WHY
     Phase docs are prose and drift silently; skeletons + tests are normative
@@ -36,6 +45,8 @@ HOW (conventions honored)
 USAGE
     python3 scripts/check_doc_contracts.py             # report, exit 1 on drift
     python3 scripts/check_doc_contracts.py --warn-only # report, always exit 0
+    python3 scripts/check_doc_contracts.py --strict-coverage
+                                # shipped-but-unlisted tests also fail (exit 1)
 
 Stdlib only. No third-party imports.
 """
@@ -58,13 +69,19 @@ ROOT = Path(__file__).resolve().parent.parent
 #                                     in this skeleton phase
 #   "make:some-target"              — skip the Makefile-target existence check
 #   "foundations:some-doc.md"       — skip the foundations-file existence check
+#   "test:phase_02:test_x"          — skip the phantom-test check for this name
+#                                     (use ONLY for learner-authored exercise
+#                                     tests the doc tells the reader to write)
 #
 # Keep this list SHORT and commented: every entry is a doc that deliberately
 # lies to the learner, which should be rare and justified.
 # ---------------------------------------------------------------------------
 ALLOW: frozenset[str] = frozenset(
     {
-        # (seeded empty)
+        # phase-02 Deliverable says "Write `test_content_hash_skip` yourself" —
+        # a learner-authored exercise test, intentionally absent from the
+        # shipped suite.
+        "test:phase_02:test_content_hash_skip",
     }
 )
 
@@ -76,6 +93,7 @@ _MAKE_STOPWORDS = {
 
 DOC_GLOB = "docs/learning/phase-*.md"
 SKELETON_DIR = "skeletons"
+TESTS_DIR = "tests"
 FOUNDATIONS_DIR = "docs/foundations"
 
 
@@ -93,6 +111,8 @@ class DocSignature:
     doc_file: Path
     doc_line: int
     source: str  # "code block" | "What You Build table"
+    top_level: bool = True  # module-top-level def (nested/method defs are not
+    #                         skeleton contracts for check 5)
 
 
 @dataclass
@@ -118,6 +138,8 @@ class SkeletonSignature:
 class Finding:
     kind: str
     lines: list[str] = field(default_factory=list)
+    severity: str = "error"  # "error" fails the lint; "warning" is exit-0
+    #                          unless --strict-coverage promotes it
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +257,7 @@ def defs_from_python_block(
     except SyntaxError:
         tree = None
     if tree is not None:
+        top_level_ids = {id(n) for n in tree.body}
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 params = [a.arg for a in node.args.posonlyargs + node.args.args]
@@ -247,6 +270,7 @@ def defs_from_python_block(
                         doc_file=doc_file,
                         doc_line=start_line + node.lineno - 1,
                         source="code block",
+                        top_level=id(node) in top_level_ids,
                     )
                 )
         return sigs
@@ -273,6 +297,7 @@ def defs_from_python_block(
                     doc_file=doc_file,
                     doc_line=start_line + i,
                     source="code block",
+                    top_level=not block_lines[i][:1].isspace(),
                 )
             )
         i = j + 1
@@ -354,6 +379,68 @@ def parse_doc(doc_path: Path) -> tuple[
             if target.lower() not in _MAKE_STOPWORDS:
                 make_refs.append((target, i))
     return sigs, make_refs, foundation_refs
+
+
+# ---------------------------------------------------------------------------
+# Deliverable-section test-name harvesting (check 4)
+# ---------------------------------------------------------------------------
+
+# `test_foo` but not `test_foo.py` (filenames) and not substrings of longer
+# identifiers like `latest_thing` (left boundary) — the naive pattern
+# backtracks `test_db.py` into a phantom `test_d`.
+_TEST_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])test_[a-z0-9_]+(?![a-z0-9_])")
+_DELIVERABLE_HEAD_RE = re.compile(r"^##\s+Deliverables?\b")
+_SECTION_HEAD_RE = re.compile(r"^##\s")
+
+
+def deliverable_test_tokens(doc_path: Path) -> tuple[list[tuple[str, int]], bool]:
+    """Harvest test-function tokens from every '## Deliverable' section.
+
+    Returns ([(token, line_1based), ...], section_found). Illustrative fenced
+    blocks are skipped (same convention as the signature checks); tokens that
+    are filenames (`test_db.py`) are not function contracts and are ignored.
+    """
+    lines = doc_path.read_text(encoding="utf-8").splitlines()
+    illustrative_lines: set[int] = set()
+    for _lang, start, block_lines, illustrative in iter_code_blocks(lines):
+        if illustrative:
+            illustrative_lines.update(range(start, start + len(block_lines)))
+
+    tokens: list[tuple[str, int]] = []
+    section_found = False
+    in_section = False
+    for i, line in enumerate(lines, start=1):
+        if _DELIVERABLE_HEAD_RE.match(line):
+            section_found = True
+            in_section = True
+            continue
+        if in_section and _SECTION_HEAD_RE.match(line):
+            in_section = False
+        if not in_section or i in illustrative_lines:
+            continue
+        for m in _TEST_TOKEN_RE.finditer(line):
+            if line[m.end() : m.end() + 3] == ".py":
+                continue  # a test FILE, not a test function
+            tokens.append((m.group(0), i))
+    return tokens, section_found
+
+
+def parse_phase_tests(tests_dir: Path) -> dict[str, str]:
+    """Map test-function name -> 'tests/phase_NN/file.py:line' for one phase."""
+    by_name: dict[str, str] = {}
+    if not tests_dir.is_dir():
+        return by_name
+    for py in sorted(tests_dir.rglob("test_*.py")):
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue  # broken test files are pytest's problem, not the lint's
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith(
+                "test_"
+            ):
+                by_name.setdefault(node.name, f"{rel(py)}:{node.lineno}")
+    return by_name
 
 
 # ---------------------------------------------------------------------------
@@ -439,12 +526,18 @@ def run_checks() -> list[Finding]:
     docs = [d for d in docs if "archive" not in d.parts]
     makefile_targets = parse_makefile_targets(ROOT / "Makefile")
     skeleton_cache: dict[str, dict[str, list[SkeletonSignature]]] = {}
+    tests_cache: dict[str, dict[str, str]] = {}
+    # Per-phase aggregation for check 4's reverse direction (1A + 1B share
+    # tests/phase_01, so doc tokens must be unioned before comparing).
+    listed_tokens_by_phase: dict[str, set[str]] = {}
+    deliverable_seen_by_phase: dict[str, bool] = {}
+    docs_by_phase: dict[str, list[Path]] = {}
 
     for doc in docs:
         sigs, make_refs, foundation_refs = parse_doc(doc)
         phase = doc_phase_dir(doc)
 
-        # ---- 1. signature drift ----
+        # ---- 1. signature drift  +  5. doc functions absent from skeleton ----
         if phase is not None:
             phase_dir = ROOT / SKELETON_DIR / phase
             if phase_dir.is_dir():
@@ -452,9 +545,35 @@ def run_checks() -> list[Finding]:
                     skeleton_cache[phase] = parse_skeleton_phase(phase_dir)
                 skel_map = skeleton_cache[phase]
                 for sig in sigs:
-                    if sig.name not in skel_map:
-                        continue  # only names present in BOTH are contracts
                     if f"{phase}:{sig.name}" in ALLOW:
+                        continue
+                    if sig.name not in skel_map:
+                        # ---- 5. the rename case: the doc presents a function
+                        # the skeleton no longer (or never) has. Only firm
+                        # contracts count: top-level, not a test, not private,
+                        # and only when the phase skeleton has real (non-marker)
+                        # files to hold it.
+                        if (
+                            skel_map
+                            and sig.top_level
+                            and not sig.name.startswith(("test_", "_"))
+                        ):
+                            findings.append(
+                                Finding(
+                                    kind="DOC FUNCTION MISSING FROM SKELETON",
+                                    lines=[
+                                        f"{rel(sig.doc_file)}:{sig.doc_line} "
+                                        f"({sig.source}) shows "
+                                        f"`{sig.name}({', '.join(sig.params)})`, but no "
+                                        f"function named `{sig.name}` exists anywhere in "
+                                        f"{SKELETON_DIR}/{phase}/.",
+                                        "fix direction: skeleton + tests are normative "
+                                        "(decision D2) — rename it in the doc, or mark "
+                                        'the block "illustrative" if it is not a '
+                                        "contract.",
+                                    ],
+                                )
+                            )
                         continue
                     candidates = skel_map[sig.name]
                     if any(signature_matches(sig, c) for c in candidates):
@@ -470,6 +589,35 @@ def run_checks() -> list[Finding]:
                                 f"{rel(best.file)}:{best.line} "
                                 f"skeleton has        {best.render()}",
                                 FIX_DIRECTION,
+                            ],
+                        )
+                    )
+
+        # ---- 4a. Deliverable test names must exist (phantom-test check) ----
+        if phase is not None:
+            tokens, section_found = deliverable_test_tokens(doc)
+            if phase not in tests_cache:
+                tests_cache[phase] = parse_phase_tests(ROOT / TESTS_DIR / phase)
+            phase_tests = tests_cache[phase]
+            docs_by_phase.setdefault(phase, []).append(doc)
+            deliverable_seen_by_phase[phase] = (
+                deliverable_seen_by_phase.get(phase, False) or section_found
+            )
+            bucket = listed_tokens_by_phase.setdefault(phase, set())
+            for token, line in tokens:
+                bucket.add(token)
+                if f"test:{phase}:{token}" in ALLOW:
+                    continue
+                if phase_tests and token not in phase_tests:
+                    findings.append(
+                        Finding(
+                            kind="PHANTOM TEST NAME",
+                            lines=[
+                                f"{rel(doc)}:{line} (Deliverable section) names "
+                                f"`{token}`, but no such test function exists in "
+                                f"{TESTS_DIR}/{phase}/.",
+                                "fix direction: tests are normative — use the real "
+                                "test name (it was probably renamed in remediation).",
                             ],
                         )
                     )
@@ -509,6 +657,43 @@ def run_checks() -> list[Finding]:
                     )
                 )
 
+    # ---- 4b. reverse direction: shipped tests the docs never name ----------
+    # Warning-level by default: an unlisted test under-specifies the
+    # deliverable but lies to nobody. --strict-coverage promotes these.
+    for phase, listed in sorted(listed_tokens_by_phase.items()):
+        phase_tests = tests_cache.get(phase, {})
+        if not phase_tests:
+            continue
+        doc_names = ", ".join(rel(d) for d in docs_by_phase.get(phase, []))
+        if not deliverable_seen_by_phase.get(phase, False):
+            findings.append(
+                Finding(
+                    kind="NO DELIVERABLE SECTION",
+                    severity="warning",
+                    lines=[
+                        f"{doc_names}: no '## Deliverable' section found, so the "
+                        f"{len(phase_tests)} tests in {TESTS_DIR}/{phase}/ are "
+                        "enumerated nowhere.",
+                    ],
+                )
+            )
+            continue
+        unlisted = sorted(set(phase_tests) - listed)
+        if unlisted:
+            findings.append(
+                Finding(
+                    kind="TEST NOT LISTED IN DELIVERABLE",
+                    severity="warning",
+                    lines=[
+                        f"{len(unlisted)} shipped test(s) in {TESTS_DIR}/{phase}/ "
+                        f"are missing from the Deliverable section of {doc_names}:",
+                        *[f"  {phase_tests[name]}  `{name}`" for name in unlisted],
+                        "fix direction: a learner building to the Deliverable list "
+                        "will fail tests whose spec lives in ambience — name them.",
+                    ],
+                )
+            )
+
     return findings
 
 
@@ -527,23 +712,43 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="report findings but always exit 0 (CI soft-launch mode)",
     )
+    parser.add_argument(
+        "--strict-coverage",
+        action="store_true",
+        help="shipped-but-unlisted test warnings (check 4b) also fail the lint",
+    )
     args = parser.parse_args(argv)
 
     findings = run_checks()
+    if args.strict_coverage:
+        for f in findings:
+            f.severity = "error"
+    errors = [f for f in findings if f.severity == "error"]
+    warnings = [f for f in findings if f.severity == "warning"]
 
     if not findings:
         print("doc-contract lint: OK — no doc <-> skeleton drift detected.")
         return 0
 
-    print(f"doc-contract lint: {len(findings)} finding(s)\n")
-    for n, f in enumerate(findings, start=1):
-        print(f"[{n}] {f.kind}")
+    print(
+        f"doc-contract lint: {len(errors)} finding(s), {len(warnings)} warning(s)\n"
+    )
+    n = 0
+    for f in errors + warnings:
+        n += 1
+        suffix = " (warning)" if f.severity == "warning" else ""
+        print(f"[{n}] {f.kind}{suffix}")
         for line in f.lines:
             print(f"    {line}")
         print()
 
     if args.warn_only:
         print("(--warn-only: exiting 0 despite findings)")
+        return 0
+    if not errors:
+        print(
+            "(warnings only — exiting 0; use --strict-coverage to make them fail)"
+        )
         return 0
     print(
         "Add intentional simplifications to the ALLOW list in "

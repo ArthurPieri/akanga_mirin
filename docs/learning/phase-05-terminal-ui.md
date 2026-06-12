@@ -1,5 +1,7 @@
 # Phase 5 — Terminal UI
 
+**Estimated time: 12–20h + ~1h vault/reflect**
+
 **Core concept:** The TUI is the face of Akanga — the thing you open every day.
 Everything built in Phases 0–4 was infrastructure. Phase 5 is where that
 infrastructure becomes a tool you interact with. The design challenge is unusual:
@@ -76,7 +78,7 @@ variable, the widget re-renders without any imperative draw calls.
 
 > Akanga node: `Reactive TUI`
 
-→ Foundation doc: `docs/foundations/asyncio-primer.md` (async event loop section)
+> → Foundation doc: `docs/foundations/asyncio-primer.md` (async event loop section)
 
 ### Widget Composition
 
@@ -100,7 +102,7 @@ about the TUI — they share only the EventBus.
 
 > Akanga node: `Event-Driven UI`
 
-→ Foundation doc: `docs/foundations/design-patterns.md` (Observer pattern)
+> → Foundation doc: `docs/foundations/design-patterns.md` (Observer pattern)
 
 ### Keyboard-First, Mouse-Aware
 
@@ -121,12 +123,12 @@ in a Textual screen. It is tested, dependency-free, and good enough up to ~12 no
 The two-layer renderer is what you build *after* checkpoints 5.1 and 5.2 are green,
 if you want to push further. Be honest with yourself about the costs: it needs extra
 dependencies (`uv sync --extra graph` installs the optional `[graph]` group —
-textual-kitty, textual-canvas, NetworkX, matplotlib), and Layer 1 works best **outside
-tmux** (see the warning at the top of this doc).
+textual-image, textual-canvas, NetworkX, matplotlib), and Layer 1 works best in a
+plain terminal window (see the tmux warning above).
 
 Two layers, chosen at runtime based on terminal capability:
 
-**Layer 1 — Pixel-perfect (Kitty, Ghostty, WezTerm, iTerm2):** `textual-kitty` renders
+**Layer 1 — Pixel-perfect (Kitty, Ghostty, WezTerm, iTerm2):** `textual-image` renders
 the graph as a PNG image inside a Textual widget using the Kitty Terminal Graphics
 Protocol. NetworkX computes a force-directed layout; matplotlib renders it (dark
 background, node shape + color by type, styled edges by direction). The result is
@@ -163,10 +165,10 @@ live refresh.
 | `Widget Composition` | note | `is_applied_in` → `Akanga TUI`; `subtype_of` → `UI Design Pattern` |
 | `Event-Driven UI` | note | `uses` → `Event Bus`; `enables` → `Live Updates`; `is_applied_in` → `Akanga TUI` |
 | `Keyboard-First Mouse-Aware` | note | `qualifies` → `Terminal UI`; `is_applied_in` → `Akanga TUI` |
-| `Two-Layer Graph Renderer` | note | `uses` → `textual-kitty`; `uses` → `textual-canvas`; `solves` → `Graph Density Ceiling` |
+| `Two-Layer Graph Renderer` | note | `uses` → `textual-image`; `uses` → `textual-canvas`; `solves` → `Graph Density Ceiling` |
 | `Suspend/Resume` | note | `enables` → `External Editor Integration`; `is_applied_in` → `Akanga TUI`; `is_part_of` → `Textual` |
 | `Textual` | reference | `implements` → `Reactive TUI`; `is_applied_in` → `Akanga TUI` |
-| `textual-kitty` | reference | `implements` → `Two-Layer Graph Renderer`; `uses` → `Kitty Terminal Graphics Protocol` |
+| `textual-image` | reference | `implements` → `Two-Layer Graph Renderer`; `uses` → `Kitty Terminal Graphics Protocol` |
 | `Kitty Terminal Graphics Protocol` | reference | `enables` → `Pixel Images in Terminal`; `is_applied_in` → `Two-Layer Graph Renderer` |
 
 ---
@@ -200,13 +202,11 @@ live refresh.
 
 Following vim and ranger conventions. Domain wins where vim and Akanga conflict.
 
-> **This table is canonical.** Earlier versions of the skeleton bound keys differently
-> (`shift+g` for the vault graph, `e` suspending to `$EDITOR`); the skeleton's
-> `BINDINGS` now match this table. The two historically contested keys, settled:
-> `G` is **jump to bottom of list** (universal vim — never the graph), and the vault
-> graph lives on `Ctrl+g`. `e` opens the **inline TextArea** editor saved with
-> `Ctrl+S`; suspending to `$EDITOR` is an optional upgrade, not the binding's
-> deliverable behavior.
+> **This table is canonical** — the skeleton's `BINDINGS` match it. The two keys
+> most worth pinning down: `G` is **jump to bottom of list** (universal vim — never
+> the graph), and the vault graph lives on `Ctrl+g`. `e` opens the **inline
+> TextArea** editor saved with `Ctrl+S`; suspending to `$EDITOR` is an optional
+> upgrade, not the binding's deliverable behavior.
 
 | Key | Action | Convention |
 |---|---|---|
@@ -237,7 +237,7 @@ Following vim and ranger conventions. Domain wins where vim and Akanga conflict.
 The ego-graph screen is a separate Textual `Screen` pushed onto the stack. The
 **baseline** version renders `render_ascii(build_ego_graph(...))` from Phase 3 inside
 a `Static` widget — build that first. The pixel/canvas version sketched below is the
-stretch goal (requires `uv sync --extra graph`; run outside tmux):
+stretch version (see the stretch-goal concept and the tmux warning above):
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -324,8 +324,8 @@ class EgoGraphScreen(Screen):
     # Esc → app.pop_screen()
 ```
 
-**`graph_renderer.py`** — two render paths (**STRETCH GOAL** — requires
-`uv sync --extra graph`; Layer 1 works best outside tmux):
+**`graph_renderer.py`** — two render paths (stretch — see the stretch-goal
+concept and the tmux warning above; illustrative sketch, no skeleton ships):
 ```python
 def render_graph_kitty(ego: EgoGraph) -> Image:
     # NetworkX spring layout → matplotlib figure → PIL Image
@@ -426,9 +426,10 @@ watch the list refresh). (~4–7h)
 
 **Checkpoint 5.3 — Graph screen (baseline), then stretch.** `g` pushes
 `EgoGraphScreen` rendering Phase 3's `render_ascii` output; `+`/`-` adjust depth;
-`Esc` pops back. Stretch: the two-layer pixel/canvas renderer (`uv sync --extra graph`,
-outside tmux). No automated tests certify this checkpoint — it is verified by use.
-(~4–7h, stretch open-ended)
+`Esc` pops back. Stretch: the two-layer pixel/canvas renderer — a stretch goal,
+not a deliverable; it needs `uv sync --extra graph` and a plain terminal window
+(see the tmux warning above). No automated tests certify this checkpoint — it is
+verified by use. (~4–7h, stretch open-ended)
 
 Stop and commit at every checkpoint. A learner who finishes only 5.1 still has a
 working, navigable knowledge-graph browser.
@@ -470,12 +471,9 @@ The test suite is in `tests/phase_05/test_tui.py`, driven by Textual's headless
 - the help-overlay test — `?` shows the keybinding cheatsheet overlay and any key
   dismisses it
 
-**Aspirational (doc sketches, not in the suite — verify manually):** earlier versions
-of this doc sketched `test_node_tree_populated`, `test_search_filters_tree`,
-`test_j_k_navigation`, `test_edit_save_roundtrip`, `test_live_update_adds_node`, and
-`test_graph_screen_opens` as if they shipped. They do not (yet). The behaviors are
-still part of the deliverable — j/k navigation, the edit/save round-trip, and the
-live-update pipeline in particular — but you certify them by hand: edit a vault file
+**Verified manually (no shipped tests):** j/k navigation, search filtering of the
+tree, the edit/save round-trip, and the live-update pipeline are part of the
+deliverable but have no automated tests — certify them by hand: edit a vault file
 in a second terminal and watch the list refresh; that is the full Phase 4 → Phase 5
 pipeline in action. The graph screen (checkpoint 5.3) has no automated tests at all.
 

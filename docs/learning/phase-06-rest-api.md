@@ -1,6 +1,6 @@
 # Phase 6 — REST API
 
-**Estimated time:** 3–4 hours
+**Estimated time:** 3–4 hours + ~1h vault/reflect
 
 **Core concept:** The TUI talks directly to `akanga_core` as a Python library — same
 process, no network. The REST API adds a second surface: an HTTP server that exposes
@@ -61,7 +61,7 @@ state on the server between requests.
 
 > Akanga node: `REST`
 
-→ Foundation doc: `docs/foundations/http-fundamentals.md`
+> → Foundation doc: `docs/foundations/http-fundamentals.md`
 
 ### FastAPI
 
@@ -118,7 +118,7 @@ that have already been validated.
 
 > Akanga node: `Path Traversal Protection`
 
-→ Foundation doc: `docs/foundations/http-fundamentals.md` (security considerations section)
+> → Foundation doc: `docs/foundations/http-fundamentals.md` (security considerations section)
 
 ### API Boundary vs Library Consumer
 
@@ -297,7 +297,8 @@ is misconfigured. All three need to be correct simultaneously.
 
 ## What You Build
 
-**`server.py`** — FastAPI application:
+**`server.py`** — FastAPI application (illustrative sketch — in the skeleton,
+the lifespan is defined inside `create_app`):
 
 ```python
 @asynccontextmanager
@@ -322,6 +323,13 @@ app = FastAPI(lifespan=lifespan)
 The tests construct the app through a **`create_app(vault, db_path)` factory** (see the
 skeleton's `server.py`) — build the FastAPI instance inside the factory so tests can
 spin it up against a temp vault and temp DB without global state leaking between runs.
+
+The `full_scan_and_index` call in the lifespan is load-bearing, not decorative: **the
+lifespan indexes the vault — the server starts serving N nodes from an existing vault
+on a cold start**, with no dependency on the TUI or any earlier process having
+populated the `.db`. Log the count at startup ("serving N indexed nodes") so an
+empty graph is visibly a vault problem, not a silent one. The scan is hash-first and
+idempotent, so re-running it on every startup is cheap.
 
 **Pydantic request models** (these match the skeleton exactly — the skeleton and tests
 are the normative contract):
@@ -426,7 +434,7 @@ Happy-path tests:
 - `test_get_neighbors` / `test_get_backlinks` — A→B traversal in both directions
 - `test_list_templates` — `GET /api/v1/templates` returns a non-empty list of template names
 
-Error-path tests (CCR-9):
+Error-path tests (the error-path requirement — every endpoint's failure mode is part of the contract):
 
 - `test_create_node_path_traversal_blocked` — `path: "../../etc/passwd"` → 400 (SEC-02; see the pitfall above for the absolute-path and symlink-escape rejection cases the suite also covers)
 - `test_create_node_missing_title_returns_422` — missing required field triggers Pydantic validation

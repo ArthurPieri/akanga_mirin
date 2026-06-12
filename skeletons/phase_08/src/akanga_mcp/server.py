@@ -1,7 +1,18 @@
 """Akanga MCP server — exposes knowledge graph tools to LLMs via MCP protocol.
 
-Uses FastMCP library. Binds to 127.0.0.1 by default (SEC-04: never 0.0.0.0).
+Uses FastMCP library. Default transport is STDIO — SEC-04's strongest posture
+(no network socket at all); the optional ``--http`` transport binds 127.0.0.1
+only (never 0.0.0.0).
 Tools exposed: search_nodes, get_node, list_relation_types, get_context, create_node.
+
+Runtime entry-point contract (``python -m akanga_mcp.server``):
+- ``--vault``/``--db`` argv, with the AKANGA_VAULT_PATH / AKANGA_DB_PATH
+  environment variables as fallback defaults (argv wins).
+- If neither source supplies a vault AND a db: print a LOUD error to stderr
+  and exit 2. A server with no DB answers every tool with empty results and
+  ``isError: false`` — healthy-looking and know-nothing, forever.
+- Initialization indexes the vault (full_scan_and_index — idempotent), so the
+  tools serve what is on disk, not whatever an old DB file remembers.
 
 SERVER_INSTRUCTIONS must warn the LLM:
 - All context is from the local knowledge graph (private, personal data)
@@ -36,18 +47,29 @@ _state: dict = {}
 
 
 def init_server(vault: str, db_path: str) -> None:
-    """Initialize server state for testing.
+    """Initialize server state — open the DB AND index the vault.
 
-    WHAT: Populate _state with a DB instance and vault path.
-    WHY: Tests need to inject a pre-populated DB without running __main__.
+    WHAT: Populate _state with a DB instance and vault path, then index.
+    WHY: Tests need to inject a pre-populated DB without running __main__ —
+    and the MCP tools serve the INDEX, so a server pointed at a real vault
+    must reflect what is on disk before the first tool call (without the
+    scan, a fresh DB file makes every tool return empty results).
     HOW:
     1. from akanga_core.db import GraphDatabase
     2. _state["db"] = GraphDatabase(db_path)
     3. _state["vault"] = vault
+    4. Index the vault so the tools serve what is on disk:
+       from akanga_core.indexer import full_scan_and_index
+       count = full_scan_and_index(str(vault), _state["db"])
+       full_scan_and_index is hash-first and idempotent (Phase 2), so an
+       already-indexed vault costs one hash per file and zero writes.
+    5. Log "serving {count} indexed nodes from {vault}" (logging, NOT print —
+       stdout belongs to the stdio MCP protocol).
     """
     raise NotImplementedError(
         "Create GraphDatabase(db_path), store in _state['db']. "
-        "Store vault in _state['vault']."
+        "Store vault in _state['vault']. Then full_scan_and_index(vault, db) "
+        "and log 'serving N indexed nodes from <vault>'."
     )
 
 
@@ -248,26 +270,35 @@ def create_node(title: str, type: str = "note", content: str = "") -> dict:  # n
 
 if __name__ == "__main__":
     import argparse
+    import os
 
     parser = argparse.ArgumentParser(description="Akanga MCP server")
-    parser.add_argument("--vault", default="./vault")
-    parser.add_argument("--db", default="./.akanga.db")
-    # IMPORTANT: default host MUST be 127.0.0.1, not 0.0.0.0 (SEC-04)
-    # Binding to 0.0.0.0 exposes the MCP server (and your private vault) to
-    # every network interface — never do this for a personal knowledge graph.
-    parser.add_argument("--host", default="127.0.0.1")
+    # Argv wins; the AKANGA_* env vars are the FALLBACK defaults — `make mcp`
+    # passes argv, MCP client configs usually set the environment variables.
+    # No silent "./vault" default: a wrong guess here means a server that
+    # looks healthy and knows nothing.
+    parser.add_argument("--vault", default=os.getenv("AKANGA_VAULT_PATH"))
+    parser.add_argument("--db", default=os.getenv("AKANGA_DB_PATH"))
+    # Default transport is STDIO (no network socket at all — SEC-04's
+    # strongest posture). --http serves on 127.0.0.1 ONLY: binding 0.0.0.0
+    # exposes the MCP server (and your private vault) to every network
+    # interface — never do this for a personal knowledge graph.
+    parser.add_argument("--http", action="store_true")
     parser.add_argument("--port", type=int, default=8001)
     args = parser.parse_args()
 
     # Initialize DB and vault before starting the server.
     # HOW:
-    # 1. from akanga_core.db import GraphDatabase
-    # 2. db = GraphDatabase(args.db)
-    # 3. _state["db"] = db
-    # 4. _state["vault"] = args.vault
-    # 5. mcp.run(transport="http", host=args.host, port=args.port)
+    # 1. If not args.vault or not args.db: print a LOUD error to stderr
+    #    (sys.stderr — stdout belongs to the stdio MCP protocol) telling the
+    #    user to pass --vault/--db or set AKANGA_VAULT_PATH/AKANGA_DB_PATH,
+    #    then sys.exit(2). NEVER serve a know-nothing server.
+    # 2. init_server(args.vault, args.db)  — opens the DB AND indexes the vault.
+    # 3. Default: mcp.run()  — stdio transport, no socket.
+    # 4. If args.http: mcp.run(transport="http", host="127.0.0.1", port=args.port)
     raise NotImplementedError(
-        "Initialize GraphDatabase(args.db). Store in _state['db'] and _state['vault']. "
-        "Then call: mcp.run(transport='http', host=args.host, port=args.port). "
-        "NEVER change --host default from 127.0.0.1 (SEC-04)."
+        "If --vault/--db are missing (argv AND env): stderr error + sys.exit(2). "
+        "Else init_server(args.vault, args.db), then mcp.run() (stdio default) "
+        "or mcp.run(transport='http', host='127.0.0.1', port=args.port) when "
+        "--http. NEVER bind any host other than 127.0.0.1 (SEC-04)."
     )

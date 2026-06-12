@@ -25,6 +25,11 @@ Key design decisions:
 - Observer and worker run as daemon threads so they do not block process
   exit; ``stop()`` still shuts both down explicitly — OBSERVER FIRST (it
   is the event source), then the worker, then the pending table.
+- ALL deadline arithmetic uses ``time.monotonic()``, never ``time.time()``:
+  the wall clock can step forwards or backwards under NTP adjustment
+  (firing debounced events early or wedging them), and the test suite
+  measures the debounce window with monotonic timestamps — deadlines must
+  live on the same clock.
 """
 from __future__ import annotations
 
@@ -239,7 +244,7 @@ class VaultWatcher:
         """
         poll_interval = min(0.05, max(self.debounce_ms / 1000.0 / 4.0, 0.005))
         while not self._stop_event.is_set():
-            now = time.time()
+            now = time.monotonic()
             with self._lock:
                 due = [
                     path
@@ -271,7 +276,7 @@ class VaultWatcher:
             return
         with self._lock:
             self._pending[path] = (
-                time.time() + self.debounce_ms / 1000.0,
+                time.monotonic() + self.debounce_ms / 1000.0,
                 "file_changed",
             )
 
@@ -291,7 +296,7 @@ class VaultWatcher:
             if entry is None:
                 return  # cancelled since the poll snapshot
             deadline, event = entry
-            if deadline > time.time():
+            if deadline > time.monotonic():
                 return  # re-debounced since the poll snapshot — newer deadline wins
             del self._pending[path]
         if event == "file_deleted" and os.path.exists(path):
@@ -299,6 +304,9 @@ class VaultWatcher:
             # (os.replace onto an existing path) into a "deleted" flag for
             # the TARGET path — which is alive and holding new content.
             # Trust the disk over the event stream: deliver the change.
+            # This branch is exercised by macOS FSEvents coalescing; on
+            # inotify (Linux CI) the replace arrives as MOVED_TO instead,
+            # so green Linux CI never executes it.
             event = "file_changed"
         self.eventbus.publish(event, path=self._normalize(path))
 
@@ -323,6 +331,6 @@ class VaultWatcher:
             return
         with self._lock:
             self._pending[path] = (
-                time.time() + self.debounce_ms / 1000.0,
+                time.monotonic() + self.debounce_ms / 1000.0,
                 "file_deleted",
             )

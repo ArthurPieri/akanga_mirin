@@ -1,6 +1,6 @@
 # Phase 1B — Data Modeling: Workspace Registry and Background Sync
 
-**Estimated time: 2–3h**
+**Estimated time: 2–3h + ~1h vault/reflect**
 
 **Core concept:** Not all mutations can happen on the critical path. When a node is
 renamed, every edge pointing to it has a stale `target` display name. Updating those

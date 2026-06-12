@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.phase_04.conftest import _load_eventbus, _load_watcher
+from tests.phase_04.conftest import _load_eventbus, _load_watcher, _wait_until
 
 EventBus = _load_eventbus()
 VaultWatcher = _load_watcher()
@@ -224,9 +224,16 @@ class TestWatcherReschedule:
 
         Timeline (debounce = 500ms):
           t=0      first write  → deadline ≈ t=500ms
-          t≈250ms  re-touch     → deadline pushed to ≈ t=750ms
-        The single event must fire no earlier than ~debounce after the
-        RE-TOUCH (measured, so raw-event delivery latency cannot skew it).
+          t≈150ms  re-touch     → deadline pushed to ≈ t=650ms
+        The re-touch lands 350ms before the FIRST deadline, so even a badly
+        starved CI runner delivers it inside the window. The single event must
+        fire no earlier than ~debounce after the RE-TOUCH (measured with
+        monotonic timestamps, so raw-event delivery latency cannot skew it).
+
+        The two assertions are deliberately split: the early-fire bug produces
+        TWO events (original deadline + rescheduled deadline) and trips the
+        count assertion; a lone early event is far more likely to be the test
+        thread getting starved than a watcher bug — its message says so.
         """
         debounce_ms = 500
         bus = EventBus()
@@ -245,33 +252,37 @@ class TestWatcherReschedule:
             time.sleep(0.2)  # let the observer arm before timing starts
 
             _atomic_write(target, "v1")          # t = 0: schedules the first deadline
-            time.sleep(0.25)
+            time.sleep(0.15)
             t_retouch = time.monotonic()
-            _atomic_write(target, "v2")          # t ≈ 250ms: re-touch INSIDE the window
+            _atomic_write(target, "v2")          # t ≈ 150ms: re-touch INSIDE the window
 
             assert ready.wait(timeout=TIMEOUT_S + 1), (
                 "No event arrived after the LAST deadline — re-scheduling must "
                 "postpone the fire, never cancel it. The final state of the "
                 "file must still be delivered exactly once."
             )
-            time.sleep(0.4)  # settle: let any (incorrect) second fire surface
+            time.sleep(0.5)  # settle: let any (incorrect) second fire surface
 
-            fire_delay = events[0][0] - t_retouch
-            assert fire_delay >= (debounce_ms / 1000) - 0.05, (
-                f"The watcher fired {fire_delay * 1000:.0f}ms after the "
-                f"re-touch — BEFORE the re-touched {debounce_ms}ms deadline. "
-                "That is the early-fire bug.\n"
-                "A re-touch inside the debounce window must push the deadline "
-                "back. When the timer wakes, _fire must RE-CHECK the current "
-                "deadline for the path and go back to sleep if a later touch "
-                "moved it — firing on the original schedule delivers a "
-                "half-written file to the indexer."
-            )
             assert len(events) == 1, (
                 f"Expected exactly ONE coalesced event after the last deadline, "
                 f"got {len(events)}.\n"
                 "Both touches are saves of the same file inside one debounce "
                 "window — they must coalesce into a single file_changed."
+            )
+
+            fire_delay = events[0][0] - t_retouch
+            assert fire_delay >= (debounce_ms / 1000) - 0.05, (
+                f"The single event fired {fire_delay * 1000:.0f}ms after the "
+                f"re-touch — before the re-touched {debounce_ms}ms deadline.\n"
+                "If this fired early AND exactly once, suspect scheduler "
+                "starvation in CI before suspecting _fire — re-run; the "
+                "early-fire bug also produces TWO events (the count assertion "
+                "above catches that). A reproducible single early fire means "
+                "_fire must RE-CHECK the current deadline for the path when "
+                "the timer wakes and go back to sleep if a later touch moved "
+                "it — and deadlines must be computed with time.monotonic(), "
+                "never time.time(): an NTP step mid-window makes wall-clock "
+                "deadlines fire early."
             )
         finally:
             watcher.stop()
@@ -285,6 +296,13 @@ class TestWatcherDeleteGrace:
     The adopted contract: deletes get a debounce grace window, and a create/
     modify of the same path INSIDE that window cancels the pending delete —
     the world sees one file_changed, never a spurious file_deleted.
+
+    PLATFORM NOTE (adversarial-analysis-v4 #10): the watcher's exists-check
+    branch (path still on disk when the delete grace expires → phantom delete,
+    suppress it) is the macOS FSEvents case; on Linux/inotify an atomic
+    replace arrives as MOVED_TO — never a coalesced delete — so Linux CI
+    exercises a different code path and local macOS runs are the validation
+    for that branch.
     """
 
     def test_recreate_within_grace_window_cancels_pending_delete(
@@ -389,10 +407,10 @@ class TestEventBusAsyncSubscriber:
             # publish from the main (non-asyncio) thread
             bus.publish("test_event", source="main_thread")
 
-            # give the event loop time to schedule and execute the coroutine
-            time.sleep(0.2)
-
-            assert len(called) == 1, (
+            # Poll instead of a flat sleep (same _wait_until pattern as the
+            # twin test in test_eventbus.py): fast when healthy, and a loaded
+            # CI runner gets the full timeout instead of a flaky 200ms.
+            assert _wait_until(lambda: len(called) == 1), (
                 "Async subscriber was not called after publish() from a non-asyncio thread; "
                 "check that EventBus.publish() uses run_coroutine_threadsafe for coroutines "
                 "when a loop has been set via set_loop()."
@@ -403,3 +421,4 @@ class TestEventBusAsyncSubscriber:
         finally:
             loop.call_soon_threadsafe(loop.stop)
             loop_thread.join(timeout=2)
+            loop.close()

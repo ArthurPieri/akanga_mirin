@@ -1,6 +1,6 @@
 # Phase 3 — Graph Algorithms
 
-**Estimated time:** 2–3 hours
+**Estimated time:** 2–3 hours + ~1h vault/reflect
 
 **Core concept:** This is the phase where you actually write graph code. Every previous
 phase built the data — files, edges, DB rows. Phase 3 asks: given a node, what does

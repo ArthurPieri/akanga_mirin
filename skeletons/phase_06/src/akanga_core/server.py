@@ -81,8 +81,16 @@ def create_app(
     2. Define a lifespan context manager that:
        a. Opens GraphDatabase(db_path)
        b. Stores it in _app_state["db"] and _app_state["vault"]
-       c. Yields (server runs here)
-       d. Closes the DB on shutdown
+       c. Indexes the vault BEFORE the first request:
+              from .indexer import full_scan_and_index
+              count = full_scan_and_index(vault, db)
+          and log "serving {count} indexed nodes from {vault}". The API
+          serves the INDEX — without this scan, a server pointed at an
+          existing vault answers GET /nodes with [] until something else
+          happens to index the same DB file. The scan is hash-first and
+          idempotent (Phase 2), so restarts are cheap.
+       d. Yields (server runs here)
+       e. Closes the DB on shutdown
     3. Create FastAPI(lifespan=lifespan)
     4. Add CORS middleware (S2) — restricted to localhost dev origins::
 

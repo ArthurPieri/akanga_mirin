@@ -21,6 +21,7 @@ Security posture (all three layers, outermost first):
 """
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -31,7 +32,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .db import GraphDatabase
+from .indexer import full_scan_and_index
 from .parser import content_hash, parse_node_file, write_node_file
+
+logger = logging.getLogger(__name__)
 
 # Built-in node templates exposed by GET /api/v1/templates.
 TEMPLATES = ["note", "active-http", "active-tcp", "active-service", "virtual", "diagram"]
@@ -174,15 +178,24 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        """Open the DB on startup, close it on shutdown.
+        """Open the DB and index the vault on startup, close on shutdown.
 
         One ``check_same_thread=False`` connection (GraphDatabase's own
         lock serializes access) shared by every request — opening a
         connection per request would defeat WAL's snapshot semantics.
+
+        The API serves the INDEX, so the index must reflect the vault
+        BEFORE the first request: without the startup scan, a server
+        pointed at an existing vault answers ``GET /nodes`` with ``[]``
+        until some other process happens to index the same DB file. The
+        scan is hash-first and idempotent (Phase 2), so an already-indexed
+        vault costs one hash per file and zero writes.
         """
         db = GraphDatabase(resolved_db)
         _app_state["db"] = db
         _app_state["vault"] = resolved_vault
+        count = full_scan_and_index(resolved_vault, db)
+        logger.info("serving %d indexed nodes from %s", count, resolved_vault)
         try:
             yield
         finally:

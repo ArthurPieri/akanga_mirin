@@ -28,6 +28,10 @@ Complete them in order — each phase builds on the previous.
 | [Phase 7](learning/phase-07-version-control.md) | Version Control as a Feature | 2–3h |
 | [Phase 8](learning/phase-08-ai-integration.md) | AI Integration (MCP) | 3–4h |
 
+Times are implementation only — budget **~1 hour extra per phase** for the vault
+nodes and Reflect prompts. The vault is a deliverable (`make vault-check` enforces
+it), not an extra.
+
 ---
 
 ## Terminology
@@ -63,7 +67,9 @@ phase mentions a concept you're not confident about.
 - [Terminal and tmux Basics](foundations/terminal-and-tmux-basics.md) — shell, tmux, the study session
 - [YAML and Markdown Frontmatter](foundations/yaml-and-markdown-frontmatter.md) — YAML, frontmatter, python-frontmatter
 
-There is also an [Architecture Overview](architecture-overview.md) and a
+There is also an [Observability & Debugging module](observability-module.md)
+(structured logging, timing decorators, health endpoints — wired into Phase 4),
+plus an [Architecture Overview](architecture-overview.md) and a
 [Detailed Architecture Reference](architecture-detailed.md) describing the
 system the curriculum builds.
 

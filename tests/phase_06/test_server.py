@@ -289,6 +289,59 @@ def test_list_templates(test_client):
 
 
 # ---------------------------------------------------------------------------
+# Runtime-entry contract  (adversarial-analysis-v4 finding #2)
+# ---------------------------------------------------------------------------
+
+
+def test_lifespan_indexes_existing_vault(tmp_path):
+    """A server started over a vault that ALREADY contains nodes must serve them.
+
+    Every other test in this suite creates nodes through the API, so a server
+    that never looks at the vault on startup still passes — that is exactly
+    how v4 finding #2 shipped: `make serve` over a 50-node vault returned []
+    from /api/v1/nodes unless some OTHER process had indexed the same .db
+    first. This test writes the node files BEFORE create_app and asserts the
+    lifespan indexes them.
+    """
+    pytest.importorskip("fastapi", reason="fastapi not installed — skipping server tests")
+    pytest.importorskip("httpx", reason="httpx not installed — skipping server tests")
+
+    from starlette.testclient import TestClient
+
+    from tests.phase_06.conftest import _load_create_app, _write_node
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    _write_node(vault, "alpha.md", title="Pre-Existing Alpha")
+    _write_node(vault, "beta.md", title="Pre-Existing Beta")
+
+    create_app = _load_create_app()
+    app = create_app(vault=str(vault), db_path=str(tmp_path / "server_test.db"))
+
+    # TestClient runs the ASGI lifespan — startup happens entering the block.
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/api/v1/nodes")
+        assert resp.status_code == 200, (
+            f"Expected 200 from GET /api/v1/nodes, got {resp.status_code}"
+        )
+        body = resp.json()
+        nodes = body.get("nodes", body) if isinstance(body, dict) else body
+        assert isinstance(nodes, list), f"Expected a list of nodes, got {type(nodes)}: {body!r}"
+
+        titles = {n.get("title") for n in nodes}
+        missing = {"Pre-Existing Alpha", "Pre-Existing Beta"} - titles
+        assert not missing, (
+            f"GET /api/v1/nodes is missing {sorted(missing)!r} — it returned "
+            f"titles {sorted(t for t in titles if t)!r}.\n"
+            "create_app's lifespan must full_scan_and_index the vault — a "
+            "server over an existing vault must not start empty. The scan is "
+            "hash-first idempotent, so indexing on every startup is cheap; "
+            "log 'serving N indexed nodes' so a misconfigured vault path is "
+            "loud instead of silently empty."
+        )
+
+
+# ---------------------------------------------------------------------------
 # Error-path tests  (CCR-9 requirement — at least one per phase)
 # ---------------------------------------------------------------------------
 

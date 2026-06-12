@@ -31,9 +31,12 @@ docs = [
     "mkdocs-material>=9.5.0",
 ]
 graph = [
-    # Phase 5 stretch goal: two-layer graph renderer (Kitty graphics + canvas fallback)
+    # Phase 5 stretch goal: two-layer graph renderer (terminal graphics + canvas fallback)
     # Bounded so the weekly canary (not learner machines) absorbs major bumps (v3 #12).
-    "textual-kitty>=0.4,<1",
+    # textual-image replaced textual-kitty (v4 #12): textual-kitty 0.4.0 — the
+    # latest ever published — exports no widget and cannot deliver the renderer.
+    # The widget entry point is `from textual_image.widget import Image`.
+    "textual-image>=0.6,<1",
     "textual-canvas>=1.1,<2",
     "networkx>=3,<4",
     "matplotlib>=3.8,<4",

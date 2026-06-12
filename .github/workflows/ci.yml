@@ -78,6 +78,74 @@ jobs:
             echo "${PHASE_PAD}    | ${SKEL}      | ${TEST}   | ${SOLN}"
           done
 
+  # The state every real learner occupies — completed work for N-1 (modeled by
+  # the N-1 solution) + `make skeleton PHASE=N` merged on top — verified by nobody
+  # (adversarial-analysis-v4.md #4): CI tested pristine skeletons and pristine
+  # solutions, never the merged product. This job walks every transition
+  # N-1 → N, exercises the AST merge, and asserts the merged tree is a sane
+  # STARTING state: pytest collection must succeed (exit != 2) and the short
+  # tracebacks may contain NotImplementedError (stubs are unimplemented — that
+  # is the expected red), but never ImportError/AttributeError/NameError.
+  transition:
+    name: Merged-skeleton transitions (N-1 → N)
+    needs: checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.7.x"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Walk every skeleton transition N-1 → N
+        run: |
+          FAILED=0
+          for N in 1 2 3 4 5 6 7 8; do
+            PREV_PAD=$(printf "%02d" $((N - 1)))
+            N_PAD=$(printf "%02d" "$N")
+            echo ""
+            echo "── Transition ${PREV_PAD} → ${N_PAD} ──"
+            rm -rf src
+            # Base = the prior SOLUTION, not the prior skeleton: a real learner at
+            # this transition has IMPLEMENTED phases 0..N-1 (skeleton marker files
+            # contain no code and would fail imports for reasons no learner hits).
+            cp -R "solutions/phase_${PREV_PAD}/src" src
+            if ! make skeleton PHASE=$N; then
+              echo "::error::make skeleton PHASE=$N failed — the merged-skeleton state is broken for transition ${PREV_PAD}→${N_PAD}"
+              FAILED=$((FAILED + 1))
+              continue
+            fi
+            STATUS=0
+            AKANGA_SRC=./src uv run pytest "tests/phase_${N_PAD}" -q --tb=line > out.log 2>&1 || STATUS=$?
+            cat out.log
+            if [ "$STATUS" -eq 2 ]; then
+              echo "::error::pytest collection failed (exit 2) — the merged-skeleton state is broken for transition ${PREV_PAD}→${N_PAD}"
+              FAILED=$((FAILED + 1))
+              continue
+            fi
+            if grep -E 'ImportError|AttributeError|NameError' out.log; then
+              echo "::error::ImportError/AttributeError/NameError in the merged tree — the merged-skeleton state is broken for transition ${PREV_PAD}→${N_PAD} (NotImplementedError is the only acceptable failure for unimplemented stubs)"
+              FAILED=$((FAILED + 1))
+              continue
+            fi
+            echo "Transition ${PREV_PAD} → ${N_PAD}: merged skeleton collects cleanly (pytest exit ${STATUS})."
+          done
+          rm -f out.log
+          if [ "$FAILED" -gt 0 ]; then
+            echo "${FAILED} transition(s) produce a broken merged-skeleton starting state."
+            exit 1
+          fi
+          echo "All 8 merged-skeleton transitions are sane starting states."
+
   # The real integrity property: solution N must pass the CUMULATIVE suite
   # 00..N, not just its own phase (adversarial-analysis-v3.md #12). The matrix
   # makes the O(N²) check affordable: 9 parallel legs with a warm uv cache.

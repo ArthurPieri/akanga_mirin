@@ -1,4 +1,5 @@
 """Phase 04 conftest — resolves AKANGA_SRC and provides concurrency fixtures."""
+import time
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,21 @@ from tests.conftest import _resolve_akanga_src
 def _setup_akanga_src() -> Path:
     """Insert AKANGA_SRC into sys.path before any test module is imported."""
     return _resolve_akanga_src(4)
+
+
+def _wait_until(predicate, timeout: float = 2.0) -> bool:
+    """Poll *predicate* until it is truthy or *timeout* seconds elapse.
+
+    The canonical replacement for flat `time.sleep(X); assert ...` in async
+    tests: it returns as soon as the condition holds (fast on healthy runs)
+    and only burns the full timeout when the assertion is about to fail.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return bool(predicate())
 
 
 # ---------------------------------------------------------------------------

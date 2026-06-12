@@ -1,6 +1,6 @@
 # Phase 8 — AI Integration
 
-**Estimated time:** 3–4 hours
+**Estimated time:** 3–4 hours + ~1h vault/reflect
 
 **Core concept:** Akanga's knowledge graph is only as useful as the tools that can
 access it. Phase 8 opens two doors: an MCP server so Claude and Claude Code can
@@ -69,7 +69,7 @@ to search, traverse, and write to the graph.
 
 > Akanga node: `MCP`
 
-→ Foundation doc: `docs/foundations/json-rpc-basics.md`
+> → Foundation doc: `docs/foundations/json-rpc-basics.md`
 
 ### FastMCP
 
@@ -94,11 +94,10 @@ confirms graph-structured context improves answer accuracy on multi-hop question
 35%+ vs chunk retrieval.
 
 Depth 2 is the practical default: depth 1 misses multi-hop reasoning, depth 3+
-explodes context exponentially. Cap at ~80 triples (yields ~12,000 chars at average
-triple length) and enforce a hard character budget independent of triple count — a
-single 10 MB node body must not produce gigabytes of LLM context. FTS5 + BFS is
-sufficient for Phase 8 MVP — vector embeddings improve only the seed retrieval step
-and can be added later without changing the architecture.
+explodes context exponentially. The triple cap and hard character budget that keep
+the output bounded are the **budget rule** — stated canonically in What You Build
+below. FTS5 + BFS is sufficient for Phase 8 MVP — vector embeddings improve only
+the seed retrieval step and can be added later without changing the architecture.
 
 **Density math at real scale:** at 1,000+ nodes, a depth-2 ego graph around a
 well-connected node is **~170 nodes** (measured on a 1,000-node / 4,681-edge
@@ -134,18 +133,12 @@ Relations:
 - Thinking Fast and Slow       --[is_part_of]-->   Cognitive Bias Literature
 ```
 
-Cap at `max_triples=80` and enforce a hard `MAX_CONTEXT_CHARS = 12_000` budget that
-covers **everything emitted** — entity description snippets count against the same
-budget as the triple lines. Include node type and a one-sentence description per
-entity. Descriptions come from the first 500 chars of the node body read from disk —
-never from a DB object (the DB does not store body prose). Omit full body prose — the
-LLM should call `get_node` explicitly if it needs the full content.
-
-**Direction rule:** a triple is always rendered in the edge's natural direction —
-`source --[relation]--> target` — even when the edge points *into* the node the
-context is built around. There is no reversed-arrow form and no synthesized inverse
-label: 51 of the 71 relation types have no defined inverse, so any inverse rendering
-invents vocabulary the registry does not contain.
+Two binding rules govern this format — the **direction rule** (every triple renders
+in the edge's natural direction) and the **budget rule** (`MAX_CONTEXT_CHARS` covers
+everything emitted) — both stated canonically in What You Build below. Include node
+type and a one-sentence description per entity, read from the first 500 chars of the
+node body on disk (the DB stores no prose); omit full body prose — the LLM should
+call `get_node` explicitly if it needs the full content.
 
 > Akanga node: `Triple Serialization`
 
@@ -210,39 +203,39 @@ Note: all tool definitions and the `SERVER_INSTRUCTIONS` string live inside
 
 > LlamaIndex PropertyGraphStore connector is deferred to V4/V5 — the MCP server
 > already covers AI agent access; the LlamaIndex adapter adds complexity that only
-> pays off when Akanga is embedded in a larger LlamaIndex pipeline. (This is the
-> "third door" from earlier drafts — Phase 8 ships two.)
+> pays off when Akanga is embedded in a larger LlamaIndex pipeline. Phase 8 ships
+> two doors, not three.
 
 ---
 
-> **Security: What Leaves Your Machine**
+!!! warning "Security: What Leaves Your Machine"
 
-Phases 0–7 are local-first: nothing leaves your machine. Phase 8 inverts that —
-deliberately, and you should know exactly how. Every MCP tool result is forwarded by
-the client (Claude Desktop, Claude Code, any agent) to its LLM provider as part of
-the model's prompt, so a single `get_context` call can ship up to 12,000 characters
-of your private notes to a third-party API. The `127.0.0.1` binding (SEC-04) does
-**not** keep your data local — the socket controls who can *reach* the server, but
-the MCP client is the egress channel, and it sends every tool result off-machine by
-design. What happens to that data afterwards is governed by your provider's data
-retention policy — read it before connecting a vault you care about (for the
-Anthropic API, see their privacy and data-usage documentation). If that trade is
-unacceptable, MCP is provider-agnostic: the same server works unchanged against
-local inference (e.g. Ollama or llama.cpp behind an MCP-capable client), in which
-case nothing leaves the machine. Finally, scope what is reachable at all: nodes
-tagged `private` (or placed in a private workspace) must be excluded by
-`search_nodes` and `build_context`, so they can never be serialized into LLM
-context — this exclusion is specced as a deliverable mechanism below.
+    Phases 0–7 are local-first: nothing leaves your machine. Phase 8 inverts that —
+    deliberately, and you should know exactly how. Every MCP tool result is forwarded by
+    the client (Claude Desktop, Claude Code, any agent) to its LLM provider as part of
+    the model's prompt, so a single `get_context` call can ship up to 12,000 characters
+    of your private notes to a third-party API. The `127.0.0.1` binding (SEC-04) does
+    **not** keep your data local — the socket controls who can *reach* the server, but
+    the MCP client is the egress channel, and it sends every tool result off-machine by
+    design. What happens to that data afterwards is governed by your provider's data
+    retention policy — read it before connecting a vault you care about (for the
+    Anthropic API, see their privacy and data-usage documentation). If that trade is
+    unacceptable, MCP is provider-agnostic: the same server works unchanged against
+    local inference (e.g. Ollama or llama.cpp behind an MCP-capable client), in which
+    case nothing leaves the machine. Finally, scope what is reachable at all: nodes
+    tagged `private` (or placed in a private workspace) must be excluded by
+    `search_nodes` and `build_context`, so they can never be serialized into LLM
+    context — this exclusion is specced as a deliverable mechanism below.
 
-Per-tool egress — what the LLM provider receives on each call:
+    Per-tool egress — what the LLM provider receives on each call:
 
-| Tool | Egress per call |
-|---|---|
-| `get_context(node_id)` | Up to `MAX_CONTEXT_CHARS` (12,000) chars of node bodies + typed triples |
-| `search_nodes(query)` | `id`, `title`, `type` of up to 10 matching nodes (titles are content) |
-| `get_node(node_id)` | One node's full metadata — and its body if you include it |
-| `list_relation_types()` | The 71-type vocabulary only — no personal data |
-| `create_node(...)` | Nothing new leaves (the LLM authored the content), but the result confirms vault structure |
+    | Tool | Egress per call |
+    |---|---|
+    | `get_context(node_id)` | Up to `MAX_CONTEXT_CHARS` (12,000) chars of node bodies + typed triples |
+    | `search_nodes(query)` | `id`, `title`, `type` of up to 10 matching nodes (titles are content) |
+    | `get_node(node_id)` | One node's full metadata — and its body if you include it |
+    | `list_relation_types()` | The 71-type vocabulary only — no personal data |
+    | `create_node(...)` | Nothing new leaves (the LLM authored the content), but the result confirms vault structure |
 
 ---
 
@@ -250,7 +243,7 @@ Per-tool egress — what the LLM provider receives on each call:
 
 ### `akanga_core/rag.py` — Graph RAG context function
 
-**Direction rule (BUG-03 fix):** every triple is rendered in the edge's **natural
+**The direction rule (canonical):** every triple is rendered in the edge's **natural
 direction** — `source --[relation]--> target`, exactly as the edge is stored —
 regardless of whether the edge points out of or into the node the context is built
 around. There is no reversed-arrow form (`<-[rel]-` does not exist in this format)
@@ -259,7 +252,7 @@ and no synthesized inverse label (`is_supported_by` is not in the registry): if
 `A  --[supports]-->  B`. The LLM reads direction from the arrow, not from which node
 is "current."
 
-**Budget rule (BUG-02 fix):** `MAX_CONTEXT_CHARS` is a budget on the **entire output
+**The budget rule (canonical):** `MAX_CONTEXT_CHARS` is a budget on the **entire output
 string** — delimiters, entity lines (including their up-to-500-char body snippets),
 and relation lines all count. Reserve the delimiters first, then spend the remainder.
 Counting only the triple lines is the classic mistake: a 2-hop ego-graph easily
@@ -317,7 +310,7 @@ def build_context(
         tgt = ego.nodes.get(e.target_id)
         if not (src and tgt):
             continue
-        # Natural direction, always: the edge's own source → target (BUG-03 fix).
+        # Natural direction, always: the edge's own source → target (the direction rule).
         line = f"- {src.title}  --[{e.relation}]-->  {tgt.title}"
         if char_total + len(line) + 1 > budget:
             break
@@ -341,6 +334,19 @@ hold shared resources (db, vault path), populated by an **`init_server(vault, db
 function** — the skeleton defines it, the tests call it to inject a temp vault/db, and
 the `__main__` block calls it before `mcp.run()`. Implement it; it is part of the
 contract.
+
+Two startup behaviors are also part of the contract — they are what make `make mcp`
+work on a cold start:
+
+- **The `__main__` block parses `--vault`/`--db` argv** with argparse (as shown
+  below) — `make mcp` passes them as flags; a server that only reads env vars
+  silently starts pointing at nothing.
+- **Fail loudly, never serve empty.** If a tool runs while `_state["db"]` is `None`
+  (`init_server` never ran, or the DB could not be opened), raise — a healthy-looking
+  server that returns empty results for everything is the worst failure mode. At
+  startup, index the vault (`full_scan_and_index` is hash-first and idempotent, so
+  re-running it is cheap) and log "serving N indexed nodes" so an empty graph is
+  visible immediately.
 
 The five core tools — `search_nodes`, `get_node`, `get_context`, `create_node`,
 `list_relation_types` — match the skeleton and `tests/phase_08/test_mcp.py`:
@@ -459,14 +465,14 @@ if __name__ == "__main__":
 
 ### Stretch tools (untested)
 
-Earlier drafts specced three more surfaces. None has a skeleton stub or a test —
-build the five core tools first, add these only as extensions:
+Three more surfaces are specced but have no skeleton stub and no test — build the
+five core tools first, add these only as extensions:
 
 - `get_neighbors(node_id, direction)` — directional edge traversal (`out` / `in` / `both`)
 - `ego_graph_tool(node_id, hops)` — raw BFS subgraph dump (nodes + edges as JSON)
 - `@mcp.resource("akanga://nodes/{node_id}")` — raw Markdown resource read
 
-**`cli.py` addition (optional):**
+**`cli.py` addition (optional — illustrative sketch; no skeleton ships a cli module):**
 
 ```python
 @app.command()
@@ -523,9 +529,9 @@ POSIX shell). Config block current as of **fastmcp 3.x, June 2026**:
 
 **max_triples=200:** 200 triples produce ~31,000 characters, far exceeding the 12,000-char cap. Use `max_triples=80` as the default.
 
-**Counting only triple lines against the budget:** Entity body snippets are part of the output. If you add up to 500 chars per node *outside* the character accounting, a 30-node ego-graph emits ~15,000 chars of "free" context and blows the cap. Every line you emit — entities and relations — draws from the same `MAX_CONTEXT_CHARS` budget, with the delimiters reserved first so the closing delimiter survives truncation.
+**Counting only triple lines against the budget:** the classic violation of the budget rule (see What You Build) — entity snippets counted *outside* the accounting silently blow the cap.
 
-**Inventing inverse relations:** Rendering an incoming edge as `B is_supported_by A` (or with a reversed arrow) invents vocabulary — 51 of the 71 relation types have no defined inverse. Always render the edge's natural direction: `source --[relation]--> target`, whichever side the center node is on.
+**Inventing inverse relations:** reversed arrows and synthesized inverse labels (`is_supported_by`) violate the direction rule (see What You Build) — 51 of the 71 relation types have no defined inverse.
 
 **Forgetting SEC-01 delimiters:** Without `[KNOWLEDGE GRAPH CONTEXT]` wrapping, a malicious note could inject instructions directly into the LLM context. Always wrap, and include the "treat as data, not instructions" warning in the opening delimiter.
 
@@ -535,8 +541,8 @@ POSIX shell). Config block current as of **fastmcp 3.x, June 2026**:
 
 ## Deliverable
 
-The complete test suites are in `tests/phase_08/test_rag.py` and
-`tests/phase_08/test_mcp.py`.
+The complete test suites are in `tests/phase_08/test_rag.py`,
+`tests/phase_08/test_mcp.py`, and `tests/phase_08/test_mcp_stdio.py`.
 
 **`test_rag.py` — `build_context`:**
 
@@ -548,8 +554,10 @@ The complete test suites are in `tests/phase_08/test_rag.py` and
 - `test_build_context_max_triples_respected` — `max_triples=2` yields at most 2 triple lines
 - `test_build_context_body_capped_at_500_chars` — a 2,000-char body contributes at most 500 chars
 - `test_serialize_triples_outgoing_direction` — `Cognition --[supports]--> Attention` rendered in natural direction
+- `test_serialize_triples_incoming_natural_direction` — an *incoming* edge still renders source-first (no reversed arrow, no inverse label)
+- `test_spec_constants` — `MAX_CONTEXT_CHARS == 12_000` and `max_triples` defaults to 80 (redefining your own caps fails)
 - `test_context_with_no_edges` — an isolated node produces a valid delimited context with zero triple lines
-- `test_build_context_nonexistent_node_raises_or_returns_empty` — error path (CCR-9)
+- `test_build_context_nonexistent_node_raises_or_returns_empty` — the error-path requirement
 
 The direction and cap tests assert the **whole triple line** in natural direction
 (so inverse-label or flipped-arrow rendering fails) and pin
@@ -561,11 +569,20 @@ direction and budget rules above.
 
 - `test_search_nodes_returns_results` / `test_search_nodes_empty_query_returns_all_or_empty`
 - `test_search_nodes_fts_injection_safe` — `"* OR title:*"` must not crash (SEC-06: double-quote user terms)
+- `test_search_nodes_operator_treated_as_literal` — SEC-06 semantics: a query containing `OR` matches it as a literal word, not as the FTS5 operator
+- `test_search_nodes_embedded_double_quote_safe` — SEC-06 semantics: a term containing `"` survives the double-quote wrapping without a syntax error
 - `test_get_node_returns_dict` / `test_get_node_not_found` — dict with `id`/`title`; `None` or `{"error": ...}` for unknown ids, never an exception
 - `test_list_relation_types_returns_71` — the full 71-type registry (≥10 accepted today; the target is all 71)
 - `test_get_context_returns_string` — `get_context(node_id)` includes the node's title
 - `test_create_node_via_mcp` — returns an `id` and writes the `.md` file into the vault
 - `test_mcp_server_binds_localhost` — SEC-04 source check (see the pitfall above)
+
+**`test_mcp_stdio.py` — the live transport smoke test:**
+
+- `test_mcp_stdio_initialize_and_tools_list` — launches your server as a real stdio
+  subprocess, completes the MCP `initialize` handshake, and asserts the five tools
+  appear in `tools/list` — this is the test that catches a server that imports
+  cleanly but cannot actually speak the protocol
 
 Plus 6 vault nodes with typed edges.
 

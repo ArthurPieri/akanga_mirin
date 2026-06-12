@@ -13,6 +13,14 @@
 
 .DEFAULT_GOAL := help
 
+# Fail fast (adversarial-analysis-v4 #1): recipes here chain many commands with
+# ';' inside a single shell. Without -e the recipe's exit status is the LAST
+# command's (usually a printf), so a failed `uv sync` still printed a green
+# "Done." and exited 0. With -e every command must succeed or the target fails.
+# Guarded constructs (`if`, `&&`/`||` lists, `|| true`) keep working as before.
+SHELL       := /bin/sh
+.SHELLFLAGS := -ec
+
 # ── Variables ─────────────────────────────────────────────────────────────────
 
 PHASE        ?= 0
@@ -40,7 +48,7 @@ GLOW         := glow
 
 # ── .PHONY declarations ────────────────────────────────────────────────────────
 
-.PHONY: help \
+.PHONY: help need-uv \
         study docs-phase docs-all foundations \
         vault-init vault-check \
         run serve mcp \
@@ -54,6 +62,25 @@ GLOW         := glow
         status where-is-my-src sync-forward \
         commit-progress push \
         docs-serve docs-build
+
+# ── Preflight ─────────────────────────────────────────────────────────────────
+# Every target that shells out through uv depends on this guard so a missing uv
+# fails LOUDLY with install instructions instead of `command not found` followed
+# by a green "Done." (adversarial-analysis-v4 #1). Declared as extra
+# prerequisites (not on the `##` help lines) so `make help` output stays clean.
+
+need-uv:
+	@command -v uv >/dev/null 2>&1 || { \
+		printf 'error: uv is required but was not found on your PATH.\n'; \
+		printf 'Install:\n  curl -LsSf https://astral.sh/uv/install.sh | sh\n'; \
+		printf 'Then restart your shell (or source the env file the installer names) and retry.\n'; \
+		exit 1; \
+	}
+
+setup setup-phase setup-workshop: need-uv
+test test-solution test-all: need-uv
+vault-init vault-check: need-uv
+run serve mcp: need-uv
 
 # =============================================================================
 # HELP — self-documenting (reads ## comments on target lines)
@@ -233,16 +260,18 @@ test: ## Run tests for one phase against AKANGA_SRC (PHASE=2)
 	if [ ! -d "tests/phase_$${PHASE_PAD}" ]; then \
 		echo "error: tests/phase_$${PHASE_PAD}/ not found — tests may not exist yet"; exit 1; \
 	fi; \
-	if [ "$(AKANGA_SRC)" = "./src" ] && [ "$(origin AKANGA_SRC)" = "default" ]; then \
+	if [ "$(AKANGA_SRC)" = "./src" ] && [ "$(origin AKANGA_SRC)" = "file" ]; then \
 		printf '\n\033[1;33m⚠  WARNING: AKANGA_SRC is not set — defaulting to ./src\033[0m\n'; \
 		printf '\033[1;33m   If ./src is empty or missing, you are NOT testing your code.\033[0m\n'; \
 		printf '\033[1;33m   To test your code:      AKANGA_SRC=/path/to/src make test PHASE=%s\033[0m\n\n' "$(PHASE)"; \
 	fi; \
 	printf 'Testing phase \033[1m%s\033[0m against \033[36m%s\033[0m ...\n' "$${PHASE_PAD}" "$(AKANGA_SRC)"; \
-	if AKANGA_SRC="$(AKANGA_SRC)" $(PYTEST) tests/phase_$${PHASE_PAD}/ -v $(PYTEST_ARGS); then \
+	STATUS=0; \
+	AKANGA_SRC="$(AKANGA_SRC)" $(PYTEST) tests/phase_$${PHASE_PAD}/ -v $(PYTEST_ARGS) || STATUS=$$?; \
+	if [ "$$STATUS" -eq 0 ]; then \
 		echo "PHASE=$(PHASE_NUM) $$(date +%Y-%m-%d) green" >> .akanga-progress; \
 		printf '\n\033[0;32mRecorded in .akanga-progress\033[0m — \033[36mmake resume\033[0m remembers where you are.\n'; \
-	else \
+	elif [ "$$STATUS" -eq 1 ]; then \
 		echo "PHASE=$(PHASE_NUM) $$(date +%Y-%m-%d) red" >> .akanga-progress; \
 		printf '\n\033[1;33mStuck? Work the ladder before reaching for the answer key:\033[0m\n'; \
 		printf '  1) Read the failing test'"'"'s message — it is a hint by design.\n'; \
@@ -250,6 +279,12 @@ test: ## Run tests for one phase against AKANGA_SRC (PHASE=2)
 		printf '  3) Check the Pitfalls section of the phase doc: \033[36mmake docs-phase PHASE=%s\033[0m\n' "$(PHASE)"; \
 		printf '  4) After 30+ minutes stuck: \033[36mmake peek PHASE=%s FILE=akanga_core/<file>.py\033[0m\n' "$(PHASE)"; \
 		exit 1; \
+	else \
+		printf '\n\033[0;31mpytest exited with code %s — that is an infrastructure problem, not a test failure.\033[0m\n' "$$STATUS"; \
+		printf '  (2 = collection error/interrupted, 3 = internal error, 4 = usage error, 5 = no tests collected)\n'; \
+		printf 'Nothing was recorded in .akanga-progress — this run was not a real attempt at the tests.\n'; \
+		printf 'Fix the error above (often an import/syntax error in src/) and run \033[36mmake test PHASE=%s\033[0m again.\n' "$(PHASE)"; \
+		exit "$$STATUS"; \
 	fi
 
 test-solution: ## Run tests for one phase against the reference solution (PHASE=2)
@@ -410,7 +445,7 @@ skeleton: ## Copy skeleton for a phase into ./src/ as the learner's starting poi
 		$(PYTHON) scripts/skeleton_merge.py "$$SKEL/src" src; \
 	fi; \
 	echo "Done. Edit src/ to complete the implementation."; \
-	printf 'Next: \033[36mmake test PHASE=%d\033[0m\n' "$(PHASE)"
+	printf 'Next: \033[36mmake test PHASE=%s\033[0m\n' "$(PHASE)"
 
 skeleton-check: ## Verify skeleton still raises NotImplementedError — no solution leakage (PHASE=2)
 	@PHASE_PAD="$(PHASE_PAD)"; \
@@ -441,7 +476,7 @@ setup-workshop: ## Lean day-1 install: core deps + test runner, no heavy extras
 	printf '\033[0;32mDone.\033[0m Run \033[36mmake test PHASE=0\033[0m to verify.\n'; \
 	echo ""; \
 	echo "Skipped (install later if you need them):"; \
-	echo "  graph extras — Phase 5 stretch-goal renderer (textual-kitty, textual-canvas,"; \
+	echo "  graph extras — Phase 5 stretch-goal renderer (textual-image, textual-canvas,"; \
 	echo "                 networkx, matplotlib, pillow). Install: uv sync --all-extras"; \
 	echo "  docs extras  — MKDocs site tooling. Install: uv sync --extra docs"
 

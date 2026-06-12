@@ -50,7 +50,7 @@ graph = [
     { name = "networkx" },
     { name = "pillow" },
     { name = "textual-canvas" },
-    { name = "textual-kitty" },
+    { name = "textual-image" },
 ]
 
 [package.metadata]
@@ -72,7 +72,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.0" },
     { name = "textual", specifier = ">=8.2.5,<9.0.0" },
     { name = "textual-canvas", marker = "extra == 'graph'", specifier = ">=1.1,<2" },
-    { name = "textual-kitty", marker = "extra == 'graph'", specifier = ">=0.4,<1" },
+    { name = "textual-image", marker = "extra == 'graph'", specifier = ">=0.6,<1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
     { name = "watchdog", specifier = ">=4.0.0" },
 ]
@@ -2283,16 +2283,16 @@ wheels = [
 ]
 
 [[package]]
-name = "textual-kitty"
-version = "0.4.0"
+name = "textual-image"
+version = "0.13.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pillow" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/af/80/06c97b21b872cc1d5f9662bc15df4418964bba0aaa05e89db9a73687535a/textual_kitty-0.4.0.tar.gz", hash = "sha256:b0892951378f32b85aacf30bf70df05fe8df903bf7b74145cc123f32cda49c34", size = 14297, upload-time = "2024-09-28T18:35:27.293Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/10/77/b2128ced69556bfbb8e1c19d8f013e621cf12531eaba4e9b09e1cfa81e37/textual_image-0.13.2.tar.gz", hash = "sha256:8ca0cee2bfcd7734de5b16a1936da226b77b745e28830d9cf2bc202cb70e43ee", size = 2185178, upload-time = "2026-05-30T21:42:33.563Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/68/db/59eb75ece99f7f3af76964dce7c3607691d5ab1bd965c87d8f2c76b40d5d/textual_kitty-0.4.0-py3-none-any.whl", hash = "sha256:fc9c07045ad2dcc94f23bf418def26177203fb0e00b1a82882fb55e2a5831157", size = 11015, upload-time = "2024-09-28T18:35:26.127Z" },
+    { url = "https://files.pythonhosted.org/packages/36/be/60aafd7263a6daa8cc4017e8bd4452c85b63ccd82a64f02636ca46e073b7/textual_image-0.13.2-py3-none-any.whl", hash = "sha256:41635f545ce2d0b3544763a2d10f25ada7f64c51acef77483b80fbfcf7ab22ee", size = 118469, upload-time = "2026-05-30T21:42:31.964Z" },
 ]
 
 [[package]]

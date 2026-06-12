@@ -19,6 +19,8 @@ when the module is run as a server (``python -m akanga_mcp.server``).
 """
 from __future__ import annotations
 
+import argparse
+import logging
 import os
 import re
 import sys
@@ -26,8 +28,11 @@ import uuid
 from pathlib import Path
 
 from akanga_core.db import GraphDatabase
+from akanga_core.indexer import full_scan_and_index
 from akanga_core.parser import content_hash, parse_node_file, write_node_file
 from akanga_core.rag import build_context
+
+logger = logging.getLogger(__name__)
 
 try:  # The transport layer is optional: tools work without it (unit tests).
     from fastmcp import FastMCP
@@ -62,12 +67,21 @@ _VOCABULARY_ROW = re.compile(
 
 
 def init_server(vault: str | Path, db_path: str | Path) -> None:
-    """Initialize (or re-initialize) module state for the given vault + DB."""
+    """Initialize (or re-initialize) module state for the given vault + DB.
+
+    The vault is indexed immediately: the MCP tools serve the INDEX, so a
+    server pointed at a real vault must reflect what is on disk rather
+    than whatever a previous process happened to leave in the DB file.
+    ``full_scan_and_index`` is hash-first and idempotent (Phase 2), so an
+    already-indexed vault costs one hash per file and zero writes.
+    """
     global db, vault_path
     if db is not None:
         db.close()
     vault_path = Path(vault).resolve()
     db = GraphDatabase(str(db_path))
+    count = full_scan_and_index(str(vault_path), db)
+    logger.info("serving %d indexed nodes from %s", count, vault_path)
 
 
 def _find_vocabulary_doc() -> Path | None:
@@ -246,12 +260,47 @@ def build_server() -> FastMCP:
 
 
 if __name__ == "__main__":
-    v_path = os.getenv("AKANGA_VAULT_PATH")
-    d_path = os.getenv("AKANGA_DB_PATH")
-    if v_path and d_path:
-        init_server(v_path, d_path)
+    arg_parser = argparse.ArgumentParser(
+        description="Akanga MCP server (stdio transport by default)"
+    )
+    # Argv wins; the AKANGA_* environment variables are the fallback
+    # defaults (`make mcp` passes argv, MCP client configs usually set env).
+    arg_parser.add_argument(
+        "--vault",
+        default=os.getenv("AKANGA_VAULT_PATH"),
+        help="Vault root directory (default: $AKANGA_VAULT_PATH)",
+    )
+    arg_parser.add_argument(
+        "--db",
+        default=os.getenv("AKANGA_DB_PATH"),
+        help="SQLite index path (default: $AKANGA_DB_PATH)",
+    )
+    arg_parser.add_argument(
+        "--http",
+        action="store_true",
+        help="Serve over HTTP on 127.0.0.1 instead of the default stdio transport",
+    )
+    args = arg_parser.parse_args()
+
+    if not args.vault or not args.db:
+        # A server with db=None answers every tool with empty results and
+        # isError=False — healthy-looking and know-nothing, forever. Refuse.
+        print(
+            "FATAL: no vault/db configured — refusing to start an MCP server "
+            "that knows nothing.\n"
+            "Pass --vault PATH and --db PATH, or set the AKANGA_VAULT_PATH "
+            "and AKANGA_DB_PATH environment variables.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    init_server(args.vault, args.db)
+    if db is None:  # pragma: no cover — init_server either sets db or raises
+        print("FATAL: server state is still uninitialized after init_server().", file=sys.stderr)
+        sys.exit(2)
+
     mcp = build_server()
-    if "--http" in sys.argv:
+    if args.http:
         # SEC-04: localhost only — never expose the server to the network.
         mcp.run(transport="http", host="127.0.0.1", port=8765)
     else:

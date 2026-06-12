@@ -9,12 +9,12 @@ exclude_docs: |
   adversarial-analysis.md
   adversarial-analysis-v2.md
   adversarial-analysis-v3.md
+  adversarial-analysis-v4.md
   analysis-and-enhancements.md
   implementation-plan.md
   plan-*.md
   user-stories.md
   future-ideas.md
-  observability-module.md
   roadmap.md
   status-remediation.md
   archive/
@@ -57,6 +57,7 @@ nav:
     - "JSON-RPC Basics": foundations/json-rpc-basics.md
     - "Makefile Basics": foundations/makefile-basics.md
     - "MKDocs Basics": foundations/mkdocs-basics.md
+    - "Observability & Debugging": observability-module.md
     - "Python Dataclasses": foundations/python-dataclasses.md
     - "Python Threading": foundations/python-threading.md
     - "Python Type Annotations": foundations/python-type-annotations.md

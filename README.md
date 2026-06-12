@@ -24,10 +24,12 @@ Akanga Mirin is an open-source, project-based learning path for Python developer
 | 7 | Version Control | GitPython auto-commit, squash queue, change history | 2–3h |
 | 8 | AI Integration | MCP server + Graph RAG (FTS5 seed → BFS context) | 3–4h |
 
-Total: **roughly 35–55 hours ±30%** of hands-on coding for an intermediate Python
-developer working alone (more with optional foundation-doc study and vault work).
-Per-phase estimates above are realistic learner time, not author time. Phase 5
-(Textual TUI) is the steepest; budget 12–20 hours if you have not used Textual before.
+Total: **roughly 34–51 hours of implementation, plus 12–24 hours of reading, vault
+construction, and reflection — the vault is a deliverable, not an extra** (each phase
+ends with vault nodes that `make vault-check` enforces). Estimates are realistic
+learner time for an intermediate Python developer working alone, not author time.
+Phase 5 (Textual TUI) is the steepest; budget 12–20 hours if you have not used
+Textual before.
 
 > **Fast path.** Want a usable tool sooner? Phase 6 depends only on phases 0–2:
 > do **0 → 1A → 1B → 2 → 6**, then come back for 3–5. This is the roadmap's MVP cut —
@@ -48,6 +50,14 @@ Per-phase estimates above are realistic learner time, not author time. Phase 5
 ---
 
 ## Quickstart
+
+**Prerequisites:**
+
+- [uv](https://docs.astral.sh/uv/) — install with `curl -LsSf https://astral.sh/uv/install.sh | sh`
+- Python ≥ 3.12 (uv can install it for you: `uv python install 3.12`)
+- git
+- Platforms: macOS, Linux, or Windows via WSL2 — native Windows is unsupported
+  (the Make + tmux workflow assumes a POSIX shell)
 
 ```bash
 git clone https://github.com/ArthurPieri/akanga_mirin
@@ -132,7 +142,11 @@ akanga_mirin/
 │   └── project-makefile            # learner's own project Makefile template
 └── scripts/
     ├── study.sh                    # tmux study session script
-    └── skeleton_check.py           # verifies skeletons still raise NotImplementedError
+    ├── skeleton_check.py           # verifies skeletons still raise NotImplementedError
+    ├── skeleton_merge.py           # merges new stubs into preserved files at phase transitions
+    ├── sync_forward.py             # propagates fixes across phase trees (drift gate in CI)
+    ├── check_doc_contracts.py      # doc ↔ skeleton ↔ test contract lint
+    └── validate_vault.py           # the vault-check conceptual gate
 ```
 
 ---
@@ -163,6 +177,19 @@ This learning path is local-first and personal. The following are explicitly out
 - Docker (no daemon, no container overhead for a personal tool)
 - Vector embeddings / semantic search (FTS5 is sufficient for MVP)
 - Diagram / canvas nodes and active / executable nodes
+
+---
+
+## About the name
+
+**Akanga** is a Tupi-Guaraní word meaning "head" or "mind" — in Tupi-Guaraní
+languages, the seat of thought, memory, and identity — and **mirĩ** means "little"
+or "small": Akanga Mirin is *the little mind you build outside your head*. The
+default workspace, Nhamandu, is named for the primordial being of Mbya Guaraní
+cosmology, whose unfolding thought gave rise to language and the world (Cadogan,
+León (1959). *Ayvu Rapyta: Textos míticos de los Mbyá-Guaraní del Guairá*).
+You will write both of these into your own vault as nodes in the Phase 1B
+vault exercise.
 
 ---
 

@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from .links import extract_wikilinks, resolve_wikilink
-from .parser import content_hash, parse_node_file, write_node_file
+from .parser import content_hash, parse_node_file, write_back, write_node_file
 
 if TYPE_CHECKING:  # pragma: no cover — import only for type checkers
     from .db import GraphDatabase
@@ -128,6 +128,17 @@ def _index_node(path: str, db: GraphDatabase, vault_path: str) -> tuple[Any, Any
     if existing is not None and existing.content_hash == file_hash:
         return existing, None  # unchanged — zero parses, zero writes
 
+    # CHANGED file: fold inline `[[Target | relation]]` captures into the
+    # frontmatter `edges:` block BEFORE parsing. `write_back` is atomic
+    # and idempotent (a no-op when there is nothing to fold) — without
+    # this call the Phase 1A fold is dead code at runtime and typed
+    # inline edges reach the DB as bare wikilinks. The fold may change
+    # the bytes, so re-hash afterwards. Boundary: unchanged files keep
+    # the skip above, so an old never-folded file folds on its next real
+    # edit (or when `rm *.db` forces a full re-index).
+    write_back(path)
+    file_hash = content_hash(path)
+
     node = parse_node_file(path)
     if _persist_minted_id(node, path):
         file_hash = content_hash(path)  # the write-back changed the bytes
@@ -197,11 +208,17 @@ def index_file(path: str, db: GraphDatabase, vault_path: str) -> Node | Any:
     on a match the existing record is returned WITHOUT parsing — a no-op
     editor save costs one file read, total.
 
-    On change: a missing/invalid id is minted and written back to the
-    file (stable identity — see `_persist_minted_id`), the node row is
-    upserted, and its outgoing edges are deleted and re-derived from the
-    current body. A wikilink whose target is not indexed yet resolves on
-    the next `full_scan_and_index` (its pass 2 sees the full registry).
+    On change, in order: inline `[[Target | relation]]` captures are
+    folded into the frontmatter `edges:` block (`write_back` — atomic,
+    idempotent) and the file re-hashed, so typed prose edges become typed
+    DB edges instead of dying as dead frontmatter; a missing/invalid id
+    is minted and written back to the file (stable identity — see
+    `_persist_minted_id`); the node row is upserted; and its outgoing
+    edges are deleted and re-derived from the current body. Fold
+    boundary: an old never-folded file is still skipped while its hash
+    matches — it folds on its next real edit (or after `rm *.db`).
+    A wikilink whose target is not indexed yet resolves on the next
+    `full_scan_and_index` (its pass 2 sees the full registry).
 
     Exceptions (missing file, malformed YAML) propagate to the caller —
     `full_scan_and_index` logs and counts them.

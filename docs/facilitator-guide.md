@@ -246,7 +246,10 @@ vault node about a difference and why.** That node cannot be faked with a copied
 solution — there is no diff.
 
 **Gate 2 — vault (conceptual).** Every phase ends with a "Vault Nodes to Create"
-table — the vault is the proof of understanding, not the tests. Check it with:
+table — the vault is the proof of understanding, not the tests. It is a deliverable,
+not an extra: budget **~1 hour per phase** for vault nodes and the Reflect prompts
+(the phase docs' "Estimated time" lines now state this separately from coding time) —
+either inside the schedule blocks above or as explicit same-day homework. Check it with:
 
 ```bash
 make vault-check PHASE=N

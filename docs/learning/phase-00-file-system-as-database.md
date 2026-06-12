@@ -1,6 +1,6 @@
 # Phase 0 — File System as Database
 
-**Estimated time: 2–3h**
+**Estimated time: 2–3h + ~1h vault/reflect**
 
 **Core concept:** The file is the database. Not a cache, not a representation — the
 file *is* the record. Everything downstream (index, TUI, API) is derived from files
@@ -74,70 +74,18 @@ git-diffable, and editable in any text editor — no proprietary format, no lock
 
 > → Foundation doc: `docs/foundations/yaml-and-markdown-frontmatter.md`
 
-> **Security: YAML Injection and the Safe Loader**
+!!! warning "Security: YAML injection and the safe loader"
+    PyYAML's default loader can instantiate arbitrary Python objects from tags
+    like `!!python/object/apply:os.system` — parsing one malicious frontmatter
+    block would execute code on your machine. `python-frontmatter` uses
+    `SafeLoader` by default (built-in YAML types only; any `!!python/` tag
+    raises `ConstructorError`), which is why this phase is safe out of the box.
+    If you ever swap YAML libraries, call `yaml.safe_load` explicitly — never
+    bare `yaml.load`.
 
-**What YAML injection is:**
-
-PyYAML's default `Loader` supports a tag system that can instantiate arbitrary
-Python objects from YAML input. A frontmatter file containing:
-
-```yaml
----
-title: !!python/object/apply:os.system ["rm -rf /"]
----
-```
-
-would — with the unsafe loader — execute `os.system("rm -rf /")` the moment the
-file is parsed. This is not a theoretical concern: it is a known, documented attack
-against Python applications that parse untrusted YAML. A vault file modified by
-another party (shared storage, cloned from a public repo, received as a file
-attachment) could carry this payload.
-
-**How python-frontmatter handles this:**
-
-`python-frontmatter` uses PyYAML's `SafeLoader` by default. `SafeLoader` only
-permits YAML's built-in types (strings, integers, floats, booleans, lists,
-dictionaries) and raises an error on any `!!python/` tag. You can verify this
-yourself:
-
-```python
-import frontmatter
-
-# This should raise yaml.constructor.ConstructorError, not execute anything:
-malicious = """---
-title: !!python/object/apply:os.system ["echo injected"]
----
-body text
-"""
-try:
-    post = frontmatter.loads(malicious)
-    print("WARNING: loaded without error — check loader")
-except Exception as e:
-    print(f"Safe: raised {type(e).__name__}: {e}")
-```
-
-Run this in your Phase 0 environment. The expected output is a `ConstructorError`,
-not a print from `os.system`.
-
-**What to do if a library does not use safe loading by default:**
-
-If you replace `python-frontmatter` with a different YAML library, or if a future
-version changes the default, apply the safe loader explicitly:
-
-```python
-import yaml
-
-# Never:
-data = yaml.load(content)           # unsafe — uses FullLoader or Loader depending on version
-
-# Always:
-data = yaml.safe_load(content)      # SafeLoader — built-in types only
-# or, explicitly:
-data = yaml.load(content, Loader=yaml.SafeLoader)
-```
-
-The same rule applies to any YAML that arrives from outside: config files, webhook
-payloads, anything not written by your own `write_node_file()`.
+> → Foundation doc: `docs/foundations/yaml-and-markdown-frontmatter.md`
+> (Security: trust boundaries and safe loading — the full attack walkthrough
+> and a verification snippet you can run)
 
 > Akanga node: `YAML Injection` — link it to `[[YAML Frontmatter]]` (you'll type
 > this edge in Phase 1A)
@@ -377,6 +325,7 @@ These are the tests, by name:
 
 - `test_write_node_file_roundtrip` — write → parse preserves `id`, `title`, `type`, and `tags` (idempotence)
 - `test_write_is_atomic` — no `*.tmp` files remain after a successful write
+- `test_failed_replace_preserves_original_file` — fault injection: when `os.replace` fails mid-write, the original file is untouched and still parses
 - `test_write_node_file_to_nonexistent_dir_creates_it` — writing into a missing subdirectory creates it
 
 **Creating:**

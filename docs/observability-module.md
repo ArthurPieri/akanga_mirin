@@ -861,8 +861,120 @@ under systemd. No external log server needed until you have multiple machines.
 
 ## Applying This Module to Akanga
 
-The Akanga-specific wiring is documented in `docs/learning/phase-04-concurrency-and-events.md`
-(Logging and Debugging section). Here is a brief map of where each concept lands:
+This section wires logging into the multi-component Akanga app you build in Phase 4
+(watcher daemon thread + EventBus + indexer). It takes about 30 minutes; Phase 4's
+"Logging and Debugging" section points here and keeps the debugging recipes that
+build on this wiring.
+
+### Step 1 — Get a logger in every module
+
+Every source file should declare a module-level logger. Never use `print()`.
+
+```python
+# At the top of watcher.py, eventbus.py, indexer.py, app.py
+import logging
+logger = logging.getLogger(__name__)
+# __name__ is "akanga_core.watcher", "akanga_core.eventbus", etc.
+# Every log line will carry its source — you always know where it came from.
+```
+
+### Step 2 — Configure logging in `cli.py` once, at startup
+
+```python
+# In cli.py — called at the start of each @app.command() handler
+import logging
+import sys
+
+def configure_logging(verbose: bool = False) -> None:
+    level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
+        datefmt="%H:%M:%S",
+        stream=sys.stderr,
+    )
+```
+
+Call `configure_logging(verbose)` as the very first line inside each CLI command
+handler, before any other imports or setup. All module loggers automatically inherit
+from the root logger configured here.
+
+### Step 3 — Add `--verbose` to every CLI command
+
+```python
+import typer
+from typing import Annotated
+
+VerboseOption = Annotated[
+    bool,
+    typer.Option("--verbose", "-v", help="Enable DEBUG-level logging."),
+]
+
+@app.command()
+def serve(
+    vault: str = "./vault",
+    db: str = "./.akanga.db",
+    verbose: VerboseOption = False,
+):
+    configure_logging(verbose)
+    ...
+```
+
+Run with `uv run python -m akanga_core.cli serve --verbose` to see every DEBUG log
+from every module. Without `--verbose`, only INFO and above appear.
+
+### Step 4 — Wire an EventBus debug subscriber
+
+When events are not propagating as expected, attach a debug subscriber at startup
+that logs every event:
+
+```python
+# In app.py, inside start_all(), after eventbus is initialized:
+if verbose:
+    _attach_debug_subscriber(eventbus)
+
+def _attach_debug_subscriber(bus: EventBus) -> None:
+    """Attach a logging subscriber to every known event type.
+    Only called when --verbose is active — not in production."""
+    debug_logger = logging.getLogger("eventbus.debug")
+    known_events = ["file_changed", "file_deleted", "node_updated", "node_deleted"]
+
+    def make_handler(name):
+        def handler(**kwargs):
+            debug_logger.debug("EVENT %s payload=%s", name, kwargs)
+        return handler
+
+    for event_name in known_events:
+        bus.subscribe(event_name, make_handler(event_name))
+```
+
+With `--verbose`, every event that passes through the bus now appears in your logs.
+You can immediately see whether a file-change event was published, and whether the
+indexer subscriber received it.
+
+### Step 5 — Log subscriber errors explicitly
+
+The EventBus swallows subscriber exceptions to preserve error isolation. Make sure
+those swallowed errors are logged:
+
+```python
+# In eventbus.py, inside the dispatch loop:
+for handler in handlers:
+    try:
+        handler(**kwargs)
+    except Exception:
+        logger.exception(
+            "Subscriber %s raised on event %s — continuing dispatch",
+            handler.__qualname__,
+            event,
+        )
+```
+
+`logger.exception()` logs at ERROR level and automatically appends the full traceback.
+This is the single most important logging line in the EventBus — without it, subscriber
+crashes are invisible.
+
+### Where each concept lands in Akanga
 
 | Concept | Where it applies in Akanga |
 |---|---|

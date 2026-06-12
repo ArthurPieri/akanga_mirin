@@ -5,7 +5,7 @@ from textwrap import dedent
 
 import pytest
 
-from tests.phase_02.conftest import _load_db, _load_indexer
+from tests.phase_02.conftest import _load_db, _load_indexer, _load_parser
 
 GraphDatabase = _load_db()
 _indexer_mod = _load_indexer()
@@ -464,4 +464,99 @@ def test_minted_uuid_is_written_back_and_stable_across_rescans(
     assert minted_id in no_id_file.read_text(encoding="utf-8"), (
         "The on-disk id changed (or vanished) on the second scan — write-back "
         "must happen exactly once; an unchanged file must not be rewritten."
+    )
+
+
+# ---------------------------------------------------------------------------
+# 7. Inline typed edges reach the graph (adversarial-analysis-v4 finding #7a)
+#
+# Round 4 ran the system end-to-end and found write_back — Phase 1A's
+# flagship — was dead code: no indexer, watcher, REST, or MCP path ever
+# called it, so `[[Target | relation]]` reached the graph as an untyped
+# "wikilink" edge with the relation silently dropped. This test pins the
+# fix contract: index_file's changed branch calls write_back to fold inline
+# typed edges into frontmatter BEFORE parsing, and the ordinary frontmatter
+# edge pass then derives the typed edge.
+# ---------------------------------------------------------------------------
+
+def _edge_triples(db_path: str) -> list[tuple[str, str, str]]:
+    """All (source_id, target_id, relation) edge rows, duplicates included."""
+    conn = sqlite3.connect(db_path)
+    try:
+        return conn.execute(
+            "SELECT source_id, target_id, relation FROM edges"
+        ).fetchall()
+    finally:
+        conn.close()
+
+
+def test_inline_typed_edge_folds_on_index(tmp_db: str, tmp_vault: Path):
+    """`[[Target Note | supports]]` in prose must become a TYPED edge in the DB
+    and a folded `edges:` entry in the source file's frontmatter — and stay
+    idempotent on re-scan.
+    """
+    full_scan_and_index = _indexer_mod.full_scan_and_index
+    parser_mod = _load_parser()
+
+    db = GraphDatabase(tmp_db)
+    id_source = "fade0001-0000-0000-0000-000000000001"
+    id_target = "fade0002-0000-0000-0000-000000000002"
+    source_path = _write_md(
+        tmp_vault, "a-source.md", id_source, "Source Note",
+        body="This claim [[Target Note | supports]] the target's argument.",
+    )
+    _write_md(tmp_vault, "b-target.md", id_target, "Target Note")
+
+    full_scan_and_index(str(tmp_vault), db)
+
+    # (a) The DB edge must carry the typed relation, not the untyped fallback.
+    relations = {
+        rel for src, tgt, rel in _edge_triples(tmp_db)
+        if src == id_source and tgt == id_target
+    }
+    assert "supports" in relations, (
+        f"No Source→Target edge with relation 'supports' in the DB after "
+        f"indexing; found relations {sorted(relations)!r}.\n"
+        "index_file must call write_back so the Phase-1A typed syntax "
+        "actually reaches the graph: fold the inline `[[Target Note | "
+        "supports]]` into the frontmatter `edges:` block BEFORE parsing, "
+        "then let the frontmatter pass derive the typed edge. An indexer "
+        "that only sees the wikilink half stores an untyped 'wikilink' row "
+        "and silently drops the relation the learner wrote."
+    )
+
+    # (b) The fold must be persisted to the source file's frontmatter.
+    parse_back = parser_mod.parse_node_file(str(source_path))
+    folded = [
+        e for e in (parse_back.frontmatter.get("edges") or [])
+        if isinstance(e, dict)
+        and e.get("relation") == "supports"
+        and e.get("target") == "Target Note"
+    ]
+    assert folded, (
+        f"a-source.md's frontmatter has no folded edges: entry for "
+        f"(supports, Target Note); frontmatter edges: "
+        f"{parse_back.frontmatter.get('edges')!r}.\n"
+        "write_back must persist the fold to disk — the .md files are the "
+        "source of truth, so a typed edge that exists only in the DB "
+        "vanishes on the next `rm *.db && scan`."
+    )
+
+    # (c) Idempotence survives the fold: a second scan changes nothing.
+    nodes_before = _node_count(tmp_db)
+    edges_before = _edge_row_count(tmp_db)
+    full_scan_and_index(str(tmp_vault), db)
+    nodes_after = _node_count(tmp_db)
+    edges_after = _edge_row_count(tmp_db)
+    db.close()
+
+    assert (nodes_after, edges_after) == (nodes_before, edges_before), (
+        f"Re-scanning after the fold changed the DB: nodes "
+        f"{nodes_before} → {nodes_after}, edge rows "
+        f"{edges_before} → {edges_after}.\n"
+        "The fold rewrites the file, so the stored content_hash must be "
+        "taken from the FOLDED bytes (re-hash after write_back, exactly "
+        "like the minted-id write-back) — otherwise every scan re-parses "
+        "and re-folds the file forever, and the scan;scan no-op contract "
+        "breaks."
     )

@@ -30,6 +30,20 @@ phase 00; phases 01–08 carry identical copies). Never patch a downstream copy:
 The canonical manifest and the drift check (`sync_forward --check-all`) enforce
 this in CI — a PR that diverges a downstream copy fails the gate.
 
+## Commit messages
+
+Use a conventional-commit prefix plus a one-line scope:
+`feat:`, `fix:`, `docs:`, `test:`, `ci:`, `chore:` — e.g.
+`fix: fail-fast Makefile recipes and uv preflight`. One logical change per
+commit; never reuse an identical message across commits. When a commit
+resolves an adversarial-analysis finding, reference the Resolution Log entry
+in the message (e.g. `fix: dead AKANGA_SRC warning (v4 #6)`).
+
+## Licensing of contributions
+
+By submitting a contribution you agree it is licensed under the repository's
+MIT license (inbound = outbound).
+
 ## Quality gates
 
 - `make check` before opening a PR — lint plus the full test matrix.

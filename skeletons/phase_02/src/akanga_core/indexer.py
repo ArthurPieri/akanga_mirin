@@ -45,26 +45,35 @@ def index_file(path: str, db: "GraphDatabase", vault_path: str) -> "Node":
        WITHOUT parsing. Parsing before hashing throws away the savings (the
        measured cost of that mistake: re-indexing an unchanged 1,000-node vault
        was only ~15% cheaper than a cold scan).
-    2. Only on change: `parse_node_file(path)` to get the `Node`.
+    2. Only on change, BEFORE parsing: fold inline `[[Target | relation]]`
+       captures into the frontmatter `edges:` block — call `write_back(path)`
+       from `.parser` (atomic + idempotent, a no-op when there is nothing to
+       fold) — then re-hash with `content_hash(path)` because the fold may
+       have changed the bytes. Without this call write_back is dead code at
+       runtime and typed inline edges never become typed DB edges. Boundary:
+       unchanged files keep the step-1 skip, so an old never-folded file
+       folds on its next real edit.
+    3. `parse_node_file(path)` to get the `Node`.
        UUID write-back: if the file had a missing/invalid `id`, the parser minted
        a fresh one in memory only — write it back into the frontmatter atomically
        (`write_node_file`) so the identity is STABLE across rescans, then re-hash
        (the write-back changed the bytes).
-    3. Store the vault-RELATIVE path on the node, set `node.content_hash`, then
+    4. Store the vault-RELATIVE path on the node, set `node.content_hash`, then
        `db.upsert_node(node)`.
-    4. Re-derive THIS node's edges: `DELETE FROM edges WHERE source_id = ?` via
+    5. Re-derive THIS node's edges: `DELETE FROM edges WHERE source_id = ?` via
        the db layer, then re-extract frontmatter edges + wikilinks and
        `upsert_edge` each. Deleting first prevents stale edges from surviving an
        edit; the schema's UNIQUE(source_id, target_id, relation) +
        INSERT OR IGNORE prevents duplicates either way.
-    5. Return the `Node`.
+    6. Return the `Node`.
 
     Note: do NOT suppress exceptions here — let them propagate so the caller
     (`full_scan_and_index`) can log and count failures.
     """
     raise NotImplementedError(
         "content_hash(path) FIRST; skip if unchanged (lookup by relative path); "
-        "else parse_node_file, write minted id back if the file had none, "
+        "else write_back(path) to fold inline edges (then re-hash), "
+        "parse_node_file, write minted id back if the file had none, "
         "db.upsert_node, delete-then-rederive this node's edges; return node"
     )
 

@@ -1,7 +1,7 @@
-# STATUS — Adversarial-Analysis Remediation (V2 + V3)
+# STATUS — Adversarial-Analysis Remediation (V2 + V3 + V4)
 
-> **Audience:** contributors / future Claude Code sessions. Updated 2026-06-11 (Rounds 2 AND 3 complete — 27/27 findings resolved across both).
-> Handoff doc for the remediation of `docs/adversarial-analysis-v2.md` (complete) and `docs/adversarial-analysis-v3.md` (in progress) findings.
+> **Audience:** contributors / future Claude Code sessions. Updated 2026-06-12 (Rounds 2 and 3 complete — 27/27 findings resolved; Round 4 in progress, see the ROUND 4 section below).
+> Handoff doc for the remediation of `docs/adversarial-analysis-v2.md` (complete), `docs/adversarial-analysis-v3.md` (complete), and `docs/adversarial-analysis-v4.md` (in progress) findings.
 > Authoritative finding-by-finding status: the Resolution Log at the end of each doc.
 
 ## Commits
@@ -97,8 +97,9 @@ D11 phase-5: doc keymap canonical; Kitty renderer = stretch goal (`uv sync --ext
   at phase transitions (AST-aware symbol diff) (#8).
 - **E9** Learner-state targets: `.akanga-progress` appended on green,
   `make resume`, `make peek`; learner-facing `status` (#9).
-- **E10** `requires-python` pin drop to **>=3.12 — pending verification** that
-  nothing in the path actually needs 3.13 (#10).
+- **E10** `requires-python` pin drop to **>=3.12 — CLOSED 2026-06-12**: verified
+  live in Round 4 on a cold 3.12.8 environment — all 9 phases green, 177 tests
+  including the stdio smoke test (v4 claims ledger) (#10).
 
 ## Finding status (Round 3)
 
@@ -117,3 +118,66 @@ D11 phase-5: doc keymap canonical; Kitty renderer = stretch goal (`uv sync --ext
 | 11 | Green ≠ understood (suite blind spots) | MODERATE | **Resolved** — see v3 Resolution Log |
 | 12 | Time rot; wrong Claude Desktop path; frozen CI | MODERATE | **Resolved** — see v3 Resolution Log |
 | 13 | Exemplar-honesty defects in persistence/API | MODERATE | **Resolved** — see v3 Resolution Log |
+
+---
+
+# ROUND 4 — Adversarial-Analysis-V4 Remediation (2026-06-12, IN PROGRESS)
+
+> Findings: `docs/adversarial-analysis-v4.md` — "verify the verifiers": 5 parallel
+> agents attacked the remediation layer itself (tests, tooling, CI, doc patches)
+> plus the live runtime (REST/MCP/3.12). Four findings were reproduced by the
+> orchestrator before acceptance (setup false-green, dead AKANGA_SRC warning,
+> phantom test name, manifest self-contradiction). The claims ledger **closed E10**
+> (3.12 confirmed: cold 3.12.8 env, all 9 phases green, 177 tests) and confirmed
+> every SEC property under live fire.
+>
+> Remediation runs as a parallel work batch **F1–F5**. F5 = docs (CLAUDE.md,
+> README, `docs/**`, mkdocs.yml, solutions/README, this file). Siblings own the
+> Makefile/shell flags, scripts (sync_forward manifest awareness, skeleton_merge
+> imports, doc-contract test-name check), tests (timing margins, monotonic), and
+> solutions code (MCP argv, lifespan indexing, write_back wiring).
+
+## Adopted decisions (V1–V8) — recorded, do not re-litigate
+
+- **V1** Makefile recipes use `.SHELLFLAGS := -ec` (fail on first error) plus a
+  `need-uv` preflight — no more false-green `make setup`/`vault-init` (#1).
+- **V2** `akanga_mcp/server.py.__main__` parses `--vault`/`--db` argv with
+  argparse and **fails loudly** if the DB is unset/unopenable — never a
+  healthy-looking server over `db=None` (#2).
+- **V3** Both runtime lifespans (FastAPI `create_app` lifespan and MCP startup)
+  call the hash-first idempotent `full_scan_and_index` and log
+  "serving N indexed nodes" — `make serve`/`make mcp` work cold (#2).
+- **V4** `write_back` is wired into the runtime: the indexer folds typed inline
+  edges into frontmatter on changed-file index, covered by a new
+  `test_inline_typed_edge_folds_on_index` (#7a).
+- **V5** Watcher deadlines use `time.monotonic()` in the reference solution;
+  timing-test margins widened and flake messages split so a flake cannot
+  impersonate the early-fire bug (#10).
+- **V6** Phase-5 stretch renderer dependency is **textual-image** (textual-kitty
+  0.4.0 ships no working widget); canary imports the widget entry point (#12).
+- **V7** Vault-check manifests are parsed from the phase-doc tables at runtime —
+  single source of truth, no embedded copies to go stale (#11).
+- **V8** CLAUDE.md carries **zero completion claims** — state lives in
+  `make status` and this file; docs/README lists all four analyses with v4
+  authoritative (#9).
+
+## Finding status (Round 4)
+
+| # | Finding | Severity | Status |
+|---|---|---|---|
+| 1 | `make setup`/`vault-init` false-green on total failure | CRITICAL | **Resolved** — see v4 Resolution Log |
+| 2 | `make mcp` lobotomized; `serve` serves empty graph | HIGH | **Resolved** — see v4 Resolution Log |
+| 3 | sync_forward ignores manifest; excluded dead; TUI ×4 unguarded | HIGH | **Resolved** — see v4 Resolution Log |
+| 4 | Merged-skeleton state broken & never CI-verified | HIGH | **Resolved** — see v4 Resolution Log |
+| 5 | Test-name enumerations drifted (phantom test) | HIGH | **Resolved** — see v4 Resolution Log |
+| 6 | Dead AKANGA_SRC warning; peek unlocked by infra failures | SERIOUS | **Resolved** — see v4 Resolution Log |
+| 7 | write_back dead at runtime; phase-0 validator nagging | SERIOUS | **Resolved** — see v4 Resolution Log |
+| 8 | Time estimate expired; "optional" vault contradiction | SERIOUS | **Resolved** — see v4 Resolution Log |
+| 9 | CLAUDE.md two rounds stale | SERIOUS | **Resolved** — see v4 Resolution Log |
+| 10 | Lying flake message; time.time in solution; macOS fix unvalidated on CI | SERIOUS | **Resolved** — see v4 Resolution Log |
+| 11 | Vault manifests stale at ship | SERIOUS | **Resolved** — see v4 Resolution Log |
+| 12 | textual-kitty cannot deliver the promised renderer | MODERATE | **Resolved** — see v4 Resolution Log |
+| 13 | Editorial repetition/voice debt (+13%, rules ×3–5) | MODERATE | **Resolved** — see v4 Resolution Log |
+| 14 | No tag, identical commit messages, no inbound license, Mirin untranslated | MODERATE | **Resolved** — see v4 Resolution Log |
+
+E10 (3.12 floor) is **CLOSED** — verified, not remediated: 177 tests green on 3.12.

@@ -327,6 +327,78 @@ Rule: if you are parsing YAML from disk (user files, vault nodes, configs), alwa
 
 ---
 
+## Security: Trust Boundaries and Safe Loading
+
+This section expands on the attack above in the context of vault files — what YAML
+injection looks like, how to verify your stack is safe, and what to do if a library
+does not use safe loading by default.
+
+**What YAML injection is:**
+
+PyYAML's default `Loader` supports a tag system that can instantiate arbitrary
+Python objects from YAML input. A frontmatter file containing:
+
+```yaml
+---
+title: !!python/object/apply:os.system ["rm -rf /"]
+---
+```
+
+would — with the unsafe loader — execute `os.system("rm -rf /")` the moment the
+file is parsed. This is not a theoretical concern: it is a known, documented attack
+against Python applications that parse untrusted YAML. A vault file modified by
+another party (shared storage, cloned from a public repo, received as a file
+attachment) could carry this payload. The trust boundary is the file system: every
+`.md` file is input you did not necessarily author.
+
+**How python-frontmatter handles this:**
+
+`python-frontmatter` uses PyYAML's `SafeLoader` by default. `SafeLoader` only
+permits YAML's built-in types (strings, integers, floats, booleans, lists,
+dictionaries) and raises an error on any `!!python/` tag. You can verify this
+yourself:
+
+```python
+import frontmatter
+
+# This should raise yaml.constructor.ConstructorError, not execute anything:
+malicious = """---
+title: !!python/object/apply:os.system ["echo injected"]
+---
+body text
+"""
+try:
+    post = frontmatter.loads(malicious)
+    print("WARNING: loaded without error — check loader")
+except Exception as e:
+    print(f"Safe: raised {type(e).__name__}: {e}")
+```
+
+Run this in your Phase 0 environment. The expected output is a `ConstructorError`,
+not a print from `os.system`.
+
+**What to do if a library does not use safe loading by default:**
+
+If you replace `python-frontmatter` with a different YAML library, or if a future
+version changes the default, apply the safe loader explicitly:
+
+```python
+import yaml
+
+# Never:
+data = yaml.load(content)           # unsafe — uses FullLoader or Loader depending on version
+
+# Always:
+data = yaml.safe_load(content)      # SafeLoader — built-in types only
+# or, explicitly:
+data = yaml.load(content, Loader=yaml.SafeLoader)
+```
+
+The same rule applies to any YAML that arrives from outside: config files, webhook
+payloads, anything not written by your own `write_node_file()`.
+
+---
+
 ## Akanga's Node Frontmatter Format
 
 Every node in the vault is a `.md` file with this frontmatter shape:

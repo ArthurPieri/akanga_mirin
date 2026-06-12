@@ -29,17 +29,23 @@ docs/
 ├── architecture-detailed.md     derived reference (published)
 ├── deployment.md                tmux / launchd / systemd options (published)
 │
+├── observability-module.md      structured logging, @timed, /health patterns (published)
+├── facilitator-guide.md         running Akanga Mirin as a 2–4 day workshop (published)
+│
 │   # Contributor-facing planning docs — excluded from the published site
 │   # (see exclude_docs in mkdocs.yml)
+├── status-remediation.md        the remediation handoff log — per-round finding
+│                                status + adopted decisions (start here for state)
+├── adversarial-analysis-v4.md   Round 4 risk analysis (CURRENT, authoritative)
+├── adversarial-analysis-v3.md   Round 3 risk analysis (historical, resolved)
+├── adversarial-analysis-v2.md   Round 2 risk analysis (historical, resolved)
+├── adversarial-analysis.md      Round 1 risk analysis (historical, resolved)
 ├── implementation-plan.md       historical sprint plan (stale; trust `make status`)
-├── adversarial-analysis.md      original risk analysis
-├── adversarial-analysis-v2.md   current risk analysis (authoritative)
 ├── analysis-and-enhancements.md findings + agreed decisions
 ├── plan-*.md                    specialist plans (docs/tests, KG theory, Makefile, security)
 ├── roadmap.md                   MVP / V1 / V2 scope boundaries
 ├── user-stories.md              user journeys and requirements
 ├── future-ideas.md              parked features (cloud sync, embeddings, …)
-├── observability-module.md      parked observability design
 └── archive/                     superseded documents
 ```
 

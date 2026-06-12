@@ -11,17 +11,7 @@ import asyncio
 import threading
 import time
 
-from tests.phase_04.conftest import _load_eventbus
-
-
-def _wait_until(predicate, timeout: float = 2.0) -> bool:
-    """Poll *predicate* until it is truthy or *timeout* seconds elapse."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(0.02)
-    return bool(predicate())
+from tests.phase_04.conftest import _load_eventbus, _wait_until
 
 
 class TestSubscribeAndPublish:

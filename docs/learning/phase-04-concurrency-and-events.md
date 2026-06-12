@@ -1,6 +1,6 @@
 # Phase 4 — Concurrency and Events
 
-**Estimated time:** 3–4 hours
+**Estimated time:** 3–4 hours + ~1h vault/reflect
 
 **Core concept:** A running Akanga process has multiple things happening simultaneously
 — the file watcher fires when you save a note, the active manager pings URLs on a
@@ -56,7 +56,7 @@ and when, or it floods downstream components with redundant work.
 
 > Akanga node: `File Watching`
 
-→ Foundation doc: `docs/foundations/python-threading.md`
+> → Foundation doc: `docs/foundations/python-threading.md`
 
 ### Debouncing
 
@@ -84,7 +84,7 @@ the whole loop. A bridge is required.
 
 > Akanga node: `Threads vs asyncio`
 
-→ Foundation doc: `docs/foundations/asyncio-primer.md`
+> → Foundation doc: `docs/foundations/asyncio-primer.md`
 
 ### Event Bus (pub/sub)
 
@@ -99,7 +99,7 @@ Two details make Akanga's bus robust rather than racy:
 
 1. **Startup buffering.** If `publish()` is called for an async subscriber *before*
    `set_loop()` has registered the asyncio loop, the dispatch is not dropped and the
-   handler is not called directly from the wrong thread (that's the BUG-04 race).
+   handler is not called directly from the wrong thread (the startup-dispatch race).
    Instead the pending dispatch is appended to a `collections.deque` buffer;
    `set_loop()` drains that buffer onto the newly registered loop. Events published
    during startup are delayed, never lost.
@@ -110,7 +110,7 @@ Two details make Akanga's bus robust rather than racy:
 
 > Akanga node: `Event Bus`
 
-→ Foundation doc: `docs/foundations/design-patterns.md` (Observer pattern section)
+> → Foundation doc: `docs/foundations/design-patterns.md` (Observer pattern section)
 
 ### `run_coroutine_threadsafe`
 
@@ -128,7 +128,7 @@ error-logging done-callback to.
 
 > Akanga node: `run_coroutine_threadsafe`
 
-→ Foundation doc: `docs/foundations/asyncio-primer.md`
+> → Foundation doc: `docs/foundations/asyncio-primer.md`
 
 ### Sync Queue Drain
 
@@ -201,10 +201,17 @@ Rules:
 - Debounces per file path — rapid saves to the same file coalesce into one event.
   Implementation: one lock-protected `dict[path → deadline]` plus a **single polling
   worker thread** (see Common Pitfalls — not a Timer per path)
+- **Re-touch postpones the fire**: every new event to a path pushes that path's
+  deadline forward — the watcher must never fire early while writes are still
+  arriving inside the window (tested by `test_retouch_inside_window_postpones_fire`)
+- **Deletes get a create-cancels-delete grace window**: a delete is published only
+  if it *stays* deleted — a create/move of the same path inside the window cancels
+  the pending delete (real editors save by delete-then-rename; tested by
+  `test_recreate_within_grace_window_cancels_pending_delete`)
 - Handles `on_created`, `on_modified`, **and** `on_moved` — atomic writes via
   `os.replace` arrive as move events on macOS; use `event.dest_path` for moves
 - On settled change: publishes `file_changed(path)` to eventbus
-- On delete: publishes `file_deleted(path)` to eventbus
+- On delete (after the grace window): publishes `file_deleted(path)` to eventbus
 - `stop()` sets the worker's `threading.Event`, stops the watchdog observer, and
   joins the worker thread
 
@@ -320,11 +327,10 @@ the watcher too, so its file rewrites don't fire change events mid-startup.
 >   the node's truth.
 > - **vim rename-backups.** vim's default save strategy writes a backup and
 >   renames over the target — so every save can arrive as a **`file_deleted` for
->   the real path** followed by a create/move.
-> - **Why deletes get a grace window.** Because of signatures like vim's, a
->   delete event is not proof the note is gone. Deletes are debounced with a
->   *create-cancels-delete* grace window: only a delete that **stays** deleted is
->   treated as real.
+>   the real path** followed by a create/move. This is why the create-cancels-delete
+>   grace window is a watcher Rule (see the Rules list above), not an edge case:
+>   a delete event is not proof the note is gone — only a delete that **stays**
+>   deleted is treated as real.
 
 ---
 
@@ -342,9 +348,12 @@ The complete test suite lives in `tests/phase_04/` — three files.
 - `test_unsubscribe_nonexistent_handler_is_safe` — unsubscribing an unknown handler must not raise
 - `test_subscriber_error_isolation` — a raising handler doesn't stop later subscribers; `publish()` never raises
 - `test_no_subscribers_publish_is_safe` — publishing with zero subscribers must not raise
-- The `set_loop` / buffering tests — `publish()` before `set_loop()` buffers async
-  dispatches instead of dropping them, and `set_loop(loop)` drains the buffer onto the
-  loop
+- The `set_loop` / buffering tests — `test_async_subscriber_receives_event_after_set_loop`,
+  `test_publish_before_set_loop_buffers_events`, and
+  `test_publish_racing_set_loop_delivers_every_event_exactly_once`: `publish()` before
+  `set_loop()` buffers async dispatches instead of dropping them; `set_loop(loop)`
+  drains the buffer onto the loop; a publish racing `set_loop` delivers every event
+  exactly once
 
 **`test_watcher.py`** — debounced filesystem events:
 
@@ -356,6 +365,12 @@ The complete test suite lives in `tests/phase_04/` — three files.
 - `test_watcher_parallel_saves_not_debounced` — writes to *different* files are not merged
 - `test_watcher_ignores_swp_files` / `test_watcher_ignores_tilde_files` /
   `test_watcher_ignores_hidden_dirs` — the filter rules
+- `test_retouch_inside_window_postpones_fire` — **the re-touch contract**: a second
+  write inside the debounce window pushes the deadline forward; the watcher must not
+  fire early
+- `test_recreate_within_grace_window_cancels_pending_delete` — **the delete grace
+  window**: a delete followed by a recreate inside the window publishes no
+  `file_deleted` (create cancels delete)
 - `test_watcher_stop_and_start` — `start()` then `stop()` completes without raising
 - `test_watcher_nonexistent_vault_raises` — a missing vault path raises in `__init__` or `start()`
 - `test_async_subscriber_receives_event` — **the bridge test**: `publish()` from a
@@ -363,9 +378,11 @@ The complete test suite lives in `tests/phase_04/` — three files.
 
 **`test_sync_worker.py`** — queue drain:
 
-- Drain propagates a renamed node's `new_name` into the `target` field of every
-  referencing file (written atomically), marks each job `processed = 1` via
-  `mark_processed`, respects the `limit` cap, and returns the processed count
+- `test_drain_processes_pending_jobs_and_marks_processed` — drain propagates a renamed
+  node's `new_name` into the `target` field of every referencing file (written
+  atomically), marks each job `processed = 1` via `mark_processed`, respects the
+  `limit` cap, and returns the processed count
+- `test_drain_with_empty_queue_returns_zero` — an empty queue drains to 0 without touching any file
 
 The debounce test proves rapid saves don't flood the indexer — the main performance
 guarantee of this phase. The async-subscriber test proves the bridge is wired
@@ -379,124 +396,16 @@ Plus 7 vault nodes with typed edges.
 
 ## Logging and Debugging
 
-**Estimated time:** 30 minutes. Skip this section and return to it when you first need
-to diagnose a problem.
-
 Phase 4 is where Akanga becomes multi-component: the watcher fires from a daemon
 thread, the EventBus dispatches to async subscribers, the indexer re-runs on every
 file change. When something goes wrong — an event is dropped, a file change does not
 propagate, a subscriber raises silently — the only tool you have is logging.
 
-> Full reference: `docs/observability-module.md`. This section covers only the
-> Akanga-specific wiring.
-
-### Step 1 — Get a logger in every module
-
-Every source file should declare a module-level logger. Never use `print()`.
-
-```python
-# At the top of watcher.py, eventbus.py, indexer.py, app.py
-import logging
-logger = logging.getLogger(__name__)
-# __name__ is "akanga_core.watcher", "akanga_core.eventbus", etc.
-# Every log line will carry its source — you always know where it came from.
-```
-
-### Step 2 — Configure logging in `cli.py` once, at startup
-
-```python
-# In cli.py — called at the start of each @app.command() handler
-import logging
-import sys
-
-def configure_logging(verbose: bool = False) -> None:
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
-        datefmt="%H:%M:%S",
-        stream=sys.stderr,
-    )
-```
-
-Call `configure_logging(verbose)` as the very first line inside each CLI command
-handler, before any other imports or setup. All module loggers automatically inherit
-from the root logger configured here.
-
-### Step 3 — Add `--verbose` to every CLI command
-
-```python
-import typer
-from typing import Annotated
-
-VerboseOption = Annotated[
-    bool,
-    typer.Option("--verbose", "-v", help="Enable DEBUG-level logging."),
-]
-
-@app.command()
-def serve(
-    vault: str = "./vault",
-    db: str = "./.akanga.db",
-    verbose: VerboseOption = False,
-):
-    configure_logging(verbose)
-    ...
-```
-
-Run with `uv run python -m akanga_core.cli serve --verbose` to see every DEBUG log
-from every module. Without `--verbose`, only INFO and above appear.
-
-### Step 4 — Wire an EventBus debug subscriber
-
-When events are not propagating as expected, attach a debug subscriber at startup
-that logs every event:
-
-```python
-# In app.py, inside start_all(), after eventbus is initialized:
-if verbose:
-    _attach_debug_subscriber(eventbus)
-
-def _attach_debug_subscriber(bus: EventBus) -> None:
-    """Attach a logging subscriber to every known event type.
-    Only called when --verbose is active — not in production."""
-    debug_logger = logging.getLogger("eventbus.debug")
-    known_events = ["file_changed", "file_deleted", "node_updated", "node_deleted"]
-
-    def make_handler(name):
-        def handler(**kwargs):
-            debug_logger.debug("EVENT %s payload=%s", name, kwargs)
-        return handler
-
-    for event_name in known_events:
-        bus.subscribe(event_name, make_handler(event_name))
-```
-
-With `--verbose`, every event that passes through the bus now appears in your logs.
-You can immediately see whether a file-change event was published, and whether the
-indexer subscriber received it.
-
-### Step 5 — Log subscriber errors explicitly
-
-The EventBus swallows subscriber exceptions to preserve error isolation. Make sure
-those swallowed errors are logged:
-
-```python
-# In eventbus.py, inside the dispatch loop:
-for handler in handlers:
-    try:
-        handler(**kwargs)
-    except Exception:
-        logger.exception(
-            "Subscriber %s raised on event %s — continuing dispatch",
-            handler.__qualname__,
-            event,
-        )
-```
-
-`logger.exception()` logs at ERROR level and automatically appends the full traceback.
-This is the single most important logging line in the EventBus — without it, subscriber
-crashes are invisible.
+> → Foundation doc: `docs/observability-module.md` (Observability & Debugging) —
+> the five-step Akanga logging wiring (module loggers, `configure_logging`,
+> `--verbose`, the EventBus debug subscriber, and explicit subscriber-error
+> logging) lives in its "Applying This Module to Akanga" section. Wire it up
+> there (~30 minutes), then use the patterns below to diagnose problems.
 
 ### Common Debugging Patterns
 
@@ -522,13 +431,9 @@ Add a DEBUG log inside the `on_modified` callback before the debounce logic. If 
 log never appears, the OS is not delivering events — check that the vault path exists
 and is not a symlink (watchdog on macOS can have issues with symlinked dirs).
 
-### Relation to the Full Observability Module
-
-This section wires logging into Phase 4 specifically. The full observability module
-(`docs/observability-module.md`) covers: structured JSON logs, timing decorators for
-sync and async functions, SQLite slow-query detection, in-memory metrics, and
-structured health endpoints. Return to it when you build the REST API (Phase 6) and
-the MCP server (Phase 8) — git specifically is Phase 7.
+The full observability module also covers structured JSON logs, timing decorators,
+SQLite slow-query detection, in-memory metrics, and structured health endpoints —
+return to it when you build the REST API (Phase 6) and the MCP server (Phase 8).
 
 ---
 

@@ -11,8 +11,17 @@ Checks, in order:
      docs/foundations/relation-vocabulary.md (soft warning + nearest-match
      suggestion — custom relations are allowed by design).
   4. With --phase N: the phase doc's "Vault Nodes to Create" table is present
-     (hard failure when expected nodes are missing).
+     (hard failure when expected nodes are missing). The expected-node
+     manifests are parsed AT RUNTIME from each docs/learning/phase-*.md
+     "## Vault Nodes to Create" table (adversarial-analysis-v4 #11 — the
+     embedded copies were stale the moment they shipped; the doc tables are
+     now the single source of truth).
   5. With --full: the global >= 50 node count check.
+
+Phase-0 note (adversarial-analysis-v4 #7b): with --phase 0 the untyped-
+wikilink warning is suppressed — the phase-0 doc explicitly teaches plain
+[[wikilinks]] and defers typed edges to Phase 1A, so nagging a phase-0
+learner about them contradicts the doc they just followed.
 
 Exit codes: 0 = passed (possibly with warnings), 1 = hard failure.
 
@@ -31,102 +40,87 @@ import re
 import sys
 from pathlib import Path
 
-# ── Per-phase expected-node manifests ─────────────────────────────────────────
-# Extracted from each phase doc's "Vault Nodes to Create" table
-# (docs/learning/phase-NN-*.md). Keep in sync when the docs change.
+# ── Per-phase expected-node manifests — parsed at runtime from the docs ──────
+# Single source of truth: each phase doc's "## Vault Nodes to Create" table
+# (docs/learning/phase-*.md). The first backticked token in each table row is
+# the node title. Parsed once per run and cached (adversarial-analysis-v4 #11:
+# the previously embedded manifests were stale at the moment they shipped).
 
-PHASE_MANIFESTS: dict[str, list[str]] = {
-    "0": [
-        "YAML Frontmatter",
-        "UUID",
-        "Idempotence",
-        "Atomic Write",
-        "Content Hash",
-        "Python Dataclass",
-        "os.replace",
-        "Vault Configuration",
-    ],
-    "1a": [
-        "Directed Graph",
-        "Labeled Property Graph",
-        "Source of Truth",
-        "Eventual Consistency",
-        "Two-Pass Parsing",
-    ],
-    "1b": [
-        "Node Types as Schema Variants",
-        "Reference Integrity",
-        "UUID",
-        "Background Sync Queue",
-        "Workspace Registry",
-        "Nhamandu",
-        "Akanga",
-    ],
-    "2": [
-        "SQLite",
-        "WAL Mode",
-        "Adjacency List",
-        "Derived Index",
-        "Two-Pass Indexing",
-        "FTS5",
-        "Thread Safety",
-    ],
-    "3": [
-        "Graph Traversal",
-        "BFS",
-        "DFS",
-        "Cycle Detection",
-        "Ego-Graph",
-        "Directed Edge Traversal",
-        "Graph Density Ceiling",
-        "Canvas Renderer in v2",
-    ],
-    "4": [
-        "File Watching",
-        "Debouncing",
-        "Threads vs asyncio",
-        "Event Bus",
-        "run_coroutine_threadsafe",
-        "Sync Queue Drain",
-        "watchdog",
-    ],
-    "5": [
-        "Reactive TUI",
-        "Widget Composition",
-        "Event-Driven UI",
-        "Keyboard-First Mouse-Aware",
-        "Two-Layer Graph Renderer",
-        "Suspend/Resume",
-        "Textual",
-        "textual-kitty",
-        "Kitty Terminal Graphics Protocol",
-    ],
-    "6": [
-        "REST",
-        "FastAPI",
-        "Lifespan Context Manager",
-        "Pydantic",
-        "WebSocket",
-        "Path Traversal Protection",
-        "API Boundary",
-        "OpenAPI",
-    ],
-    "7": [
-        "Git Commit Model",
-        "GitPython",
-        "Non-Fatal Error Handling",
-        "Idempotent Commit",
-        ".gitignore as Contract",
-    ],
-    "8": [
-        "MCP",
-        "FastMCP",
-        "Graph RAG",
-        "Triple Serialization",
-        "MCP Tool Design",
-        "API Boundary for AI Clients",
-    ],
-}
+LEARNING_DOCS_DIR = (
+    Path(__file__).resolve().parent.parent / "docs" / "learning"
+)
+VAULT_NODES_HEADING_RE = re.compile(r"^##\s+Vault Nodes to Create\s*$")
+SECTION_HEADING_RE = re.compile(r"^##\s")
+TABLE_ROW_TITLE_RE = re.compile(r"^\s*\|\s*`([^`]+)`")
+DOC_PHASE_RE = re.compile(r"^phase-(\d{2})([ab]?)-")
+
+_MANIFEST_CACHE: tuple[dict[str, list[str]], list[str]] | None = None
+
+
+def load_phase_manifests() -> tuple[dict[str, list[str]], list[str]]:
+    """Parse every phase doc's "## Vault Nodes to Create" table.
+
+    Returns ({phase_key: [node titles]}, [errors]). phase_key follows
+    normalize_phase ('0', '1a', '1b', '2'..'8'). A doc with a missing heading
+    or an empty table produces a clear error instead of silently
+    under-enforcing the contract. Cached for the duration of the run.
+    """
+    global _MANIFEST_CACHE
+    if _MANIFEST_CACHE is not None:
+        return _MANIFEST_CACHE
+
+    manifests: dict[str, list[str]] = {}
+    errors: list[str] = []
+
+    docs = sorted(LEARNING_DOCS_DIR.glob("phase-*.md"))
+    if not docs:
+        errors.append(
+            f"no phase docs found under {LEARNING_DOCS_DIR} — cannot build "
+            "the expected-node manifests"
+        )
+        _MANIFEST_CACHE = (manifests, errors)
+        return _MANIFEST_CACHE
+
+    for doc in docs:
+        m = DOC_PHASE_RE.match(doc.name)
+        if not m:
+            continue
+        key = normalize_phase(m.group(1) + m.group(2))  # '01a' -> '1a'
+        lines = doc.read_text(encoding="utf-8").splitlines()
+
+        titles: list[str] = []
+        heading_found = False
+        in_section = False
+        for line in lines:
+            if VAULT_NODES_HEADING_RE.match(line):
+                heading_found = True
+                in_section = True
+                continue
+            if in_section and SECTION_HEADING_RE.match(line):
+                break
+            if in_section:
+                row = TABLE_ROW_TITLE_RE.match(line)
+                if row:  # header/separator rows carry no backticked cell
+                    titles.append(row.group(1))
+
+        if not heading_found:
+            errors.append(
+                f"{doc.name}: no '## Vault Nodes to Create' heading — the "
+                f"phase-{key} node manifest cannot be enforced (fix the doc)"
+            )
+            continue
+        if not titles:
+            errors.append(
+                f"{doc.name}: '## Vault Nodes to Create' section has no table "
+                "rows with a backticked node title — the manifest is empty "
+                "(fix the doc table)"
+            )
+            continue
+        manifests[key] = titles
+
+    _MANIFEST_CACHE = (manifests, errors)
+    return _MANIFEST_CACHE
+
 
 INLINE_LINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 CODE_BLOCK_RE = re.compile(r"```.*?```", flags=re.DOTALL)
@@ -227,6 +221,12 @@ def validate_vault(
     hard_failures: list[str] = []
     warnings: list[str] = []
 
+    # Phase 0 teaches plain [[wikilinks]] and explicitly defers the typed
+    # [[Target | relation]] form to Phase 1A — don't nag learners for
+    # following the doc (adversarial-analysis-v4 #7b).
+    suppress_untyped = phase is not None and normalize_phase(phase) == "0"
+    untyped_count = 0
+
     nodes = sorted(path.glob("**/*.md"))
     print(f"Found {len(nodes)} nodes.")
 
@@ -291,10 +291,13 @@ def validate_vault(
         prose = CODE_BLOCK_RE.sub("", body)
         for link_text in INLINE_LINK_RE.findall(prose):
             if "|" not in link_text:
-                warnings.append(
-                    f"{rel_name}: untyped wikilink [[{link_text.strip()}]] — "
-                    "consider the typed form [[Target | relation]]"
-                )
+                if suppress_untyped:
+                    untyped_count += 1
+                else:
+                    warnings.append(
+                        f"{rel_name}: untyped wikilink [[{link_text.strip()}]] — "
+                        "consider the typed form [[Target | relation]]"
+                    )
                 continue
             target, _, relation = link_text.partition("|")
             target, relation = target.strip(), relation.strip()
@@ -328,28 +331,45 @@ def validate_vault(
             )
 
     print(f"Found {total_edges} edges (frontmatter blocks + inline shorthand).")
+    if suppress_untyped and untyped_count:
+        print(
+            f"({untyped_count} untyped wikilink(s) — fine in Phase 0; the typed "
+            "[[Target | relation]] form arrives in Phase 1A.)"
+        )
 
-    # ── 4. Per-phase expected nodes ───────────────────────────────────────────
+    # ── 4. Per-phase expected nodes (parsed live from the phase doc tables) ──
     if phase is not None:
+        manifests, manifest_errors = load_phase_manifests()
         key = normalize_phase(phase)
         keys = ["1a", "1b"] if key == "1" else [key]
-        if any(k not in PHASE_MANIFESTS for k in keys):
+        if any(k not in manifests for k in keys):
             print(
-                f"Error: unknown phase '{phase}' "
-                f"(expected one of: {', '.join(sorted(PHASE_MANIFESTS))})",
+                f"Error: no usable node manifest for phase '{phase}'.",
                 file=sys.stderr,
             )
+            for e in manifest_errors:
+                print(f"  {e}", file=sys.stderr)
+            if manifests:
+                print(
+                    f"  (phases with parseable tables: {', '.join(sorted(manifests))} "
+                    "— parsed from the docs/learning/phase-*.md "
+                    "'Vault Nodes to Create' tables)",
+                    file=sys.stderr,
+                )
             return False
         titles_lower = {t.lower() for t in titles}
         for k in keys:
-            missing = [t for t in PHASE_MANIFESTS[k] if t.lower() not in titles_lower]
+            missing = [t for t in manifests[k] if t.lower() not in titles_lower]
             if missing:
                 hard_failures.append(
                     f"phase {k}: missing expected vault node(s): "
                     + ", ".join(f"'{t}'" for t in missing)
                 )
             else:
-                print(f"Phase {k} node manifest PASSED ({len(PHASE_MANIFESTS[k])} nodes present).")
+                print(
+                    f"Phase {k} node manifest PASSED ({len(manifests[k])} nodes "
+                    "present, per the phase doc's table)."
+                )
 
     # ── 5. Global node-count check (--full only) ─────────────────────────────
     if full:
@@ -399,6 +419,11 @@ def main() -> None:
         sys.exit(0)
     else:
         print("\nOverall Vault Validation: FAILED")
+        print(
+            "\nA vault node is a .md file in ./vault/ with `title:` frontmatter.\n"
+            "The expected titles for this phase are in the phase doc's\n"
+            "'Vault Nodes to Create' table — open it with: make docs-phase PHASE=<N>"
+        )
         sys.exit(1)
 
 
