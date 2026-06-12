@@ -29,6 +29,21 @@ jobs:
       - name: Lint
         run: uv run ruff check tests/ skeletons/ scripts/
 
+      # The phase roster lives in one place (Makefile MAX_PHASE); this file's
+      # verify matrix below cannot read Make variables, so it hard-codes the
+      # list. This guard fails the build the day the two disagree
+      # (adversarial-analysis-v5 #5).
+      - name: Phase roster consistency (Makefile MAX_PHASE vs verify matrix)
+        run: |
+          MAKE_MAX=$(make -s print-max-phase)
+          MATRIX_MAX=$(grep -E '^\s+phase: \[' .github/workflows/ci.yml \
+            | tr -dc '0-9\n,' | tr ',' '\n' | sort -n | tail -1)
+          if [ "$MAKE_MAX" != "$MATRIX_MAX" ]; then
+            echo "Makefile MAX_PHASE=$MAKE_MAX but ci.yml verify matrix tops out at $MATRIX_MAX."
+            echo "Update the 'phase:' matrix in ci.yml to cover 0..$MAKE_MAX."
+            exit 1
+          fi
+
       # Enforcing since 2026-06-10 (first clean run: 27286025295).
       - name: Doc-contract lint (doc ↔ skeleton signature drift)
         run: uv run python scripts/check_doc_contracts.py

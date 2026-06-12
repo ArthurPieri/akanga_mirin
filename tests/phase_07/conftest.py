@@ -4,13 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import _resolve_akanga_src
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _setup_akanga_src() -> Path:
-    """Insert AKANGA_SRC into sys.path before any test module is imported."""
-    return _resolve_akanga_src(7)
 
 
 @pytest.fixture()
@@ -39,7 +32,8 @@ def git_manager(tmp_git_repo: Path):
     """A GitManager instance pointing at a freshly initialized git repo.
 
     Imported inside the fixture so the AKANGA_SRC sys.path insertion runs
-    first (guaranteed by the session-scoped _setup_akanga_src fixture).
+    first (guaranteed by the session-scoped _akanga_src_guard fixture in the
+    root conftest).
     """
     try:
         from gitmgr import GitManager

@@ -58,9 +58,10 @@ that log over any prose — including this file.
 
 ## Current focus
 
-Round 4 remediation — resolving the findings of `docs/adversarial-analysis-v4.md`
-(consolidated findings, risk matrix, and priority tiers). The running handoff log
-with per-finding status and adopted decisions is `docs/status-remediation.md`.
+Round 5 remediation — resolving the findings of `docs/adversarial-analysis-v5.md`
+(readability + DRY lens; Tier 1 resolved, Tiers 2–3 scheduled). The running
+handoff log with per-finding status and adopted decisions is
+`docs/status-remediation.md`.
 
 ---
 

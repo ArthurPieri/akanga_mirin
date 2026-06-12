@@ -20,16 +20,22 @@ if TYPE_CHECKING:  # pragma: no cover — import only for type checkers
 # inline-edge shorthand yields only the bare target title, never the raw
 # piped string. The optional non-capturing group consumes the relation part.
 _WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
+# Fenced code blocks are stripped before extraction so that example syntax
+# inside ``` fences is never mistaken for a real wikilink — the same
+# invariant `parser.extract_inline_edges` enforces for typed inline edges.
+_CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 
 
 def extract_wikilinks(content: str) -> list[str]:
     """Return the title of every `[[Title]]` wikilink in `content`.
 
-    Titles are whitespace-stripped; empty captures are dropped. The
-    `[[Target | relation]]` inline-edge syntax contributes only `Target`
+    Fenced code blocks are stripped first so example syntax in ``` fences
+    is ignored. Titles are whitespace-stripped; empty captures are dropped.
+    The `[[Target | relation]]` inline-edge syntax contributes only `Target`
     (the relation half is the parser's `extract_inline_edges` concern).
     """
-    return [title.strip() for title in _WIKILINK_RE.findall(content) if title.strip()]
+    stripped = _CODE_FENCE_RE.sub("", content)
+    return [title.strip() for title in _WIKILINK_RE.findall(stripped) if title.strip()]
 
 
 def resolve_wikilink(title: str, db: GraphDatabase) -> str | None:

@@ -1,11 +1,24 @@
 """Phase 02 tests — links: extract_wikilinks, resolve_wikilink."""
 from pathlib import Path
 
+import pytest
+
 from tests.phase_02.conftest import _load_db, _load_links, _load_parser
 
-GraphDatabase = _load_db()
-_links_mod = _load_links()
-_parser_mod = _load_parser()
+# Bound by the autouse fixture below at fixture time -- not import time -- so
+# a missing/broken learner module is reported through the AKANGA_SRC guard's
+# diagnostics instead of a raw collection error (adversarial-analysis-v5 #2).
+GraphDatabase = None
+_links_mod = None
+_parser_mod = None
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _bind_learner_modules():
+    global GraphDatabase, _links_mod, _parser_mod
+    GraphDatabase = _load_db()
+    _links_mod = _load_links()
+    _parser_mod = _load_parser()
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +82,31 @@ def test_extract_wikilinks_skips_inline_edges():
     # If 'Flow State' alone is returned, that is an acceptable implementation choice.
     # If result is empty, that is also acceptable.
     assert isinstance(result, list)
+
+
+def test_extract_wikilinks_ignores_fenced_code():
+    """
+    [[Title]] syntax inside fenced code blocks is example text, not a link.
+
+    The typed-edge extractor (parser.extract_inline_edges) already strips
+    ``` fences before matching; extract_wikilinks must enforce the same
+    invariant, or fenced examples become real edges in the graph.
+    """
+    extract_wikilinks = _links_mod.extract_wikilinks
+
+    content = (
+        "Real link to [[Blink]].\n"
+        "```\n"
+        "Example syntax: [[Flow State]] and [[Deep Work | supports]]\n"
+        "```\n"
+        "Another real link to [[Atomic Habits]].\n"
+    )
+    result = extract_wikilinks(content)
+
+    assert "Blink" in result
+    assert "Atomic Habits" in result
+    assert "Flow State" not in result
+    assert "Deep Work" not in result
 
 
 # ---------------------------------------------------------------------------

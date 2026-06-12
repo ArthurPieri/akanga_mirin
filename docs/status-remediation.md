@@ -181,3 +181,62 @@ D11 phase-5: doc keymap canonical; Kitty renderer = stretch goal (`uv sync --ext
 | 14 | No tag, identical commit messages, no inbound license, Mirin untranslated | MODERATE | **Resolved** — see v4 Resolution Log |
 
 E10 (3.12 floor) is **CLOSED** — verified, not remediated: 177 tests green on 3.12.
+
+---
+
+# ROUND 5 — Adversarial-Analysis-V5 Remediation (2026-06-12, IN PROGRESS)
+
+> Source: `docs/adversarial-analysis-v5.md` (readability + DRY lens — first
+> round on the cleanliness dimension). 9 findings: 1 STRUCTURAL, 5 SERIOUS,
+> 3 MODERATE. Owner accepted the suggested tiers (fast path): Tier 1 fixed
+> first, Tiers 2–3 accepted as Changed and scheduled.
+
+## Adopted decisions (W1–W3 so far) — recorded, do not re-litigate
+
+- **W1 (#8)** `extract_wikilinks` strips ``` fences before matching — same
+  invariant as `parser.extract_inline_edges`. Canonical links.py (phase_02)
+  fixed and propagated 3–8 via sync-forward; pinning test
+  `test_extract_wikilinks_ignores_fenced_code` added; skeleton HOW updated
+  (fence strip is now step 1).
+- **W2 (#2)** Loader calls must never run at module top level in tests —
+  sys.path setup happens in `pytest_configure` (collection time), diagnostics
+  in the session guard (fixture time). The 9 per-phase `_setup_akanga_src`
+  fixtures (false docstrings) are replaced by ONE root-conftest
+  `_akanga_src_guard` autouse session fixture with a truthful docstring;
+  phase number in the error message is derived from collected items. The 5
+  files with module-level loads (phase_02 test_db/test_indexer/test_links,
+  phase_03 test_graph, phase_04 test_watcher) now bind learner modules in an
+  autouse module-scoped `_bind_learner_modules` fixture. Verified: missing
+  AKANGA_SRC now yields the curated message + exit 1 in every phase.
+- **W3 (#5)** Phase roster single-sourced: Makefile `MAX_PHASE := 8` +
+  `PHASES := $(shell seq 0 $(MAX_PHASE))` feed all four all-phases loops,
+  `TO`, and resume's bound. `verify-all`/`examples-all`/`test-phase-range`
+  gained the `TESTED=0`-style floor-guards test-all already had (v4 #1
+  pattern finished). `sync_forward.py --to` defaults to the manifest's
+  `[manifest].phases` max. CI `checks` job cross-checks the verify matrix
+  against `make -s print-max-phase`.
+
+## Finding status (Round 5)
+
+| # | Finding | Severity | Status |
+|---|---|---|---|
+| 1 | Dual-try loader family: 23 forked copies, 4 live divergences | STRUCTURAL | **Accepted-pending** — Tier 2; fix via `tests/_helpers.py::load_attr` after #2 settles |
+| 2 | False fixture docstring; phases 02–04 bypass AKANGA_SRC diagnostics | SERIOUS | **Resolved (W2)** |
+| 3 | Fixture name collisions; contradictory upsert contracts; false "positional" comment | MODERATE | **Accepted-pending** — Tier 3 batch |
+| 4 | Marker convention defined 4 ways; zero script tests | SERIOUS | **Accepted-pending** — Tier 2; `scripts/_common.py` + pinning test |
+| 5 | Phase roster hand-enumerated ×9; silent-green loop guards | SERIOUS | **Resolved (W3)** |
+| 6 | No scripts/ shared core; 1A/1B convention in 5 parsers; help double-registration | MODERATE | **Accepted-pending** — Tier 3 batch |
+| 7 | Dead delete_edge/get_edges_touching with false docstrings; server hand-writes their SQL | SERIOUS | **Accepted-pending** — Tier 2; route-body swaps + skeleton HOW |
+| 8 | links.py missing parser.py's fence strip → phantom edges from fenced examples | SERIOUS | **Resolved (W1)** |
+| 9 | Ten Any-typed DB APIs; phantom second Node type | MODERATE | **Accepted-pending** — Tier 3; NodeRecord dataclass |
+
+## Verification gate for Tier 1 (all green 2026-06-12)
+
+- `make test-solution PHASE=2` → 40/40 (incl. new fence test)
+- `make test-all` → all 9 phases passed
+- `make verify PHASE=8` → cumulative 00..08 green
+- `sync_forward.py --check-all` → 56 pairs, 0 drifting
+- `ruff check tests/ scripts/` → clean
+- `check_doc_contracts.py` → warnings only (pre-existing), exit 0
+- `skeleton_check.py skeletons/phase_02/src` → OK
+- Smoke: `env -u AKANGA_SRC pytest tests/phase_02/` → curated message, exit 1

@@ -29,8 +29,14 @@ PHASE        ?= 0
 PHASE_NUM    := $(shell echo "$(PHASE)" | sed 's/[aAbB]$$//')
 PHASE_PAD    := $(shell printf "%02d" "$(PHASE_NUM)" 2>/dev/null)
 
+# Single source of truth for the phase roster. Every all-phases loop and
+# bound below derives from these two variables — when a phase 9 lands, this
+# is the only line to touch (CI cross-checks its matrix against MAX_PHASE).
+MAX_PHASE    := 8
+PHASES       := $(shell seq 0 $(MAX_PHASE))
+
 FROM         ?= 0
-TO           ?= 8
+TO           ?= $(MAX_PHASE)
 BASE         ?= solutions
 
 TOPIC        ?=
@@ -48,7 +54,7 @@ GLOW         := glow
 
 # ── .PHONY declarations ────────────────────────────────────────────────────────
 
-.PHONY: help need-uv \
+.PHONY: help need-uv print-max-phase \
         study docs-phase docs-all foundations \
         vault-init vault-check \
         run serve mcp \
@@ -68,6 +74,11 @@ GLOW         := glow
 # fails LOUDLY with install instructions instead of `command not found` followed
 # by a green "Done." (adversarial-analysis-v4 #1). Declared as extra
 # prerequisites (not on the `##` help lines) so `make help` output stays clean.
+
+# Machine-readable roster bound for CI's consistency check (no ## comment on
+# purpose — this is plumbing, not a learner-facing target).
+print-max-phase:
+	@echo $(MAX_PHASE)
 
 need-uv:
 	@command -v uv >/dev/null 2>&1 || { \
@@ -300,7 +311,7 @@ test-all: ## Run all phases against their solutions (full suite verification)
 	@echo "Running full test suite against solutions ..."; \
 	FAILED=0; \
 	TESTED=0; \
-	for n in 0 1 2 3 4 5 6 7 8; do \
+	for n in $(PHASES); do \
 		PHASE_PAD=$$(printf "%02d" $$n); \
 		SOLUTION_SRC="solutions/phase_$${PHASE_PAD}/src"; \
 		if [ -d "$$SOLUTION_SRC" ] && [ -d "tests/phase_$${PHASE_PAD}" ]; then \
@@ -328,6 +339,7 @@ test-mine: ## Run all tests against AKANGA_SRC (your own code)
 test-phase-range: ## Run phases FROM..TO against their solutions (FROM=0 TO=3)
 	@echo "Testing phases $(FROM)–$(TO) against solutions ..."; \
 	FAILED=0; \
+	TESTED=0; \
 	for n in $$(seq $(FROM) $(TO)); do \
 		PHASE_PAD=$$(printf "%02d" $$n); \
 		SOLUTION_SRC="solutions/phase_$${PHASE_PAD}/src"; \
@@ -335,8 +347,13 @@ test-phase-range: ## Run phases FROM..TO against their solutions (FROM=0 TO=3)
 			printf '\n\033[1;33m── Phase %s ──\033[0m\n' "$${PHASE_PAD}"; \
 			AKANGA_SRC="$$SOLUTION_SRC" $(PYTEST) tests/phase_$${PHASE_PAD}/ -v \
 				|| FAILED=$$((FAILED+1)); \
+			TESTED=$$((TESTED+1)); \
 		fi; \
 	done; \
+	if [ $$TESTED -eq 0 ]; then \
+		echo "ERROR: No phase in $(FROM)..$(TO) had both a solution and a test suite — ran 0 tests." >&2; \
+		exit 1; \
+	fi; \
 	if [ $$FAILED -gt 0 ]; then \
 		printf '\033[0;31m%d phase(s) failed.\033[0m\n' "$$FAILED"; exit 1; \
 	fi
@@ -370,7 +387,8 @@ verify: ## Verify solution N passes all tests 00..N cumulatively (PHASE=3)
 verify-all: ## Verify all 9 phases are cumulative (facilitator, slow)
 	@echo "Verifying cumulative correctness for all phases ..."; \
 	FAILED=0; \
-	for n in 0 1 2 3 4 5 6 7 8; do \
+	VERIFIED=0; \
+	for n in $(PHASES); do \
 		PHASE_PAD=$$(printf "%02d" $$n); \
 		SOLUTION_SRC="solutions/phase_$${PHASE_PAD}/src"; \
 		if [ ! -d "$$SOLUTION_SRC" ]; then continue; fi; \
@@ -382,11 +400,16 @@ verify-all: ## Verify all 9 phases are cumulative (facilitator, slow)
 					|| FAILED=$$((FAILED+1)); \
 			fi; \
 		done; \
+		VERIFIED=$$((VERIFIED+1)); \
 	done; \
+	if [ $$VERIFIED -eq 0 ]; then \
+		echo "ERROR: No solution directories found — verify-all verified 0 phases." >&2; \
+		exit 1; \
+	fi; \
 	if [ $$FAILED -gt 0 ]; then \
 		printf '\n\033[0;31m%d cumulative check(s) failed.\033[0m\n' "$$FAILED"; exit 1; \
 	else \
-		printf '\n\033[0;32mAll phases cumulative — full verification passed.\033[0m\n'; \
+		printf '\n\033[0;32mAll %d phases cumulative — full verification passed.\033[0m\n' "$$VERIFIED"; \
 	fi
 
 # =============================================================================
@@ -404,14 +427,20 @@ example: ## Run the standalone example script for a phase (PHASE=2)
 
 examples-all: ## Run all 9 phase example scripts sequentially
 	@FAILED=0; \
-	for n in 0 1 2 3 4 5 6 7 8; do \
+	RAN=0; \
+	for n in $(PHASES); do \
 		PHASE_PAD=$$(printf "%02d" $$n); \
 		SCRIPT=$$(find examples -name "phase_$${PHASE_PAD}_*.py" 2>/dev/null | head -1); \
 		if [ -n "$$SCRIPT" ]; then \
 			printf '\n\033[1;33m── Phase %s: %s ──\033[0m\n' "$${PHASE_PAD}" "$$SCRIPT"; \
 			$(PYTHON) "$$SCRIPT" || FAILED=$$((FAILED+1)); \
+			RAN=$$((RAN+1)); \
 		fi; \
 	done; \
+	if [ $$RAN -eq 0 ]; then \
+		echo "ERROR: No example scripts found — examples-all ran 0 scripts." >&2; \
+		exit 1; \
+	fi; \
 	if [ $$FAILED -gt 0 ]; then \
 		printf '\033[0;31m%d example(s) failed.\033[0m\n' "$$FAILED"; exit 1; \
 	fi
@@ -515,7 +544,7 @@ status: ## Repo authoring status: which skeletons/tests/solutions are shipped
 	@printf '\n  \033[1;36mRepo authoring status (skeletons/tests/solutions shipped)\033[0m\n\n'; \
 	printf '  %-8s %-12s %-10s %-12s\n' 'Phase' 'Skeleton' 'Tests' 'Solution'; \
 	printf '  %-8s %-12s %-10s %-12s\n' '-----' '--------' '-----' '--------'; \
-	for n in 0 1 2 3 4 5 6 7 8; do \
+	for n in $(PHASES); do \
 		PHASE_PAD=$$(printf "%02d" $$n); \
 		SKEL=$$([ -d "skeletons/phase_$${PHASE_PAD}" ] && echo "✓ done" || echo "- todo"); \
 		TEST=$$([ -d "tests/phase_$${PHASE_PAD}" ] && echo "✓ done" || echo "- todo"); \
@@ -572,8 +601,8 @@ resume: ## Show your last green phase and the commands to continue (3-week-retur
 	printf '\n  \033[1;36mYour progress\033[0m\n\n'; \
 	printf '  Last green phase: \033[0;32m%s\033[0m (on %s)\n' "$$N" "$$WHEN"; \
 	NEXT=$$((N+1)); \
-	if [ "$$NEXT" -gt 8 ]; then \
-		printf '  Phase 8 is green — you have finished the build. Try \033[36mmake vault-check FULL=1\033[0m\n\n'; \
+	if [ "$$NEXT" -gt $(MAX_PHASE) ]; then \
+		printf '  Phase $(MAX_PHASE) is green — you have finished the build. Try \033[36mmake vault-check FULL=1\033[0m\n\n'; \
 	else \
 		printf '  Next up: phase %s\n\n' "$$NEXT"; \
 		printf '    \033[36mmake docs-phase PHASE=%s\033[0m   # read the phase spec\n' "$$NEXT"; \

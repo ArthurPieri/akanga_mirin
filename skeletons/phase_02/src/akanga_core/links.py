@@ -14,7 +14,11 @@ def extract_wikilinks(content: str) -> list[str]:
     (after resolution). Extracting them is the first step before resolution.
 
     HOW:
-    1. Define (or compile) a regex pattern that matches `[[...]]` wikilinks:
+    1. Strip fenced code blocks FIRST, so `[[...]]` examples inside ``` fences
+       are never mistaken for real wikilinks (the same invariant
+       `parser.extract_inline_edges` enforces for typed inline edges):
+           content = re.sub(r'```.*?```', '', content, flags=re.DOTALL)
+    2. Define (or compile) a regex pattern that matches `[[...]]` wikilinks:
            pattern = re.compile(r'\\[\\[([^\\]|]+)(?:\\|[^\\]]+)?\\]\\]')
        Breakdown:
          - `\\[\\[`          — literal opening `[[`
@@ -22,10 +26,10 @@ def extract_wikilinks(content: str) -> list[str]:
                                (this is the title; stops at `|` for inline-edge syntax)
          - `(?:\\|[^\\]]+)?` — optional non-capturing group: ` | relation` part (ignored)
          - `\\]\\]`          — literal closing `]]`
-    2. Use `pattern.findall(content)` to get all captured title strings.
-    3. Strip whitespace from each title with `.strip()`.
-    4. Filter out any empty strings.
-    5. Return the resulting list.
+    3. Use `pattern.findall(content)` to get all captured title strings.
+    4. Strip whitespace from each title with `.strip()`.
+    5. Filter out any empty strings.
+    6. Return the resulting list.
 
     Example:
         extract_wikilinks("See [[Blink]] and [[Flow State | supports]].")
@@ -36,7 +40,8 @@ def extract_wikilinks(content: str) -> list[str]:
     is acceptable. Either behaviour is spec-compliant.
     """
     raise NotImplementedError(
-        r"Use re.compile(r'\[\[([^\]|]+)(?:\|[^\]]+)?\]\]').findall(content); "
+        r"Strip ``` fences first (re.sub(r'```.*?```', '', content, flags=re.DOTALL)); "
+        r"then re.compile(r'\[\[([^\]|]+)(?:\|[^\]]+)?\]\]').findall(...); "
         "strip whitespace from each title; filter empty strings; return list"
     )
 

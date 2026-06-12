@@ -36,7 +36,8 @@ docs/
 │   # (see exclude_docs in mkdocs.yml)
 ├── status-remediation.md        the remediation handoff log — per-round finding
 │                                status + adopted decisions (start here for state)
-├── adversarial-analysis-v4.md   Round 4 risk analysis (CURRENT, authoritative)
+├── adversarial-analysis-v5.md   Round 5 risk analysis — readability/DRY (CURRENT)
+├── adversarial-analysis-v4.md   Round 4 risk analysis (historical, resolved)
 ├── adversarial-analysis-v3.md   Round 3 risk analysis (historical, resolved)
 ├── adversarial-analysis-v2.md   Round 2 risk analysis (historical, resolved)
 ├── adversarial-analysis.md      Round 1 risk analysis (historical, resolved)

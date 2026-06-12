@@ -5,7 +5,6 @@ from textwrap import dedent
 
 import pytest
 
-from tests.conftest import _resolve_akanga_src
 
 
 # ---------------------------------------------------------------------------
@@ -31,12 +30,6 @@ _ID_ATTENTION = str(uuid.UUID("bbbbbbbb-0800-0000-0000-000000000002"))
 _ID_MEMORY    = str(uuid.UUID("cccccccc-0800-0000-0000-000000000003"))
 _ID_LEARNING  = str(uuid.UUID("dddddddd-0800-0000-0000-000000000004"))
 _ID_ISOLATED  = str(uuid.UUID("eeeeeeee-0800-0000-0000-000000000005"))
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _setup_akanga_src() -> Path:
-    """Insert AKANGA_SRC into sys.path before any test module is imported."""
-    return _resolve_akanga_src(8)
 
 
 @pytest.fixture()

@@ -532,9 +532,19 @@ def main() -> None:
         help="Propagate even into phases the manifest excludes (overrides recorded intent)",
     )
     parser.add_argument(
-        "--to", metavar="N", type=int, default=8, help="Stop at this phase (default: 8)"
+        "--to",
+        metavar="N",
+        type=int,
+        default=None,
+        help="Stop at this phase (default: the manifest's [manifest].phases maximum, "
+        "so a new phase added to the manifest is propagated to without editing this script)",
     )
     args = parser.parse_args()
+
+    if args.to is None:
+        # Resolve the bound from the manifest roster rather than a hard-coded
+        # literal — adversarial-analysis-v5 #5 (phase roster single-sourcing).
+        args.to = max(load_manifest_data().get("manifest", {}).get("phases", [8]))
 
     if args.check_all:
         if args.file or args.from_phase is not None or args.apply or args.force:

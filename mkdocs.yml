@@ -6,10 +6,7 @@ site_description: "Build a personal knowledge graph in 10 phases"
 # deployment.md stays public deliberately.
 exclude_docs: |
   README.md
-  adversarial-analysis.md
-  adversarial-analysis-v2.md
-  adversarial-analysis-v3.md
-  adversarial-analysis-v4.md
+  adversarial-analysis*.md
   analysis-and-enhancements.md
   implementation-plan.md
   plan-*.md

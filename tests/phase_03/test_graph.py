@@ -12,11 +12,24 @@ import pytest
 
 from tests.phase_03.conftest import _load_graph, _load_db
 
-_graph_mod = _load_graph()
-build_ego_graph = _graph_mod.build_ego_graph
-render_ascii = _graph_mod.render_ascii
-EgoGraph = _graph_mod.EgoGraph
-EdgeDirection = _graph_mod.EdgeDirection
+# Bound by the autouse fixture below at fixture time -- not import time -- so
+# a missing/broken learner module is reported through the AKANGA_SRC guard's
+# diagnostics instead of a raw collection error (adversarial-analysis-v5 #2).
+_graph_mod = None
+build_ego_graph = None
+render_ascii = None
+EgoGraph = None
+EdgeDirection = None
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _bind_learner_modules():
+    global _graph_mod, build_ego_graph, render_ascii, EgoGraph, EdgeDirection
+    _graph_mod = _load_graph()
+    build_ego_graph = _graph_mod.build_ego_graph
+    render_ascii = _graph_mod.render_ascii
+    EgoGraph = _graph_mod.EgoGraph
+    EdgeDirection = _graph_mod.EdgeDirection
 
 
 # ---------------------------------------------------------------------------

@@ -20,8 +20,18 @@ import pytest
 
 from tests.phase_04.conftest import _load_eventbus, _load_watcher, _wait_until
 
-EventBus = _load_eventbus()
-VaultWatcher = _load_watcher()
+# Bound by the autouse fixture below at fixture time -- not import time -- so
+# a missing/broken learner module is reported through the AKANGA_SRC guard's
+# diagnostics instead of a raw collection error (adversarial-analysis-v5 #2).
+EventBus = None
+VaultWatcher = None
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _bind_learner_modules():
+    global EventBus, VaultWatcher
+    EventBus = _load_eventbus()
+    VaultWatcher = _load_watcher()
 
 # Short debounce to keep tests fast
 DEBOUNCE_MS = 80

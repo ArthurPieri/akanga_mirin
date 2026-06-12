@@ -4,13 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import _resolve_akanga_src
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _setup_akanga_src() -> Path:
-    """Insert AKANGA_SRC into sys.path before any test module is imported."""
-    return _resolve_akanga_src(3)
 
 
 # ---------------------------------------------------------------------------

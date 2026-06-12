@@ -1,5 +1,6 @@
 """Root test conftest — AKANGA_SRC resolver and shared fixtures."""
 import os
+import re
 import sys
 from pathlib import Path
 import pytest
@@ -41,3 +42,29 @@ def _resolve_akanga_src(phase: int) -> Path:
         sys.path.remove(str(src))
     sys.path.insert(0, str(src))
     return src
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _akanga_src_guard(request) -> Path:
+    """Fail fast with guidance when AKANGA_SRC is unset or missing, and purge
+    previously-imported akanga modules so learner code takes precedence.
+
+    NOTE this fixture does NOT make sys.path safe for import-time work: pytest
+    imports test modules during COLLECTION, before any fixture runs. The
+    sys.path insertion that collection relies on happens in pytest_configure
+    above. Loader calls (`_load_db()` etc.) must therefore live inside
+    fixtures or tests, never at module top level — at top level an import
+    failure surfaces as a raw collection error (exit code 2) and skips this
+    guard's diagnostics entirely (adversarial-analysis-v5 #2).
+
+    The phase number in the error message is derived from the first collected
+    test's path; in multi-phase sessions (`make test-mine`) it names the first
+    suite, which is hint enough.
+    """
+    phase = 0
+    for item in request.session.items:
+        m = re.search(r"phase_(\d+)", str(getattr(item, "nodeid", "")))
+        if m:
+            phase = int(m.group(1))
+            break
+    return _resolve_akanga_src(phase)

@@ -6,8 +6,18 @@ import pytest
 
 from tests.phase_02.conftest import _load_db, _load_parser
 
-GraphDatabase = _load_db()
-_parser_mod = _load_parser()
+# Bound by the autouse fixture below at fixture time -- not import time -- so
+# a missing/broken learner module is reported through the AKANGA_SRC guard's
+# diagnostics instead of a raw collection error (adversarial-analysis-v5 #2).
+GraphDatabase = None
+_parser_mod = None
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _bind_learner_modules():
+    global GraphDatabase, _parser_mod
+    GraphDatabase = _load_db()
+    _parser_mod = _load_parser()
 
 
 # ---------------------------------------------------------------------------
