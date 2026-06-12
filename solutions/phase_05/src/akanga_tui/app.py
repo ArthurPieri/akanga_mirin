@@ -76,7 +76,29 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class ConfirmDeleteScreen(ModalScreen[bool]):
+class _DismissOnce:
+    """Route every modal exit through ``_finish`` so a queued duplicate
+    event can never dismiss the screen twice.
+
+    WHY this exists: key auto-repeat — or a second close event queued
+    behind the first (``q`` bouncing while ``escape`` is still in flight) —
+    can deliver another dismissal after the screen has already left the
+    stack. The second ``dismiss()`` then pops the screen BELOW it, and the
+    next pop crashes the app on an empty stack (``ScreenStackError``).
+    The guard makes dismissal idempotent: the first call wins, every later
+    one is a no-op (phase doc §Interaction States, "Dismiss exactly once").
+    """
+
+    _finished = False
+
+    def _finish(self, result=None) -> None:
+        if self._finished:
+            return  # duplicate event — the screen is already gone
+        self._finished = True
+        self.dismiss(result)
+
+
+class ConfirmDeleteScreen(_DismissOnce, ModalScreen[bool]):
     """Ask before destroying anything — dismisses with True only on confirm.
 
     WHY a modal and not a bell + second keypress: a silent two-step ``d``
@@ -125,16 +147,16 @@ class ConfirmDeleteScreen(ModalScreen[bool]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         event.stop()
-        self.dismiss(event.button.id == "confirm-yes")
+        self._finish(event.button.id == "confirm-yes")
 
     def action_confirm(self) -> None:
-        self.dismiss(True)
+        self._finish(True)
 
     def action_cancel(self) -> None:
-        self.dismiss(False)
+        self._finish(False)
 
 
-class HelpScreen(ModalScreen[None]):
+class HelpScreen(_DismissOnce, ModalScreen[None]):
     """The ``?`` keybinding cheatsheet overlay — any key dismisses it."""
 
     DEFAULT_CSS = """
@@ -164,12 +186,16 @@ class HelpScreen(ModalScreen[None]):
             yield Static("\n".join(lines), id="help-table")
 
     def on_key(self, event: events.Key) -> None:
-        """Dismiss on ANY key press — a cheatsheet must never trap the user."""
+        """Dismiss on ANY key press — a cheatsheet must never trap the user.
+
+        Any-key close is also the easiest double-dismiss to trigger (hold a
+        key and auto-repeat queues a second event) — hence ``_finish``.
+        """
         event.stop()
-        self.dismiss(None)
+        self._finish(None)
 
 
-class GraphScreen(ModalScreen[None]):
+class GraphScreen(_DismissOnce, ModalScreen[None]):
     """Baseline graph view (checkpoint 5.3): pre-rendered ASCII in a Static.
 
     Both ``g`` (ego graph) and ``ctrl+g`` (vault graph) reuse this screen —
@@ -210,10 +236,11 @@ class GraphScreen(ModalScreen[None]):
             yield Static(self._body, id="graph-art")
 
     def action_close(self) -> None:
-        self.dismiss(None)
+        # esc and q BOTH close — the duplicate-event case _finish guards.
+        self._finish(None)
 
 
-class NewNodeScreen(ModalScreen[str | None]):
+class NewNodeScreen(_DismissOnce, ModalScreen[str | None]):
     """Prompt for a new node title; dismisses with the title or None."""
 
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
@@ -238,10 +265,10 @@ class NewNodeScreen(ModalScreen[str | None]):
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         event.stop()  # keep this submit from reaching the app's search handler
-        self.dismiss(event.value.strip() or None)
+        self._finish(event.value.strip() or None)
 
     def action_cancel(self) -> None:
-        self.dismiss(None)
+        self._finish(None)
 
 
 class EditorTextArea(TextArea):

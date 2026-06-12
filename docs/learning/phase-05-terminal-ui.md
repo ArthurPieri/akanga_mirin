@@ -140,6 +140,13 @@ Unicode characters (`▀ ▄ █`) to simulate a pixel grid at 2x vertical resol
 Nodes are colored rounded boxes; edges are Bresenham lines terminated with Unicode
 arrow characters (`→`, `⟵`). Significantly better than ASCII art and works anywhere.
 
+> **Layer-1 field notes (from the reference build):** terminal-capability
+> auto-detection routinely fails under tmux — and `make study` *is* tmux — so
+> don't trust detection: when you know the terminal is Ghostty or Kitty, force
+> the Kitty graphics protocol explicitly. And render the matplotlib figure at
+> 2× the target pixel size, then downscale (supersampling) — node labels stay
+> legible at terminal-cell resolutions.
+
 > Akanga node: `Two-Layer Graph Renderer`
 
 ### Suspend / Resume (optional upgrade)
@@ -403,6 +410,32 @@ to run the app in its own window.)
 and the incoming edges. Escape or `n` cancels. The confirmation modal is a tested
 deliverable, not a nicety.
 
+**Dismiss exactly once.** Modal dismissal is a concurrency problem in disguise:
+key events queue. Hold a key and auto-repeat queues a second close event behind
+the first — or `escape` lands while `q` is still in flight when both close the
+screen — and the duplicate arrives *after* the modal has already left the stack.
+An unguarded second `dismiss()` (or `pop_screen()`) then pops the screen *below*
+the modal, and the next pop crashes the app with `ScreenStackError`. Make every
+exit path — keys, buttons, input-submit — route through one idempotent guard
+(illustrative — adapt freely):
+
+```python
+class _DismissOnce:
+    _finished = False
+
+    def _finish(self, result=None) -> None:
+        if self._finished:
+            return  # duplicate event — the screen is already gone
+        self._finished = True
+        self.dismiss(result)
+```
+
+Every modal inherits the mixin and calls `self._finish(...)` wherever it would
+have called `self.dismiss(...)`. The `d` confirmation, the `?` cheatsheet (its
+any-key close is the easiest double-dismiss to trigger), and the graph screens
+(two close keys) all need it — `test_modal_double_dismiss_is_safe` pins the
+guard.
+
 ---
 
 ## Checkpoints — 5.1 / 5.2 / 5.3
@@ -420,7 +453,7 @@ Certified by: `test_tui_app_starts_without_crash`, `test_tui_shows_node_titles`,
 **Checkpoint 5.2 — Edit + mutations + live updates.** Inline TextArea editing with
 `Ctrl+S`, `n` creates, `d` deletes behind the ModalScreen confirmation, `?` shows the
 help overlay, and the Phase 4 EventBus pipeline refreshes the list when a file changes
-on disk. Certified by: the delete-confirmation and help-overlay tests, plus manual
+on disk. Certified by: the delete-confirmation, help-overlay, and double-dismiss tests, plus manual
 verification of the live-update pipeline (edit a vault file in another terminal and
 watch the list refresh). (~4–7h)
 
@@ -470,6 +503,9 @@ The test suite is in `tests/phase_05/test_tui.py`, driven by Textual's headless
   removed only after confirming, and escape cancels with nothing deleted
 - the help-overlay test — `?` shows the keybinding cheatsheet overlay and any key
   dismisses it
+- `test_modal_double_dismiss_is_safe` — closing the help modal twice (key
+  auto-repeat / a queued duplicate close event) leaves the base screen intact;
+  route every modal exit through the dismiss-once guard (§Interaction States)
 
 **Verified manually (no shipped tests):** j/k navigation, search filtering of the
 tree, the edit/save round-trip, and the live-update pipeline are part of the

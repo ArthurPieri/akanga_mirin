@@ -1,4 +1,5 @@
 """Phase 02 tests — indexer: index_file, full_scan_and_index, edge cases."""
+import json
 import sqlite3
 from pathlib import Path
 from textwrap import dedent
@@ -478,7 +479,62 @@ def test_minted_uuid_is_written_back_and_stable_across_rescans(
 
 
 # ---------------------------------------------------------------------------
-# 7. Inline typed edges reach the graph (adversarial-analysis-v4 finding #7a)
+# 7. YAML implicit-date normalization (ported from the noteapp reference fix)
+#
+# PyYAML implicitly types bare scalars: `due: 2026-07-01` in frontmatter parses
+# to a datetime.date object, not the string the author visually wrote.
+# json.dumps(node.frontmatter) raises TypeError on it. The parser must
+# normalize date/datetime values to ISO strings at the parse boundary so every
+# downstream consumer (DB, API, MCP, write-back) sees one type: str.
+# ---------------------------------------------------------------------------
+
+def test_bare_yaml_date_in_frontmatter_normalizes_to_string(
+    db_path: str, vault_dir: Path
+):
+    """A bare YAML date (`due: 2026-07-01`) must come out of the parser as the
+    ISO string "2026-07-01", and the node must index without error.
+    """
+    index_file = _indexer_mod.index_file
+    parser_mod = _load_parser()
+
+    db = GraphDatabase(db_path)
+    node_id = "da7e0001-0000-0000-0000-000000000001"
+    content = dedent(f"""\
+        ---
+        id: {node_id}
+        title: Dated Node
+        type: note
+        tags: []
+        edges: []
+        due: 2026-07-01
+        ---
+
+        Body text.
+        """)
+    path = vault_dir / "dated.md"
+    path.write_text(content, encoding="utf-8")
+
+    # Indexing a node with a bare YAML date must not raise.
+    index_file(str(path), db, str(vault_dir))
+    assert db.get_node(node_id) is not None
+    db.close()
+
+    node = parser_mod.parse_node_file(str(path))
+    due = node.frontmatter.get("due")
+    assert due == "2026-07-01", (
+        f"frontmatter['due'] is {due!r} ({type(due).__name__}), expected the "
+        "string '2026-07-01'.\n"
+        "PyYAML implicitly types the bare scalar `2026-07-01` as a "
+        "datetime.date — a different type than the text the author wrote. "
+        "parse_node_file must normalize date/datetime values to ISO strings "
+        "at the parse boundary (recursively, through nested dicts/lists)."
+    )
+    # The contract this protects: frontmatter is always JSON-serializable.
+    json.dumps(node.frontmatter)
+
+
+# ---------------------------------------------------------------------------
+# 8. Inline typed edges reach the graph (adversarial-analysis-v4 finding #7a)
 #
 # Round 4 ran the system end-to-end and found write_back — Phase 1A's
 # flagship — was dead code: no indexer, watcher, REST, or MCP path ever

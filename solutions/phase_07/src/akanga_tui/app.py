@@ -56,7 +56,27 @@ from akanga_core.parser import content_hash, parse_node_file, write_node_file
 # ---------------------------------------------------------------------------
 
 
-class ConfirmDeleteScreen(ModalScreen[bool]):
+class _DismissOnce:
+    """Route every screen exit through ``_finish`` — dismiss exactly once.
+
+    Key auto-repeat, or a second close event queued behind the first
+    (HelpScreen binds escape AND q AND ? to close), can deliver another
+    dismissal after the screen has already left the stack. The second
+    ``dismiss()``/``pop_screen()`` then pops the screen BELOW it, and the
+    next pop crashes the app with ``ScreenStackError``. The guard makes
+    dismissal idempotent: first call wins, duplicates are no-ops.
+    """
+
+    _finished = False
+
+    def _finish(self, result=None) -> None:
+        if self._finished:
+            return  # duplicate event — the screen is already gone
+        self._finished = True
+        self.dismiss(result)
+
+
+class ConfirmDeleteScreen(_DismissOnce, ModalScreen[bool]):
     """Yes/no confirmation before a node is deleted.
 
     Dismisses with True only on an explicit 'y' — escape and 'n' both
@@ -82,13 +102,13 @@ class ConfirmDeleteScreen(ModalScreen[bool]):
         )
 
     def action_confirm(self) -> None:
-        self.dismiss(True)
+        self._finish(True)
 
     def action_cancel(self) -> None:
-        self.dismiss(False)
+        self._finish(False)
 
 
-class HelpScreen(ModalScreen[None]):
+class HelpScreen(_DismissOnce, ModalScreen[None]):
     """Keybinding cheatsheet built straight from the app's BINDINGS."""
 
     BINDINGS = [
@@ -109,10 +129,11 @@ class HelpScreen(ModalScreen[None]):
         yield Vertical(Static("\n".join(lines)), id="help-dialog")
 
     def action_close(self) -> None:
-        self.dismiss(None)
+        # Three keys close this screen — _finish absorbs the duplicates.
+        self._finish(None)
 
 
-class TitlePromptScreen(ModalScreen[str | None]):
+class TitlePromptScreen(_DismissOnce, ModalScreen[str | None]):
     """Single-line prompt for a new node title; escape cancels."""
 
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
@@ -128,13 +149,13 @@ class TitlePromptScreen(ModalScreen[str | None]):
         self.query_one("#title-input", Input).focus()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        self.dismiss(event.value.strip() or None)
+        self._finish(event.value.strip() or None)
 
     def action_cancel(self) -> None:
-        self.dismiss(None)
+        self._finish(None)
 
 
-class EditorScreen(ModalScreen[str | None]):
+class EditorScreen(_DismissOnce, ModalScreen[str | None]):
     """Inline TextArea editor — Ctrl+S saves, Escape discards.
 
     Editing stays inside the TUI (no terminal suspend, no external
@@ -161,13 +182,14 @@ class EditorScreen(ModalScreen[str | None]):
         self.query_one("#editor", TextArea).focus()
 
     def action_save(self) -> None:
-        self.dismiss(self.query_one("#editor", TextArea).text)
+        # A held Ctrl+S auto-repeats — only the first save event may dismiss.
+        self._finish(self.query_one("#editor", TextArea).text)
 
     def action_cancel(self) -> None:
-        self.dismiss(None)
+        self._finish(None)
 
 
-class GraphScreen(Screen):
+class GraphScreen(_DismissOnce, Screen):
     """A Textual Tree rendering of edges — used for ego and vault graphs.
 
     A Tree gives free keyboard navigation, folding, and scrolling; the
@@ -195,7 +217,10 @@ class GraphScreen(Screen):
         yield Footer()
 
     def action_close(self) -> None:
-        self.app.pop_screen()
+        # Pushed result-less (no callback), so a guarded dismiss(None) is
+        # equivalent to pop_screen() — minus the double-pop failure mode
+        # when escape and q race.
+        self._finish(None)
 
 
 # ---------------------------------------------------------------------------

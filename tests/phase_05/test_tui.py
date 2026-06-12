@@ -301,6 +301,87 @@ async def test_help_overlay(vault_with_nodes, indexed_db, tmp_path):
         await pilot.press("q")
 
 
+async def test_modal_double_dismiss_is_safe(vault_with_nodes, indexed_db, tmp_path):
+    """Closing a modal twice must leave the base screen intact (dismiss-once guard).
+
+    Key auto-repeat — or a second close event queued behind the first — can
+    deliver another dismissal after the modal has already been popped.  An
+    unguarded second ``dismiss()`` / ``pop_screen()`` then pops the BASE
+    screen and the app crashes with ScreenStackError.  Route every modal
+    exit through a dismiss-once guard so the duplicate is a no-op.
+    """
+    import inspect
+
+    TUI = _load_tui_class()
+    db_path = str(tmp_path / "test.db")
+    app = _make_app(TUI, vault=str(vault_with_nodes), db_path=db_path)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        base_screen = pilot.app.screen
+        await pilot.press("question_mark")
+        await pilot.pause()
+
+        modal = pilot.app.screen
+        if modal is base_screen:
+            # An app that shows help without pushing a screen has no modal
+            # stack to corrupt — the double-dismiss bug class cannot occur.
+            pytest.skip("'?' did not push a screen — nothing to double-dismiss")
+
+        async def _close_once() -> None:
+            """Invoke the modal's own close path, exactly as a queued event would.
+
+            Probes only learner-defined exits (action_close / action_cancel /
+            on_key) — never Textual's built-in ``action_dismiss``, which is raw
+            ``dismiss()`` and sits outside any screen-level guard.
+            """
+            for name in ("action_close", "action_cancel"):
+                method = getattr(modal, name, None)
+                if callable(method):
+                    result = method()
+                    if inspect.isawaitable(result):
+                        await result
+                    return
+            handler = getattr(modal, "on_key", None)
+            if callable(handler):
+                from textual import events
+
+                result = handler(events.Key("escape", None))
+                if inspect.isawaitable(result):
+                    await result
+                return
+            pytest.skip(
+                "modal exposes no close action or on_key handler — "
+                "cannot exercise its dismissal path"
+            )
+
+        await _close_once()
+        await pilot.pause()
+        try:
+            await _close_once()  # the auto-repeat duplicate — must be a no-op
+            await pilot.pause()
+        except Exception as exc:  # noqa: BLE001 — ANY escape here is the bug
+            pytest.fail(
+                f"Dismissing the modal a second time raised {type(exc).__name__}: {exc}\n"
+                "A duplicate close event (key auto-repeat, or escape queued behind q) "
+                "must be a no-op.  Route every modal exit through a dismiss-once "
+                "guard — a _DismissOnce mixin whose _finish() sets a flag and calls "
+                "self.dismiss(result) only the first time — instead of calling "
+                "dismiss()/pop_screen() unguarded."
+            )
+
+        assert pilot.app.screen is base_screen, (
+            "After closing the help modal twice, the app is no longer on its base "
+            f"screen (now on {pilot.app.screen!r}).\n"
+            "The second dismiss() popped the screen BELOW the modal.  Make modal "
+            "dismissal idempotent with a dismiss-once guard (_finish sets a flag, "
+            "then dismisses exactly once)."
+        )
+
+        await pilot.press("q")
+
+
 # ---------------------------------------------------------------------------
 # Error-path tests
 # ---------------------------------------------------------------------------

@@ -158,6 +158,75 @@ PyYAML and `python-frontmatter` use the last value. No error is raised. Always l
 
 ---
 
+## Implicit Typing: The Value You See Is Not the Type You Get
+
+The "scalar types" rule above — YAML infers types automatically — is convenient right up until
+it isn't. YAML resolves every *unquoted* scalar against a set of patterns, silently. Gotcha 1
+(`yes`/`no` as booleans) is one instance of a much broader rule:
+
+```yaml
+due: 2026-07-01      # datetime.date(2026, 7, 1) — not the string "2026-07-01"
+version: 1.0         # float 1.0 — not the string "1.0"
+enabled: no          # bool False — the "Norway problem" (country code NO becomes False)
+id: 0x1A             # int 26 — YAML 1.1 resolves hex literals
+```
+
+Parses to:
+
+```python
+{"due": datetime.date(2026, 7, 1), "version": 1.0, "enabled": False, "id": 26}
+```
+
+No warning, no error. The value the author *sees* in the file is not the type the program *gets*.
+
+### Why this matters in Akanga
+
+The parser stores the parsed metadata dict in `Node.frontmatter` as-is. If a node's frontmatter
+contains an unquoted date, that dict now carries a `datetime.date` — which is **not
+JSON-serializable**. Nothing fails at parse time; the break happens later, in whichever consumer
+first calls `json.dumps()` on the frontmatter:
+
+```python
+import json, datetime
+
+json.dumps({"due": datetime.date(2026, 7, 1)})
+# TypeError: Object of type date is not JSON serializable
+```
+
+This is why the reference parser normalizes `date`/`datetime` values to ISO strings
+at the parse boundary — the `_normalize_fm` helper in `parser.py` (a fix that
+originated in noteapp, the codebase this curriculum is distilled from) — so no
+downstream consumer ever sees a non-JSON type. You build this in Phase 2.
+
+You can watch the mistyping happen in your Phase 0 environment:
+
+```python
+import frontmatter
+
+post = frontmatter.loads("""---
+due: 2026-07-01
+version: 1.0
+enabled: no
+---
+body""")
+print({k: type(v).__name__ for k, v in post.metadata.items()})
+# {'due': 'date', 'version': 'float', 'enabled': 'bool'}
+```
+
+### Defenses
+
+1. **Quote ambiguous scalars.** Dates, version numbers, things that look like booleans, hex-ish
+   IDs: `due: "2026-07-01"`, `version: "1.0"`, `enabled: "no"`. Quoting always produces a string.
+2. **Normalize at the boundary.** Don't trust authors to quote. The parse function is the single
+   place where raw YAML becomes program data — convert `date`/`datetime` to ISO strings (and
+   reject or coerce any other non-JSON type) there, once, instead of defending in every consumer.
+3. **Know your YAML version.** PyYAML implements YAML 1.1, where `yes`/`no`/`on`/`off` are
+   booleans and `0x1A` is an int. The YAML 1.2 core schema drops those resolutions (only
+   `true`/`false` are booleans), so two parsers can type the same file differently. Quoting and
+   boundary normalization protect you under either schema.
+
+---
+
 ## Markdown Frontmatter
 
 Frontmatter is a YAML block embedded at the very top of a Markdown file, fenced by `---` delimiters:

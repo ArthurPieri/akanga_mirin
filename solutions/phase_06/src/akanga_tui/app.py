@@ -33,7 +33,25 @@ from akanga_core.db import GraphDatabase
 from akanga_core.indexer import full_scan_and_index
 
 
-class ConfirmDeleteScreen(ModalScreen[bool]):
+class _DismissOnce:
+    """Route every modal exit through ``_finish`` — dismiss exactly once.
+
+    Key auto-repeat (or a second close event queued behind the first) can
+    deliver another dismissal after the screen has already been popped; the
+    second ``dismiss()`` then pops the screen BELOW it and the app crashes
+    with ``ScreenStackError``. The guard makes the duplicate a no-op.
+    """
+
+    _finished = False
+
+    def _finish(self, result=None) -> None:
+        if self._finished:
+            return  # duplicate event — the screen is already gone
+        self._finished = True
+        self.dismiss(result)
+
+
+class ConfirmDeleteScreen(_DismissOnce, ModalScreen[bool]):
     """Modal "Delete '<title>'?" confirmation — dismisses with True/False.
 
     Deleting a node destroys a real file on disk, so a bare ``d`` press
@@ -57,13 +75,13 @@ class ConfirmDeleteScreen(ModalScreen[bool]):
             yield Label(f"Delete '{self._title}'?  (y/n)")
 
     def action_confirm(self) -> None:
-        self.dismiss(True)
+        self._finish(True)
 
     def action_cancel(self) -> None:
-        self.dismiss(False)
+        self._finish(False)
 
 
-class HelpScreen(ModalScreen[None]):
+class HelpScreen(_DismissOnce, ModalScreen[None]):
     """The ``?`` keybinding cheatsheet, generated from the app's BINDINGS.
 
     Building the table from ``BINDINGS`` (instead of hand-writing it)
@@ -84,7 +102,7 @@ class HelpScreen(ModalScreen[None]):
             yield Static("\n".join(lines))
 
     def action_close(self) -> None:
-        self.dismiss(None)
+        self._finish(None)
 
 
 class AkangaTUI(App):

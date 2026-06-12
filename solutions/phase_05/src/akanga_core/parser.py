@@ -24,6 +24,7 @@ import os
 import re
 import shutil
 import tempfile
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -40,19 +41,37 @@ _INLINE_EDGE_RE = re.compile(r"\[\[([^\]|]+)\|([^\]]+)\]\]")
 _CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 
 
+def _normalize_fm(value: Any) -> Any:
+    """Recursively convert YAML-implicit date/datetime values to ISO strings.
+
+    Bare YAML dates (``due: 2026-07-01``) parse to ``datetime.date`` — not
+    JSON-serializable, and a different type than the string the author
+    visually wrote. Normalizing at the parse boundary means every consumer
+    downstream (DB, API, MCP, write-back) sees one type: str.
+    """
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: _normalize_fm(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_normalize_fm(v) for v in value]
+    return value
+
+
 def parse_node_file(path: str) -> Node:
     """Parse a Markdown file with YAML frontmatter into a Node.
 
     Missing or invalid `id` values are replaced with a fresh uuid4 so
     every Node the system sees has a usable identity. `title` falls back
-    to the filename stem, `type` defaults to "note", and the raw YAML
-    dict is preserved unmodified in `node.frontmatter`.
+    to the filename stem, `type` defaults to "note", and the YAML dict
+    is preserved in `node.frontmatter` with one normalization: implicit
+    date/datetime values become ISO strings (see `_normalize_fm`).
 
     Raises FileNotFoundError for a missing file and lets YAML errors
     (e.g. ScannerError) propagate for malformed frontmatter.
     """
     post = frontmatter.load(path)
-    fm: dict[str, Any] = post.metadata
+    fm: dict[str, Any] = _normalize_fm(post.metadata or {})
 
     raw_id = fm.get("id")
     try:

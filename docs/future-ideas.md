@@ -77,6 +77,23 @@ at a glance:
 - **Temporal animation** — replay the graph's evolution over git history. Each commit
   adds/removes nodes and edges; the graph animates forward in time.
 
+**Interaction layer (prior art: noteapp).** The noteapp reference implementation has
+since built an interaction layer over its graph view. Parked here so the ideas are
+recorded with provenance:
+
+- **Mouse pan / zoom / select** — direct manipulation of the graph viewport and
+  click-to-select of nodes.
+- **Drag-to-reposition** — pick up a node and pin it where you drop it, overriding
+  the force-directed layout.
+- **Connect mode** — drag from one node to another to create a typed edge between
+  them (relation type chosen at drop time).
+- **Note preview panel** — a panel beside the graph showing the selected node's
+  rendered body without leaving the graph view.
+- **Edge relation labels on hover** — hovering an edge reveals its relation type.
+
+These exist in noteapp as working prior art; like the visual-encoding ideas above,
+they gate on the Phase 5 two-layer pixel renderer stretch goal being stable first.
+
 **Minimum prerequisites:** Two-layer renderer stable + sufficient vault size to make
 visual differentiation meaningful (at least ~50 nodes).
 
@@ -86,6 +103,6 @@ visual differentiation meaningful (at least ~50 nodes).
 
 - **Semantic search / vector embeddings** — `sentence-transformers` over node bodies as a complement to FTS5. Useful for fuzzy/synonym queries. Can be added as a Phase 9+ enhancement without changing any Phase 1–8 architecture. (Research note from AI integration work: FTS5 + BFS is sufficient for MVP; embeddings only improve the seed-node retrieval step.)
 - **Akanga Cloud / sync** — vault sync across devices via a self-hosted or managed backend. Requires conflict resolution model (CRDTs? git-based?). Entirely separate infrastructure concern.
-- **Mobile / web client** — a browser or mobile UI over the REST API. The REST API (Phase 6) is the foundation; the client is out of scope for the current learning path.
+- **Mobile / web client** — a browser or mobile UI over the REST API. The REST API (Phase 6) is the foundation; the client is out of scope for the current learning path. (noteapp carries a working React/Cytoscape reference implementation should this ever be unparked.)
 - **Multi-user / collaborative vaults** — shared knowledge graphs with per-user attribution. Requires auth, access control, and a conflict model. Not compatible with the "single local SQLite" architecture without significant rework.
 - **Relation inference** — if A `supports` B and B `contradicts` C, infer that A `contradicts` C (transitively). Requires a formal inference engine and a way to distinguish asserted vs inferred edges. The `symmetric` and `inverse_id` fields in the relation registry (Phase 1) are the foundation for lazy inverse inference, but full transitivity is a research problem.

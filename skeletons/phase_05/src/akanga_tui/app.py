@@ -398,10 +398,31 @@ class AkangaTUI(App):
         3. Ask for confirmation with a ``ModalScreen`` — the same pattern as
            the help cheatsheet (action_help_cheatsheet): define a
            ``ConfirmDeleteScreen(ModalScreen[bool])`` showing
-           "Delete '<title>'? (y/n)" with Yes/No buttons (or y/n keys) that
-           ``self.dismiss(True/False)``, then::
+           "Delete '<title>'? (y/n)" with Yes/No buttons (or y/n keys), then::
 
                self.push_screen(ConfirmDeleteScreen(node.title), callback=...)
+
+           Dismiss-once guard: do NOT call ``self.dismiss(True/False)``
+           directly from the y/n/escape handlers. Key auto-repeat (or a
+           second close event queued behind the first) can deliver another
+           dismissal after the screen has already been popped — the second
+           ``dismiss()`` then pops the screen BELOW it and the app dies with
+           ``ScreenStackError``. Write a tiny mixin once and let EVERY modal
+           in this file inherit it::
+
+               class _DismissOnce:
+                   _finished = False
+
+                   def _finish(self, result=None) -> None:
+                       if self._finished:
+                           return  # duplicate event — already closed
+                       self._finished = True
+                       self.dismiss(result)
+
+           then route every exit path through it — ``self._finish(True)`` /
+           ``self._finish(False)`` here, ``self._finish(None)`` in the help
+           and graph screens (``test_modal_double_dismiss_is_safe`` pins
+           this guard).
 
            Run steps 4a–4g in the callback only when the result is True.
            Do NOT use a bell + second-keypress pattern — it is invisible to
@@ -461,7 +482,11 @@ class AkangaTUI(App):
              edge's natural direction, e.g.
              ``f"--[{edge.relation or 'links'}]--> {target.title}"`` under
              its source node (look titles up in ``ego.nodes``).
-           - Bind ``q`` / ``escape`` to ``self.app.pop_screen()``.
+           - Bind ``q`` / ``escape`` to a single close action that routes
+             through the ``_DismissOnce._finish`` guard (see
+             action_delete_node step 3) — with TWO close keys a queued
+             duplicate can arrive after the screen is already popped, and a
+             bare ``self.app.pop_screen()`` would then pop the main screen.
 
         4. ``self.push_screen(EgoGraphScreen(ego))``.
         """
@@ -509,14 +534,17 @@ class AkangaTUI(App):
 
         2. Render as a Textual ``DataTable`` or a formatted ``Markdown`` string.
         3. Push a ``ModalScreen`` (or any ``Screen``) that displays the table
-           and dismisses on any key press.
+           and dismisses on any key press — through the ``_DismissOnce``
+           guard (action_delete_node step 3): any-key close is the easiest
+           double-dismiss to trigger, since holding a key auto-repeats and
+           queues a second event behind the first.
 
         Note: this ModalScreen is the pattern the delete confirmation
         (action_delete_node) reuses — build it once, parameterise twice.
         """
         raise NotImplementedError(
             "Build a table from self.BINDINGS, push a ModalScreen showing the table. "
-            "Dismiss on any key press."
+            "Dismiss on any key press via the _DismissOnce._finish guard."
         )
 
     def action_focus_next_node(self) -> None:

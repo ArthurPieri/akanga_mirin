@@ -348,3 +348,49 @@ Known-latent (logged, not fixed): NodeRecord(frozen) generates __hash__ but
 `tags: list[str]` makes hashing raise at call time — no current call site
 hashes records; if a `set[NodeRecord]` is ever needed, change tags to
 `tuple[str, ...]` first.
+
+---
+
+# NOTEAPP SYNC — Cross-repo port batch (2026-06-12)
+
+A gap analysis of the noteapp reference implementation (the codebase this
+curriculum is distilled from) against the curriculum classified every recent
+noteapp theme as PORT / ADD / PARK / SKIP. Most core-integrity fix classes
+were already absorbed (UUID write-back E2, symlink-resolved watcher, delete
+grace window E5, tombstone pass, hash-skip, debounce D6/E3, SEC ledger).
+Executed this batch:
+
+- **PORT: `_DismissOnce` double-dismiss guard** (noteapp 5a4aaea). Textual
+  raises ScreenStackError when a queued duplicate event dismisses an
+  already-popped modal. Guarded ALL modal exits in the three intentionally
+  divergent TUIs (phase_05: 4 modal classes incl. HelpScreen's any-key
+  close; phase_06: 2; phase_07: 5, incl. converting the bare
+  `pop_screen()` in GraphScreen.action_close). Skeleton phase_05 HOW now
+  teaches the mixin (docstrings only — code would trip skeleton_check);
+  regression test `test_modal_double_dismiss_is_safe` added to phase_05
+  suite (red-test verified: the unguarded path raises ScreenStackError) and
+  listed in the phase doc's Deliverable; teaching callout "Dismiss exactly
+  once" added to phase-05 doc §Interaction States.
+- **PORT (defensive): `_normalize_fm` YAML-date normalization** (noteapp
+  ab69426). Bare YAML dates parse to datetime.date (not JSON-serializable).
+  Canonical phase_02 parser.py now normalizes date/datetime → ISO strings
+  at the parse boundary; propagated 2→8; phase_02 skeleton marker teaches
+  it; pinning test `test_bare_yaml_date_in_frontmatter_normalizes_to_string`
+  in tests/phase_02/test_indexer.py. akanga had no LIVE json.dumps boundary
+  on frontmatter — this is future-proofing plus a teaching moment.
+- **ADD (docs): YAML implicit typing** — new foundation-doc section
+  (dates, floats, the Norway problem, hex ints; defenses; points at
+  `_normalize_fm` as the Phase-2 boundary fix). **Kitty renderer field
+  notes** in phase-05 stretch section (tmux breaks auto-detection — force
+  the protocol; render 2× + downscale).
+- **PARK: interaction layer** (pan/zoom/select, drag, connect mode, note
+  preview, edge-label hover) recorded in docs/future-ideas.md with noteapp
+  provenance, gated on the pixel-renderer stretch goal; web-client entry
+  notes noteapp's React/Cytoscape reference implementation.
+- **SKIP**: Nhamandu theming, noteapp's own DRY round, PYTHONPATH/uv make
+  fixes (different harness), product features akanga diverges from by
+  design.
+
+Gates green post-merge: lint, test-all 9/9 (phase_05 now 9 tests, phase_02
+41), verify PHASE=8 cumulative, drift gate converged (parser re-propagated),
+doc-contract exit 0, skeleton_check 9/9, markers 3/3, mkdocs clean.
