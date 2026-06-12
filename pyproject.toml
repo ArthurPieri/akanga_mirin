@@ -9,7 +9,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "python-frontmatter>=1.1.0",     # Phase 0+: YAML frontmatter parsing
-    "textual>=8.2.5,<9.0.0",          # Phase 5: terminal UI
+    "textual>=8.2.7,<9.0.0",          # Phase 5: terminal UI
     "watchdog>=4.0.0",               # Phase 4: filesystem events
     "fastapi>=0.115.0",              # Phase 6: REST API
     "uvicorn[standard]>=0.32.0",     # Phase 6: ASGI server
