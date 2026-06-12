@@ -40,9 +40,12 @@ docs/foundations/       background explainer docs
 docs/                   planning, analyses, facilitator guide — map in docs/README.md
 scripts/                study.sh, skeleton_check.py, skeleton_merge.py,
                         sync_forward.py + sync_manifest.toml,
-                        check_doc_contracts.py, validate_vault.py
+                        check_doc_contracts.py, validate_vault.py,
+                        _common.py (shared conventions: markers, REPO_ROOT,
+                        phase normalization, md section walker)
 templates/              project-makefile template for learners
-tests/                  phase test suites
+tests/                  phase test suites + _helpers.py (shared dual-layout
+                        loader policy) + test_scripts_markers.py (CI pin)
 skeletons/              skeleton code per phase
 solutions/              reference implementations (on main; usage norms in
                         solutions/README.md)
@@ -152,7 +155,7 @@ Phase 1 builds the relation registry. Phase 8's `list_relation_types()` MCP tool
 
 ## Security context
 
-Three security properties are enforced in this curriculum's own `solutions/` and
+Four security properties are enforced in this curriculum's own `solutions/` and
 `skeletons/` trees (they originate from fixes in the noteapp reference
 implementation that preceded this repo):
 

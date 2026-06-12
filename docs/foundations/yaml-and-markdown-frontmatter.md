@@ -547,9 +547,10 @@ types with their inverses — a building block for the full graph model.
 
 ## In Your Implementation
 
-- **`parser.py`** (Phase 0) — `parse_node(path)` calls `frontmatter.load()` and returns a
-  `Node` dataclass. `write_node(path, node)` calls `frontmatter.dumps()` and writes atomically.
-  All metadata access uses `.get()` with safe defaults.
+- **`parser.py`** (Phase 0) — `parse_node_file(path)` calls `frontmatter.load()` and returns a
+  `Node` dataclass. `write_node_file(path, frontmatter_dict, content)` calls
+  `frontmatter.dumps()` and writes atomically. All metadata access uses `.get()`
+  with safe defaults.
 
 - **Phase 1 work** — introduces `akanga.yaml` vault config. `yaml.safe_load` is the correct parser.
   The config schema includes `owner`, `default_workspace`, `workspaces`, and `relations`.
