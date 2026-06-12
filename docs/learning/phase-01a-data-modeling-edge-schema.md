@@ -205,6 +205,8 @@ The snippets below are illustrative — the shipped suite is
 `test_write_back_moves_inline_to_frontmatter` / `_idempotent` /
 `_preserves_existing_edges` / `_malformed_edges_yaml_raises`.
 
+The illustrative sketches:
+
 ```python
 def test_inline_edge_extraction():
     body = "This idea [[Blink — Gladwell | contradicts]] fast thinking."
