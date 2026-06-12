@@ -63,6 +63,11 @@ Round 5 remediation is **COMPLETE** — all 9 findings of
 running handoff log with per-finding status and adopted decisions (W1–W9) is
 `docs/status-remediation.md`.
 
+No round is currently in progress — `make status` and
+`docs/status-remediation.md` are the live state. One deferred item with a
+trigger: `check_doc_contracts.run_checks` extraction, revisit only if that
+file grows.
+
 ---
 
 ## How testing works
