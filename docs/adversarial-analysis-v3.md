@@ -106,3 +106,31 @@ The Round-2 settlements (D1–D11) and the resolved findings — this round atta
 
 ## Appendix — Agent Coverage
 A1 cohort → #8 #9 #10 · A2 scale → #1 #4 #5 · A3 code → #1 #2 #3 #13 · A4 maintenance → #6 #7 #12 · A5 outcomes → #6 #11 #12. Cross-validation: #1 found independently by A2 (behavioral) and A3 (code-reading), reproduced by orchestrator; A4's CLAUDE.md sub-claim disproved and withdrawn.
+
+---
+
+## Resolution Log
+
+*Status as of 2026-06-11 (W1–W6 batch + orchestrator integration complete). Verification: all 9 cumulative
+legs green (leg 08: 176 passed — the capstone tree is fully cumulative for the first time), stdio MCP smoke
+passes, duplication reproduced-then-fixed (2→4→6 became 2→2→2), drift gate 55 pairs / 0 drifting, ruff clean.*
+
+| # | Finding | Status | Resolution |
+|---|---|---|---|
+| 1 | Edge duplication (reproduced) | **Resolved** | UNIQUE(source,target,relation)+INSERT OR IGNORE in skeleton+all trees; hash-first skip; per-node delete-rederive; tombstone pass; UUID write-back at index (W2); 4 idempotency tests (W3) |
+| 2 | phase_08 reverts taught lessons | **Resolved** | Canonical eventbus/watcher promoted; then FULL lineage convergence — phase_08 now carries the 02–07 base byte-identical + adapted MCP/TUI layers (W1 + orchestrator) |
+| 3 | EventBus TOCTOU; _fire variance | **Resolved** | Lock-scoped set_loop/buffer; canonical _fire; observer-first stop; stress tests (W1/W3). Bonus: W3's re-touch test exposed a REAL macOS phantom-delete (FSEvents coalesces atomic replace into a delete for the living target) — fixed with an exists-check on debounced deletes |
+| 4 | Graph RAG emits no graph at density | **Resolved** | Relations-first, depth-then-typedness ranking, root 500/neighbor 120 snippets, depth param; verified: 80 triples + 65 snippets at 11,863/12,000 chars (W5) |
+| 5 | Editor/sync write signatures | **Resolved** | 5s idle commit batcher + gc every 50 commits; delete grace window (create-cancels-delete); dup-id warning + displaced-row FTS handling (W1/W2); doc callouts (W4) |
+| 6 | Answer key shipped; stale docs; no norms | **Resolved** | 6-spot sweep; CONTRIBUTING + solutions/README rewritten with CS50-style norms; make peek + PEEKS.md; failure message inverted to the remediation ladder (W4/W6) |
+| 7 | Solution-tree drift | **Resolved** | sync_manifest.toml + sync_forward --base/--check-all + CI drift-gate; one-time convergence merged the half-fixes; 55 pairs byte-identical incl. phase_08 (W6 + orchestrator) |
+| 8 | Phase-transition stub gap | **Resolved** | AST skeleton_merge.py wired into make skeleton; facilitator ImportError row (W6/W4) |
+| 9 | No learner state | **Resolved** | .akanga-progress on green/red, make resume/checkpoint, learner-facing status hint (W6) |
+| 10 | Day-1 funnel | **Resolved** (3.12 verification pending canary) | requires-python>=3.12; absolute .envrc; setup-workshop; remediation-ladder failure message (W6) |
+| 11 | Green ≠ understood | **Resolved** | Mutation blocks phases 00/02/04; atomic fault-injection test (write_text now fails it) (W4/W3) |
+| 12 | Time rot; frozen CI; wrong Desktop path | **Resolved** | dependabot + weekly canary; CI matrix with cumulative legs + cache; stdio MCP smoke (passes); Desktop path fixed + stamped; extras pinned (W6/W3/W4) |
+| 13 | Exemplar-honesty defects | **Resolved** | close() under lock; get_edges_touching/delete_edge methods; displaced-row FTS dance; one path convention (vault-relative) asserted at the boundary; search limits (W2 + convergence) |
+
+**Corrections owned this round:** A4's CLAUDE.md-stale claim disproved pre-synthesis; the venv pytest binary went
+missing mid-batch (uv lock without sync), silently falling back to the asdf global stack — caught because the
+stdio smoke skipped on missing fastmcp; venv restored, full gate re-run green.

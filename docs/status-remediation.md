@@ -1,6 +1,6 @@
 # STATUS — Adversarial-Analysis Remediation (V2 + V3)
 
-> **Audience:** contributors / future Claude Code sessions. Updated 2026-06-11 (Round 3 in progress — see the Round 3 section at the end).
+> **Audience:** contributors / future Claude Code sessions. Updated 2026-06-11 (Rounds 2 AND 3 complete — 27/27 findings resolved across both).
 > Handoff doc for the remediation of `docs/adversarial-analysis-v2.md` (complete) and `docs/adversarial-analysis-v3.md` (in progress) findings.
 > Authoritative finding-by-finding status: the Resolution Log at the end of each doc.
 
@@ -56,7 +56,7 @@ D11 phase-5: doc keymap canonical; Kitty renderer = stretch goal (`uv sync --ext
 
 ---
 
-# ROUND 3 — Adversarial-Analysis-V3 Remediation (2026-06-11, IN PROGRESS)
+# ROUND 3 — Adversarial-Analysis-V3 Remediation (2026-06-11, COMPLETE)
 
 > Findings: `docs/adversarial-analysis-v3.md` — 13 findings from 5 analysis agents
 > armed with measured data (1,000-node benchmark vault, md5 drift across solution
@@ -104,16 +104,16 @@ D11 phase-5: doc keymap canonical; Kitty renderer = stretch goal (`uv sync --ext
 
 | # | Finding | Severity | Status |
 |---|---|---|---|
-| 1 | Edge duplication on every re-scan (**reproduced**: 2→4→6) | CRITICAL | In progress — schema + write-back + idempotency test (code/test siblings) |
-| 2 | phase_08 tree reverts taught lessons (BUG-04 back) | CRITICAL | In progress — phase_07 module promotion (code sibling) |
-| 3 | EventBus TOCTOU / `_fire` variance by copy | SERIOUS | In progress — rides the E7 convergence commit + stress tests |
-| 4 | Graph RAG emits no graph at real density | SERIOUS | In progress — code (sibling); **doc density paragraph DONE** (phase-08) |
-| 5 | Editor/sync write signatures break write path | SERIOUS | In progress — batcher/gc/guards in code; **doc callouts DONE** (phases 04 + 07) |
-| 6 | Stale status claims; no honor-system norms | SERIOUS | In progress — **doc sweep DONE** (README, facilitator-guide, solutions/README, CONTRIBUTING); `make peek` + Makefile message inversion (sibling) |
-| 7 | Solution-tree drift, divergent half-fixes | SERIOUS | In progress — manifest + sync_forward rework + CI gate (sibling) |
-| 8 | Phase-transition stub delivery gap | SERIOUS | In progress — skeleton merge (sibling); **facilitator ImportError row DONE** |
-| 9 | No learner state / resume / backup | SERIOUS | In progress — progress/resume/checkpoint targets (sibling) |
-| 10 | Day-1 funnel (3.13 pin, relative AKANGA_SRC, …) | MODERATE | In progress — pin verification pending (E10); **facilitator proxy-vs-interpreter row DONE** |
-| 11 | Green ≠ understood (suite blind spots) | MODERATE | In progress — **mutation blocks DONE** (phases 00/02/04); fault-injection test (test sibling) |
-| 12 | Time rot; wrong Claude Desktop path; frozen CI | MODERATE | In progress — **Desktop path + fastmcp version stamp + stale tests-note DONE** (phase-08); canary/dependabot/MCP smoke (sibling) |
-| 13 | Exemplar-honesty defects in persistence/API | MODERATE | In progress — code sibling |
+| 1 | Edge duplication on every re-scan (**reproduced**: 2→4→6) | CRITICAL | **Resolved** — see v3 Resolution Log |
+| 2 | phase_08 tree reverts taught lessons (BUG-04 back) | CRITICAL | **Resolved** — see v3 Resolution Log |
+| 3 | EventBus TOCTOU / `_fire` variance by copy | SERIOUS | **Resolved** — see v3 Resolution Log |
+| 4 | Graph RAG emits no graph at real density | SERIOUS | **Resolved** — see v3 Resolution Log |
+| 5 | Editor/sync write signatures break write path | SERIOUS | **Resolved** — see v3 Resolution Log |
+| 6 | Stale status claims; no honor-system norms | SERIOUS | **Resolved** — see v3 Resolution Log |
+| 7 | Solution-tree drift, divergent half-fixes | SERIOUS | **Resolved** — see v3 Resolution Log |
+| 8 | Phase-transition stub delivery gap | SERIOUS | **Resolved** — see v3 Resolution Log |
+| 9 | No learner state / resume / backup | SERIOUS | **Resolved** — see v3 Resolution Log |
+| 10 | Day-1 funnel (3.13 pin, relative AKANGA_SRC, …) | MODERATE | **Resolved** — see v3 Resolution Log |
+| 11 | Green ≠ understood (suite blind spots) | MODERATE | **Resolved** — see v3 Resolution Log |
+| 12 | Time rot; wrong Claude Desktop path; frozen CI | MODERATE | **Resolved** — see v3 Resolution Log |
+| 13 | Exemplar-honesty defects in persistence/API | MODERATE | **Resolved** — see v3 Resolution Log |

@@ -127,7 +127,7 @@ class AkangaTUI(App):
 
     def _refresh_node_list(self) -> None:
         """Load all nodes from the database and update the sidebar."""
-        self._all_nodes = self.db.get_all_nodes(limit=1000)
+        self._all_nodes = self.db.list_nodes(limit=1000)
         self._update_list_view(self.query_one("#filter-input", Input).value)
 
     def _update_list_view(self, filter_text: str) -> None:

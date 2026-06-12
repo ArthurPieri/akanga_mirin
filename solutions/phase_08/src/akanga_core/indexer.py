@@ -1,70 +1,262 @@
-"""Vault indexing and full-text search helpers.
+"""Phase 02 — the indexer: files in, derived index out.
 
-Search is metadata-only (title + tags): node prose is never stored in the
-database (Phase 2 rule / BUG-01), so FTS cannot and should not match body
-text. SEC-06 quoting is handled inside :meth:`GraphDatabase.search`.
+The `.md` files are the source of truth; the DB is an expendable index.
+`full_scan_and_index` proves it: delete the `.db` file at any time, run
+the scan again, and the identical graph comes back — nodes from the
+files, edges re-derived from wikilinks and frontmatter edge blocks.
+
+IDEMPOTENCE CONTRACT: `scan; scan` produces an identical DB. Three
+mechanisms enforce it (the index used to be append-only, duplicating
+every edge on every re-scan):
+
+- Hash-first skip: a file's SHA-256 is computed BEFORE parsing and
+  compared against the row stored at the same vault-relative path. An
+  unchanged file costs one read — zero parses, zero writes.
+- Delete-then-rederive: a changed file's outgoing edges are wiped
+  (`db.delete_edges_from`) and rebuilt from the current body, so stale
+  links die and re-derived links cannot accumulate (the schema's
+  `UNIQUE(source_id, target_id, relation)` backstops this).
+- Tombstones: after pass 1, every DB node whose file no longer exists
+  on disk is deleted — file deletions reconcile instead of haunting
+  search and RAG results forever.
+
+IDENTITY STABILITY: a file with a missing or invalid `id` gets the
+freshly minted UUID written BACK into its frontmatter (atomically)
+before the upsert. Without the write-back every scan re-mints a new id,
+orphaning the node's edges each time — an Obsidian vault imported with
+no ids would never converge.
+
+Two-pass design, changed files only: edges reference target nodes by
+UUID, so every node must be in the `nodes` table BEFORE any edge can be
+resolved — pass 1 upserts the changed nodes, pass 2 re-derives edges
+for exactly those nodes. Known limit: a wikilink in an UNCHANGED file
+that only now became resolvable stays unresolved until that file next
+changes; `rm *.db && scan` re-resolves everything (expendable DB).
 """
 from __future__ import annotations
 
-from pathlib import Path
+import logging
+import os
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
-from .db import GraphDatabase
-from .links import extract_edges, resolve_path
-from .parser import parse_node_file
+from .links import extract_wikilinks, resolve_wikilink
+from .parser import content_hash, parse_node_file, write_node_file
+
+if TYPE_CHECKING:  # pragma: no cover — import only for type checkers
+    from .db import GraphDatabase
+    from .models import Node
+
+logger = logging.getLogger(__name__)
 
 
-def search_fts(db: GraphDatabase, query: str) -> list[dict]:
-    """Full-text search over node titles and tags.
+def scan_vault(vault_path: str) -> Iterator[str]:
+    """Yield the path of every indexable `.md` file under `vault_path`.
 
-    Returns plain dicts (id, title, type, tags, path) so results are directly
-    JSON-serializable for the API and MCP layers. Empty queries return [].
+    Hidden directories (`.git/`, `.akanga/`, ...) are pruned in-place so
+    `os.walk` never descends into them; non-`.md` files are skipped.
+    Separating traversal from indexing keeps both halves testable.
     """
-    return [
-        {
-            "id": node.id,
-            "title": node.title,
-            "type": node.type,
-            "tags": node.tags,
-            "path": node.path,
-        }
-        for node in db.search(query)
-    ]
+    for root, dirs, files in os.walk(vault_path):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        for filename in files:
+            if filename.endswith(".md"):
+                yield os.path.join(root, filename)
 
 
-def index_file(db: GraphDatabase, vault: Path, path: Path) -> str:
-    """Parse one Markdown file and upsert its node + outgoing edges.
+def _vault_relative(path: str, vault_path: str) -> str:
+    """Normalise `path` to the vault-relative form stored in the DB.
 
-    Returns the node ID. Prose is parsed for link extraction but never
-    persisted — only metadata reaches the database.
+    ONE spelling per file: `node.path` is always stored relative to the
+    vault root, so the index survives the vault being moved or mounted
+    elsewhere — and so the hash-first lookup finds the same row no
+    matter how the caller spelled the path.
     """
-    parsed = parse_node_file(path)
-    db.upsert_node(parsed)
+    return os.path.relpath(os.path.abspath(path), os.path.abspath(vault_path))
 
-    for target, relation in extract_edges(parsed.content):
-        target_path = resolve_path(vault, path, target)
-        if not target_path.exists():
+
+def _node_disk_path(stored_path: str, vault_path: str) -> str:
+    """Resolve a stored node path back to an absolute on-disk path.
+
+    Stored paths are normally vault-relative (see `_vault_relative`),
+    but rows written by other layers (e.g. the Phase 6 API) may be
+    absolute — both spellings must resolve.
+    """
+    if os.path.isabs(stored_path):
+        return stored_path
+    return os.path.join(vault_path, stored_path)
+
+
+def _persist_minted_id(node: Node | Any, path: str) -> bool:
+    """Write a freshly minted UUID back into the file's frontmatter.
+
+    `parse_node_file` silently replaces a missing/invalid `id` with a
+    new uuid4 — but it is PURE and never touches the file, so without
+    this write-back the next scan would mint a DIFFERENT id and orphan
+    every edge pointing at this node. The write is atomic
+    (`write_node_file`: temp file + fsync + `os.replace`).
+
+    Returns True when the file was rewritten — the caller must re-hash.
+    """
+    raw_id = node.frontmatter.get("id")
+    try:
+        UUID(str(raw_id))
+        return False  # the id on disk is already valid — nothing to do
+    except ValueError:
+        pass
+    frontmatter = dict(node.frontmatter)
+    frontmatter["id"] = node.id  # the uuid parse_node_file just minted
+    write_node_file(path, frontmatter, node.content)
+    node.frontmatter = frontmatter
+    return True
+
+
+def _index_node(path: str, db: GraphDatabase, vault_path: str) -> tuple[Any, Any | None]:
+    """Index one file's NODE row; return `(node, parsed_or_None)`.
+
+    `parsed` is None when nothing was written: either the content hash
+    matched (unchanged file) or a duplicate-id conflict was refused.
+    When `parsed` is a Node the caller still owes the edge re-derive
+    (`_reindex_edges`) — kept separate so `full_scan_and_index` can
+    defer edges until every changed node exists (the two-pass rule).
+    """
+    rel_path = _vault_relative(path, vault_path)
+    file_hash = content_hash(path)  # ONE read; no parse on the fast path
+
+    existing = db.get_node_by_path(rel_path)
+    if existing is not None and existing.content_hash == file_hash:
+        return existing, None  # unchanged — zero parses, zero writes
+
+    node = parse_node_file(path)
+    if _persist_minted_id(node, path):
+        file_hash = content_hash(path)  # the write-back changed the bytes
+
+    # Duplicate-id guard (disk-aware half; the DB half only warns). A
+    # sync-conflict copy ("note (conflicted copy).md") carries the same
+    # frontmatter id as the original. While the already-indexed file
+    # still exists, keep it and refuse the newcomer — otherwise node
+    # identity flaps between files on every scan. If the old path is
+    # gone from disk, this is an ordinary move and the upsert proceeds.
+    current = db.get_node(node.id)
+    if current is not None:
+        current_disk = os.path.abspath(_node_disk_path(current.path, vault_path))
+        if current_disk != os.path.abspath(path) and os.path.exists(current_disk):
+            logger.warning(
+                "Duplicate node id %s: %r is already indexed and still on disk; "
+                "refusing to index %r (sync-conflict copy suspected). "
+                "Policy: the first-indexed file wins while both exist.",
+                node.id,
+                current.path,
+                rel_path,
+            )
+            return current, None
+
+    node.path = rel_path
+    node.content_hash = file_hash
+    db.upsert_node(node)
+    return node, node
+
+
+def _reindex_edges(parsed: Node | Any, db: GraphDatabase) -> None:
+    """Replace a node's outgoing edges with ones derived from its body.
+
+    Delete-then-rederive is what makes re-indexing idempotent at the
+    edge level: stale links from the previous version die here, and the
+    re-derived links land on the schema's UNIQUE constraint instead of
+    duplicating. Incoming edges belong to OTHER files — never touched.
+    """
+    db.delete_edges_from(parsed.id)
+
+    # Wikilinks in the body → untyped "wikilink" edges.
+    for title in extract_wikilinks(parsed.content or ""):
+        target_id = resolve_wikilink(title, db)
+        if target_id is not None and target_id != parsed.id:
+            db.upsert_edge(parsed.id, target_id, relation="wikilink")
+
+    # Frontmatter `edges:` entries → typed edges. A stored target_id
+    # wins; otherwise the display-cache title is resolved like a wikilink.
+    for raw in parsed.frontmatter.get("edges") or []:
+        if not isinstance(raw, dict):
             continue
-        target_note = parse_node_file(target_path)
-        db.upsert_node(target_note)
-        db.upsert_edge(parsed.id, target_note.id, relation=relation)
+        target_id = raw.get("target_id") or resolve_wikilink(raw.get("target", ""), db)
+        if target_id and target_id != parsed.id:
+            db.upsert_edge(
+                parsed.id,
+                target_id,
+                raw.get("relation") or "",
+                raw.get("relation_id") or "",
+            )
 
-    return parsed.id
 
+def index_file(path: str, db: GraphDatabase, vault_path: str) -> Node | Any:
+    """Index one `.md` file — node row AND outgoing edges; return the node.
 
-def index_vault(db: GraphDatabase, vault: Path) -> int:
-    """Index every Markdown file in the vault. Returns the node count."""
-    count = 0
-    for md_file in sorted(Path(vault).rglob("*.md")):
-        index_file(db, Path(vault), md_file)
-        count += 1
-    return count
+    Hash-first skip: the file's SHA-256 is computed before anything else
+    and compared against the row stored at the same vault-relative path;
+    on a match the existing record is returned WITHOUT parsing — a no-op
+    editor save costs one file read, total.
+
+    On change: a missing/invalid id is minted and written back to the
+    file (stable identity — see `_persist_minted_id`), the node row is
+    upserted, and its outgoing edges are deleted and re-derived from the
+    current body. A wikilink whose target is not indexed yet resolves on
+    the next `full_scan_and_index` (its pass 2 sees the full registry).
+
+    Exceptions (missing file, malformed YAML) propagate to the caller —
+    `full_scan_and_index` logs and counts them.
+    """
+    node, parsed = _index_node(path, db, vault_path)
+    if parsed is not None:
+        _reindex_edges(parsed, db)
+    return node
 
 
 def full_scan_and_index(vault_path: str, db: GraphDatabase) -> int:
-    """Compatibility alias matching the phase 02–07 lineage signature.
+    """Idempotent two-pass scan; return the number of files processed.
 
-    The phase-08 tree names this :func:`index_vault` with (db, vault)
-    argument order; cross-phase callers (and the cumulative test suites)
-    use the curriculum-wide ``full_scan_and_index(vault_path, db)``.
+    Pass 1 walks the vault and upserts every CHANGED node (hash-first;
+    failures are logged and counted, never fatal). The tombstone pass
+    then deletes DB nodes whose files vanished from disk. Pass 2
+    re-derives edges for exactly the changed nodes — by then every
+    possible target exists in the registry, which is why edge derivation
+    cannot run inside pass 1 (a single-pass indexer silently drops any
+    edge whose target file sorts later in the walk).
+
+    Contract: `scan; scan` leaves the DB identical — an unchanged vault
+    costs one hash per file and zero writes.
     """
-    return index_vault(db, Path(vault_path))
+    count = 0
+    errors = 0
+    changed: list[Any] = []
+
+    # ---- Pass 1: nodes (changed files only) ----------------------------
+    for path in scan_vault(vault_path):
+        try:
+            _, parsed = _index_node(path, db, vault_path)
+            if parsed is not None:
+                changed.append(parsed)
+            count += 1
+        except Exception:  # noqa: BLE001 — one bad file must not abort the scan
+            logger.warning("Failed to index %s", path, exc_info=True)
+            errors += 1
+    if errors:
+        logger.warning("Full scan: %d file(s) failed to index", errors)
+
+    # ---- Tombstones: deletions must reconcile ---------------------------
+    # A node whose file is gone leaves the index entirely — row, FTS
+    # entry, and edges in BOTH directions via delete_node. Otherwise
+    # deleted notes haunt search results and RAG context forever.
+    for node in db.list_nodes(limit=10_000):
+        if not os.path.exists(_node_disk_path(node.path, vault_path)):
+            logger.info("Tombstone: %s (%s) no longer on disk — removing", node.path, node.id)
+            db.delete_node(node.id)
+
+    # ---- Pass 2: edges for changed nodes (registry is now complete) -----
+    for parsed in changed:
+        try:
+            _reindex_edges(parsed, db)
+        except Exception:  # noqa: BLE001 — one bad node must not abort the scan
+            logger.warning("Edge re-derive failed for node %s", parsed.id, exc_info=True)
+
+    return count

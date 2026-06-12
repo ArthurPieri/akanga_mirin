@@ -294,6 +294,12 @@ class VaultWatcher:
             if deadline > time.time():
                 return  # re-debounced since the poll snapshot — newer deadline wins
             del self._pending[path]
+        if event == "file_deleted" and os.path.exists(path):
+            # Phantom delete: macOS FSEvents coalesces an atomic replace
+            # (os.replace onto an existing path) into a "deleted" flag for
+            # the TARGET path — which is alive and holding new content.
+            # Trust the disk over the event stream: deliver the change.
+            event = "file_changed"
         self.eventbus.publish(event, path=self._normalize(path))
 
     def _handle_delete(self, path: str) -> None:

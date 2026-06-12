@@ -23,11 +23,9 @@ import os
 import re
 import sys
 import uuid
-from dataclasses import asdict
 from pathlib import Path
 
 from akanga_core.db import GraphDatabase
-from akanga_core.indexer import search_fts
 from akanga_core.parser import content_hash, parse_node_file, write_node_file
 from akanga_core.rag import build_context
 
@@ -135,7 +133,10 @@ def search_nodes(query: str) -> list[dict]:
     """Full-text search over node titles and tags. Returns matching nodes."""
     if db is None:
         return []
-    return search_fts(db, query)
+    return [
+        {"id": n.id, "title": n.title, "type": n.type, "tags": list(n.tags)}
+        for n in db.search_fts(query, limit=20)
+    ]
 
 
 def get_node(node_id: str) -> dict | None:
@@ -145,9 +146,20 @@ def get_node(node_id: str) -> dict | None:
     node = db.get_node(node_id)
     if node is None:
         return None
-    payload = asdict(node)
+    # The lineage GraphDatabase returns attribute-access rows (not dataclasses),
+    # and stores vault-relative paths — anchor before the disk read.
+    payload = {
+        "id": node.id,
+        "title": node.title,
+        "type": node.type,
+        "tags": list(node.tags),
+        "path": node.path,
+    }
+    disk_path = Path(node.path)
+    if not disk_path.is_absolute() and vault_path is not None:
+        disk_path = Path(vault_path) / disk_path
     try:
-        payload["body"] = parse_node_file(node.path).content
+        payload["body"] = parse_node_file(str(disk_path)).content
     except OSError:
         payload["body"] = ""
     return payload

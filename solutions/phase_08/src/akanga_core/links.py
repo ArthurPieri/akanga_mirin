@@ -1,64 +1,48 @@
+"""Phase 02 — wikilink extraction and title → UUID resolution.
+
+Wikilinks (`[[Title]]`) are how nodes reference each other in prose.
+Every wikilink becomes a directed edge in the graph once resolved. The
+two halves of that pipeline live here:
+
+- `extract_wikilinks` — Markdown body → list of target titles
+- `resolve_wikilink`  — title → node UUID (the DB stores stable UUID
+  pairs, never fragile title-to-title links)
+"""
 from __future__ import annotations
 
 import re
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover — import only for type checkers
+    from .db import GraphDatabase
+
+# `[[Title]]` — the capture stops at `|`, so the `[[Target | relation]]`
+# inline-edge shorthand yields only the bare target title, never the raw
+# piped string. The optional non-capturing group consumes the relation part.
+_WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 
 
-def extract_edges(content: str) -> list[tuple[str, str]]:
+def extract_wikilinks(content: str) -> list[str]:
+    """Return the title of every `[[Title]]` wikilink in `content`.
+
+    Titles are whitespace-stripped; empty captures are dropped. The
+    `[[Target | relation]]` inline-edge syntax contributes only `Target`
+    (the relation half is the parser's `extract_inline_edges` concern).
     """
-    Extract edges from content.
-    Matches [[Target | relation]] or [[Target]].
-    Default relation is 'mentions'.
-    Returns a list of (target, relation).
+    return [title.strip() for title in _WIKILINK_RE.findall(content) if title.strip()]
+
+
+def resolve_wikilink(title: str, db: GraphDatabase) -> str | None:
+    """Look up a node by title (case-insensitive) and return its UUID string.
+
+    Returns None when no node matches, letting the indexer silently skip
+    unresolvable wikilinks instead of aborting the scan. If multiple
+    nodes share a title, the first match wins — disambiguation is out of
+    scope for Phase 02. The title is bound as a `?` parameter, never
+    interpolated into the SQL string.
     """
-    # Regex to find [[Target | relation]] or [[Target]]
-    # Group 1: Target (everything until | or ]])
-    # Group 2: relation (optional, everything after | until ]])
-    pattern = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
-    matches = pattern.findall(content)
-
-    edges = []
-    for target, relation in matches:
-        target = target.strip()
-        relation = relation.strip() if relation else "mentions"
-        if target:
-            edges.append((target, relation))
-    return edges
-
-
-def resolve_path(vault_root: str | Path, current_path: str | Path, target: str) -> Path:
-    """
-    Resolve the link target to an absolute Path.
-    """
-    vault_root = Path(vault_root).absolute()
-    current_path = Path(current_path).absolute()
-
-    # Link targets usually refer to .md files, which might or might not have extensions in the link.
-    target_p = Path(target)
-    possible_targets = [target_p]
-    if target_p.suffix != ".md":
-        possible_targets.append(target_p.with_suffix(".md"))
-
-    # 1. Try relative to current_path's directory
-    for pt in possible_targets:
-        try:
-            try_path = (current_path.parent / pt).resolve()
-            if try_path.exists() and try_path.is_relative_to(vault_root):
-                return try_path
-        except (ValueError, OSError):
-            continue
-
-    # 2. Try relative to vault root
-    for pt in possible_targets:
-        try:
-            try_path = (vault_root / pt).resolve()
-            if try_path.exists() and try_path.is_relative_to(vault_root):
-                return try_path
-        except (ValueError, OSError):
-            continue
-
-    # 3. Fallback: absolute path from vault root (might not exist yet)
-    # Ensure it ends with .md if it's a note link
-    if target_p.suffix != ".md":
-        target_p = target_p.with_suffix(".md")
-    return (vault_root / target_p).absolute()
+    with db._lock:
+        row = db.conn.execute(
+            "SELECT id FROM nodes WHERE lower(title) = lower(?)", (title,)
+        ).fetchone()
+    return None if row is None else row["id"]

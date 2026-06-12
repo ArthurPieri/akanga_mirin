@@ -25,44 +25,32 @@ phases = [0, 1, 2, 3, 4, 5, 6, 7, 8]
 [[modules]]
 file = "src/akanga_core/db.py"
 introduced_in = 2
-applies_to = [2, 3, 4, 5, 6, 7]
-excluded = [8]
-excluded_reason = "phase_08 db.py is intentionally divergent (MCP-era schema/API surface; see v3 findings #1/#13)"
+applies_to = [2, 3, 4, 5, 6, 7, 8]
 
 [[modules]]
 file = "src/akanga_core/parser.py"
 introduced_in = 2
-applies_to = [2, 3, 4, 5, 6, 7]
-excluded = [8]
-excluded_reason = "phase_08 parser.py diverges with the MCP tree"
+applies_to = [2, 3, 4, 5, 6, 7, 8]
 
 [[modules]]
 file = "src/akanga_core/models.py"
 introduced_in = 2
-applies_to = [2, 3, 4, 5, 6, 7]
-excluded = [8]
-excluded_reason = "phase_08 models.py diverges with the MCP tree"
+applies_to = [2, 3, 4, 5, 6, 7, 8]
 
 [[modules]]
 file = "src/akanga_core/sync_queue.py"
 introduced_in = 2
-applies_to = [2, 3, 4, 5, 6, 7]
-excluded = [8]
-excluded_reason = "phase_08 does not ship sync_queue.py"
+applies_to = [2, 3, 4, 5, 6, 7, 8]
 
 [[modules]]
 file = "src/akanga_core/indexer.py"
 introduced_in = 2
-applies_to = [2, 3, 4, 5, 6, 7]
-excluded = [8]
-excluded_reason = "phase_08 indexer.py diverges with the MCP tree"
+applies_to = [2, 3, 4, 5, 6, 7, 8]
 
 [[modules]]
 file = "src/akanga_core/links.py"
 introduced_in = 2
-applies_to = [2, 3, 4, 5, 6, 7]
-excluded = [8]
-excluded_reason = "phase_08 links.py diverges with the MCP tree"
+applies_to = [2, 3, 4, 5, 6, 7, 8]
 
 # ── Phase 3: graph traversal ─────────────────────────────────────────────────
 
@@ -89,8 +77,7 @@ excluded = []
 [[modules]]
 file = "src/akanga_core/sync_worker.py"
 introduced_in = 4
-applies_to = [4, 5, 6, 7]
-excluded = [8]
+applies_to = [4, 5, 6, 7, 8]
 excluded_reason = "phase_08 does not ship sync_worker.py"
 
 # ── Phase 6: REST API ────────────────────────────────────────────────────────

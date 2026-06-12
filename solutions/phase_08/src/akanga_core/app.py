@@ -28,7 +28,7 @@ from pathlib import Path
 from .db import GraphDatabase
 from .eventbus import EventBus
 from .gitmgr import GitManager
-from .indexer import index_file, index_vault
+from .indexer import full_scan_and_index, index_file
 from .watcher import VaultWatcher
 
 logger = logging.getLogger(__name__)
@@ -82,7 +82,7 @@ class AkangaApp:
         ``INSERT OR IGNORE``), so restarting the app never duplicates
         anything.
         """
-        count = index_vault(self.db, self.vault_path)
+        count = full_scan_and_index(str(self.vault_path), self.db)
         self.watcher.start()
         self._commit_stop = threading.Event()  # fresh event — restartable
         self._committer = threading.Thread(
@@ -117,7 +117,8 @@ class AkangaApp:
         """Re-index a changed file, announce it, and mark the batch dirty."""
         try:
             file_path = Path(path)
-            node_id = index_file(self.db, self.vault_path, file_path)
+            node = index_file(str(file_path), self.db, str(self.vault_path))
+            node_id = node.id
             self._node_ids[self._path_key(file_path)] = node_id
             self.events.publish("node_updated", node_id=node_id)
             self._mark_dirty(file_path.stem)
@@ -224,7 +225,7 @@ class AkangaApp:
         page_size = 500
         offset = 0
         while True:
-            batch = self.db.get_all_nodes(limit=page_size, offset=offset)
+            batch = self.db.list_nodes(limit=page_size, offset=offset)
             if not batch:
                 return None
             for node in batch:
