@@ -24,13 +24,13 @@ def _bind_learner_modules():
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_node(node_id: str, title: str, tmp_vault: Path, *, tags=None, content_hash=None):
+def _make_node(node_id: str, title: str, vault_dir: Path, *, tags=None, content_hash=None):
     """Construct a minimal Node instance for use in tests."""
     Node = _parser_mod.Node
 
     return Node(
         id=node_id,
-        path=str(tmp_vault / f"{node_id}.md"),  # full id — node paths are UNIQUE in the DB schema
+        path=str(vault_dir / f"{node_id}.md"),  # full id — node paths are UNIQUE in the DB schema
         title=title,
         type="note",
         tags=tags or [],
@@ -42,12 +42,12 @@ def _make_node(node_id: str, title: str, tmp_vault: Path, *, tags=None, content_
 # 1. upsert_node / get_node
 # ---------------------------------------------------------------------------
 
-def test_upsert_and_get_node(tmp_db: str, tmp_vault: Path):
+def test_upsert_and_get_node(db_path: str, vault_dir: Path):
     """Upserting a node and retrieving it by id returns matching fields."""
 
 
-    db = GraphDatabase(tmp_db)
-    node = _make_node("aaaaaaaa-0001-0001-0001-000000000001", "Cognitive Load", tmp_vault)
+    db = GraphDatabase(db_path)
+    node = _make_node("aaaaaaaa-0001-0001-0001-000000000001", "Cognitive Load", vault_dir)
     db.upsert_node(node)
 
     fetched = db.get_node(node.id)
@@ -57,27 +57,27 @@ def test_upsert_and_get_node(tmp_db: str, tmp_vault: Path):
     assert fetched.type == node.type
 
 
-def test_upsert_is_idempotent(tmp_db: str, tmp_vault: Path):
+def test_upsert_is_idempotent(db_path: str, vault_dir: Path):
     """Upserting the same node twice results in exactly one row in the DB."""
 
 
-    db = GraphDatabase(tmp_db)
-    node = _make_node("aaaaaaaa-0002-0002-0002-000000000002", "Idempotent Node", tmp_vault)
+    db = GraphDatabase(db_path)
+    node = _make_node("aaaaaaaa-0002-0002-0002-000000000002", "Idempotent Node", vault_dir)
     db.upsert_node(node)
     db.upsert_node(node)
 
-    conn = sqlite3.connect(tmp_db)
+    conn = sqlite3.connect(db_path)
     count = conn.execute("SELECT COUNT(*) FROM nodes WHERE id = ?", (node.id,)).fetchone()[0]
     conn.close()
     assert count == 1
 
 
-def test_upsert_updates_existing(tmp_db: str, tmp_vault: Path):
+def test_upsert_updates_existing(db_path: str, vault_dir: Path):
     """Upserting a node with a changed title overwrites the previous title."""
 
 
-    db = GraphDatabase(tmp_db)
-    node = _make_node("aaaaaaaa-0003-0003-0003-000000000003", "Original Title", tmp_vault)
+    db = GraphDatabase(db_path)
+    node = _make_node("aaaaaaaa-0003-0003-0003-000000000003", "Original Title", vault_dir)
     db.upsert_node(node)
 
     node.title = "Updated Title"
@@ -87,12 +87,12 @@ def test_upsert_updates_existing(tmp_db: str, tmp_vault: Path):
     assert fetched.title == "Updated Title"
 
 
-def test_delete_node(tmp_db: str, tmp_vault: Path):
+def test_delete_node(db_path: str, vault_dir: Path):
     """Deleting a node by id means get_node returns None afterwards."""
 
 
-    db = GraphDatabase(tmp_db)
-    node = _make_node("aaaaaaaa-0004-0004-0004-000000000004", "To Delete", tmp_vault)
+    db = GraphDatabase(db_path)
+    node = _make_node("aaaaaaaa-0004-0004-0004-000000000004", "To Delete", vault_dir)
     db.upsert_node(node)
     db.delete_node(node.id)
 
@@ -103,26 +103,26 @@ def test_delete_node(tmp_db: str, tmp_vault: Path):
 # 2. list_nodes
 # ---------------------------------------------------------------------------
 
-def test_list_nodes(tmp_db: str, tmp_vault: Path):
+def test_list_nodes(db_path: str, vault_dir: Path):
     """After upserting 3 nodes, list_nodes returns all 3."""
 
 
-    db = GraphDatabase(tmp_db)
+    db = GraphDatabase(db_path)
     for i in range(3):
-        db.upsert_node(_make_node(f"bbbbbbbb-000{i}-000{i}-000{i}-00000000000{i}", f"List Node {i}", tmp_vault))
+        db.upsert_node(_make_node(f"bbbbbbbb-000{i}-000{i}-000{i}-00000000000{i}", f"List Node {i}", vault_dir))
 
     nodes = db.list_nodes()
     assert len(nodes) >= 3
 
 
-def test_list_nodes_limit_offset(tmp_db: str, tmp_vault: Path):
+def test_list_nodes_limit_offset(db_path: str, vault_dir: Path):
     """list_nodes respects limit and offset for pagination."""
 
 
-    db = GraphDatabase(tmp_db)
+    db = GraphDatabase(db_path)
     for i in range(5):
         node_id = f"cccccccc-{i:04d}-{i:04d}-{i:04d}-{i:012d}"
-        db.upsert_node(_make_node(node_id, f"Page Node {i}", tmp_vault))
+        db.upsert_node(_make_node(node_id, f"Page Node {i}", vault_dir))
 
     page = db.list_nodes(limit=2, offset=2)
     assert len(page) == 2
@@ -132,23 +132,23 @@ def test_list_nodes_limit_offset(tmp_db: str, tmp_vault: Path):
 # 3. FTS5 search
 # ---------------------------------------------------------------------------
 
-def test_search_fts_basic(tmp_db: str, tmp_vault: Path):
+def test_search_fts_basic(db_path: str, vault_dir: Path):
     """A node titled 'Cognitive Load' is returned when searching 'cognitive'."""
 
 
-    db = GraphDatabase(tmp_db)
-    node = _make_node("dddddddd-0001-0001-0001-000000000001", "Cognitive Load", tmp_vault, tags=["cognition"])
+    db = GraphDatabase(db_path)
+    node = _make_node("dddddddd-0001-0001-0001-000000000001", "Cognitive Load", vault_dir, tags=["cognition"])
     db.upsert_node(node)
 
     results = db.search_fts("cognitive")
     assert any(r.id == node.id for r in results)
 
 
-def test_search_fts_no_operator_injection(tmp_db: str, tmp_vault: Path):
+def test_search_fts_no_operator_injection(db_path: str, vault_dir: Path):
     """FTS5 operator-like input must not crash (SEC-06: terms are double-quoted)."""
 
 
-    db = GraphDatabase(tmp_db)
+    db = GraphDatabase(db_path)
     # Should return an empty list (or any list), never raise an exception.
     try:
         results = db.search_fts("* OR title:*")
@@ -157,15 +157,15 @@ def test_search_fts_no_operator_injection(tmp_db: str, tmp_vault: Path):
         pytest.fail(f"search_fts raised an unexpected exception on operator input: {exc}")
 
 
-def test_search_fts_operator_treated_as_literal(tmp_db: str, tmp_vault: Path):
+def test_search_fts_operator_treated_as_literal(db_path: str, vault_dir: Path):
     """SEC-06 semantic check: searching 'OR' must match a node titled with the literal word.
 
     An implementation that swallows the FTS5 error (try/except: return []) passes
     the no-crash test above but fails this one — the quoted-term mitigation must
     actually treat operators as searchable literal text.
     """
-    db = GraphDatabase(tmp_db)
-    node = _make_node("dddddddd-0002-0002-0002-000000000002", "Boolean OR Logic", tmp_vault)
+    db = GraphDatabase(db_path)
+    node = _make_node("dddddddd-0002-0002-0002-000000000002", "Boolean OR Logic", vault_dir)
     db.upsert_node(node)
 
     results = db.search_fts("OR")
@@ -177,14 +177,14 @@ def test_search_fts_operator_treated_as_literal(tmp_db: str, tmp_vault: Path):
     )
 
 
-def test_search_fts_embedded_double_quote_does_not_raise(tmp_db: str, tmp_vault: Path):
+def test_search_fts_embedded_double_quote_does_not_raise(db_path: str, vault_dir: Path):
     """SEC-06: a user term containing a double quote must not break the FTS5 query.
 
     The reference implementation needed exactly this handling: strip embedded
     quotes from the term before wrapping it ( term.replace('\"', '') ).
     """
-    db = GraphDatabase(tmp_db)
-    node = _make_node("dddddddd-0003-0003-0003-000000000003", "Cognition Quoted", tmp_vault)
+    db = GraphDatabase(db_path)
+    node = _make_node("dddddddd-0003-0003-0003-000000000003", "Cognition Quoted", vault_dir)
     db.upsert_node(node)
 
     try:
@@ -205,13 +205,13 @@ def test_search_fts_embedded_double_quote_does_not_raise(tmp_db: str, tmp_vault:
 # 4. Edges — neighbors and backlinks
 # ---------------------------------------------------------------------------
 
-def test_upsert_edge_and_get_neighbors(tmp_db: str, tmp_vault: Path):
+def test_upsert_edge_and_get_neighbors(db_path: str, vault_dir: Path):
     """After inserting an edge A→B, get_neighbors(A.id) includes B."""
 
 
-    db = GraphDatabase(tmp_db)
-    node_a = _make_node("eeeeeeee-0001-0001-0001-000000000001", "Source Node", tmp_vault)
-    node_b = _make_node("eeeeeeee-0002-0002-0002-000000000002", "Target Node", tmp_vault)
+    db = GraphDatabase(db_path)
+    node_a = _make_node("eeeeeeee-0001-0001-0001-000000000001", "Source Node", vault_dir)
+    node_b = _make_node("eeeeeeee-0002-0002-0002-000000000002", "Target Node", vault_dir)
     db.upsert_node(node_a)
     db.upsert_node(node_b)
     db.upsert_edge(node_a.id, node_b.id, "supports", "EP-001")
@@ -220,13 +220,13 @@ def test_upsert_edge_and_get_neighbors(tmp_db: str, tmp_vault: Path):
     assert any(n.id == node_b.id for n in neighbors)
 
 
-def test_get_backlinks(tmp_db: str, tmp_vault: Path):
+def test_get_backlinks(db_path: str, vault_dir: Path):
     """After inserting edge A→B, get_backlinks(B.id) includes A."""
 
 
-    db = GraphDatabase(tmp_db)
-    node_a = _make_node("ffffffff-0001-0001-0001-000000000001", "Backlink Source", tmp_vault)
-    node_b = _make_node("ffffffff-0002-0002-0002-000000000002", "Backlink Target", tmp_vault)
+    db = GraphDatabase(db_path)
+    node_a = _make_node("ffffffff-0001-0001-0001-000000000001", "Backlink Source", vault_dir)
+    node_b = _make_node("ffffffff-0002-0002-0002-000000000002", "Backlink Target", vault_dir)
     db.upsert_node(node_a)
     db.upsert_node(node_b)
     db.upsert_edge(node_a.id, node_b.id, "contradicts", "EP-002")
@@ -235,13 +235,13 @@ def test_get_backlinks(tmp_db: str, tmp_vault: Path):
     assert any(n.id == node_a.id for n in backlinks)
 
 
-def test_delete_node_removes_edges(tmp_db: str, tmp_vault: Path):
+def test_delete_node_removes_edges(db_path: str, vault_dir: Path):
     """Deleting the source node cascades to remove its outgoing edges."""
 
 
-    db = GraphDatabase(tmp_db)
-    node_a = _make_node("11111111-0001-0001-0001-000000000001", "Cascade Source", tmp_vault)
-    node_b = _make_node("22222222-0002-0002-0002-000000000002", "Cascade Target", tmp_vault)
+    db = GraphDatabase(db_path)
+    node_a = _make_node("11111111-0001-0001-0001-000000000001", "Cascade Source", vault_dir)
+    node_b = _make_node("22222222-0002-0002-0002-000000000002", "Cascade Target", vault_dir)
     db.upsert_node(node_a)
     db.upsert_node(node_b)
     db.upsert_edge(node_a.id, node_b.id, "supports", "EP-001")
@@ -254,16 +254,16 @@ def test_delete_node_removes_edges(tmp_db: str, tmp_vault: Path):
     assert not any(n.id == node_a.id for n in backlinks)
 
 
-def test_get_edges_from(tmp_db: str, tmp_vault: Path):
+def test_get_edges_from(db_path: str, vault_dir: Path):
     """get_edges_from(A.id) returns [(Node, relation, relation_id)] for outgoing edges.
 
     Unlike get_neighbors, this preserves the relation label and registry id —
     Phase 3 ego graphs and Phase 8 RAG triples need them (a bare node list
     forces relation='' downstream and guts the 71-type vocabulary).
     """
-    db = GraphDatabase(tmp_db)
-    node_a = _make_node("33333333-0001-0001-0001-000000000001", "Edge From Source", tmp_vault)
-    node_b = _make_node("33333333-0002-0002-0002-000000000002", "Edge From Target", tmp_vault)
+    db = GraphDatabase(db_path)
+    node_a = _make_node("33333333-0001-0001-0001-000000000001", "Edge From Source", vault_dir)
+    node_b = _make_node("33333333-0002-0002-0002-000000000002", "Edge From Target", vault_dir)
     db.upsert_node(node_a)
     db.upsert_node(node_b)
     db.upsert_edge(node_a.id, node_b.id, "depends_on", "SC-001")
@@ -288,11 +288,11 @@ def test_get_edges_from(tmp_db: str, tmp_vault: Path):
     )
 
 
-def test_get_edges_to(tmp_db: str, tmp_vault: Path):
+def test_get_edges_to(db_path: str, vault_dir: Path):
     """get_edges_to(B.id) returns [(Node, relation, relation_id)] for incoming edges."""
-    db = GraphDatabase(tmp_db)
-    node_a = _make_node("44444444-0001-0001-0001-000000000001", "Edge To Source", tmp_vault)
-    node_b = _make_node("44444444-0002-0002-0002-000000000002", "Edge To Target", tmp_vault)
+    db = GraphDatabase(db_path)
+    node_a = _make_node("44444444-0001-0001-0001-000000000001", "Edge To Source", vault_dir)
+    node_b = _make_node("44444444-0002-0002-0002-000000000002", "Edge To Target", vault_dir)
     db.upsert_node(node_a)
     db.upsert_node(node_b)
     db.upsert_edge(node_a.id, node_b.id, "uses", "SC-003")
@@ -318,12 +318,12 @@ def test_get_edges_to(tmp_db: str, tmp_vault: Path):
 # 5. WAL mode
 # ---------------------------------------------------------------------------
 
-def test_wal_mode(tmp_db: str):
+def test_wal_mode(db_path: str):
     """After GraphDatabase.__init__, SQLite journal_mode must be 'wal'."""
 
 
-    GraphDatabase(tmp_db)
-    conn = sqlite3.connect(tmp_db)
+    GraphDatabase(db_path)
+    conn = sqlite3.connect(db_path)
     mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
     conn.close()
     assert mode == "wal"
@@ -333,20 +333,20 @@ def test_wal_mode(tmp_db: str):
 # 6. Error paths
 # ---------------------------------------------------------------------------
 
-def test_get_node_not_found(tmp_db: str):
+def test_get_node_not_found(db_path: str):
     """get_node with a non-existent id returns None without raising."""
 
 
-    db = GraphDatabase(tmp_db)
+    db = GraphDatabase(db_path)
     result = db.get_node("nonexistent-id-that-does-not-exist")
     assert result is None
 
 
-def test_delete_nonexistent_node(tmp_db: str):
+def test_delete_nonexistent_node(db_path: str):
     """delete_node with a non-existent id does not raise an exception."""
 
 
-    db = GraphDatabase(tmp_db)
+    db = GraphDatabase(db_path)
     # Must complete without raising.
     db.delete_node("nonexistent-id-that-does-not-exist")
 
@@ -379,15 +379,15 @@ class _FailingConn:
 
 
 def test_write_failure_propagates_sqlite_error(
-    tmp_db: str, tmp_vault: Path, monkeypatch: pytest.MonkeyPatch
+    db_path: str, vault_dir: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """A failing connection must surface sqlite3.Error to the caller — not be swallowed.
 
     The caller (indexer, watcher handler) decides how to log/retry. Catching
     the error inside GraphDatabase and returning silently would hide data loss.
     """
-    db = GraphDatabase(tmp_db)
-    node = _make_node("00000000-0000-0000-0000-000000000000", "Initial", tmp_vault)
+    db = GraphDatabase(db_path)
+    node = _make_node("00000000-0000-0000-0000-000000000000", "Initial", vault_dir)
     db.upsert_node(node)
 
     conn_attr = next((a for a in ("conn", "_conn") if hasattr(db, a)), None)

@@ -184,7 +184,7 @@ E10 (3.12 floor) is **CLOSED** — verified, not remediated: 177 tests green on 
 
 ---
 
-# ROUND 5 — Adversarial-Analysis-V5 Remediation (2026-06-12, IN PROGRESS)
+# ROUND 5 — Adversarial-Analysis-V5 Remediation (2026-06-12, COMPLETE — 9/9 findings resolved)
 
 > Source: `docs/adversarial-analysis-v5.md` (readability + DRY lens — first
 > round on the cleanliness dimension). 9 findings: 1 STRUCTURAL, 5 SERIOUS,
@@ -240,19 +240,67 @@ E10 (3.12 floor) is **CLOSED** — verified, not remediated: 177 tests green on 
   phase_08 MCP loader is package-first with the why). test_rag's gratuitous
   _load_db copy deleted (imports the conftest's).
 
+- **W7 (#3)** Fixtures renamed by contract, kept phase-local: phase_02
+  `tmp_db`→`db_path` + `tmp_vault`→`vault_dir` (docstring states akanga.yaml
+  lives in the returned dir's PARENT), phase_05 `tmp_db`→`indexed_db` +
+  `tmp_vault`→`vault_with_nodes`, phase_01 `tmp_db`→`sync_queue_conn`. Both
+  false "upsert_edge is positional" comments replaced with the real
+  keyword-friendly signature; `populated_db`'s docstring now states the
+  Node-OR-dict upsert contract that phase 3 exercises. `_write_node`
+  deduplicated into tests/_helpers.py (phase_06 conftest re-exports it).
+- **W8 (#6)** scripts/_common.py capped at four conventions: marker files,
+  `REPO_ROOT` (replaced 4 computations), `normalize_phase` with
+  strip_split/expand_split covering the 1A/1B convention (replaced 2 Python
+  parsers; shell sites carry keep-in-step pointer comments), and
+  `iter_md_section` (replaced 4 walkers; parity-verified line-for-line on
+  all 10 phase docs). check_doc_contracts gained a file-local
+  `strip_self_cls` (3 inline copies → 1). `make help` is self-registering:
+  `## @group description` tags + one HELP_GREP macro replace the 12
+  hand-maintained name alternations — output byte-identical, new targets
+  appear in help with no second list to edit. run_checks restructuring
+  explicitly DEFERRED (risk > reward); AST harvesters left distinct by
+  design.
+- **W9 (#9)** `NodeRecord` (frozen, slots — grep-verified nothing mutates DB
+  returns; parse-model Node mutations are a different type) is the DB's
+  six-field read model in canonical db.py; all ten `Any` annotations
+  replaced (`upsert_node(node: Node | NodeRecord | dict[str, Any])` typed
+  honestly); graph.py `EgoGraph.root: NodeRecord` via TYPE_CHECKING (the
+  misleading "avoid import cycle" comment deleted); sync_worker.drain
+  annotated `GraphDatabase | sqlite3.Connection`. Skeleton phase_02 db.py
+  now teaches NodeRecord (stubs still raise NotImplementedError); phase_06
+  server skeleton's nine SimpleNamespace footnotes collapsed to one
+  canonical record-object note (+ one-line pointers), `vars(n)` suggestions
+  removed (slots-incompatible); phase_08 note fixed likewise; canonical
+  server `_node_dict` typed `NodeRecord`. Propagated: db.py 2→8, graph.py
+  3→8, sync_worker.py 4→8, server.py 6→8.
+
 ## Finding status (Round 5)
 
 | # | Finding | Severity | Status |
 |---|---|---|---|
 | 1 | Dual-try loader family: 23 forked copies, 4 live divergences | STRUCTURAL | **Resolved (W6)** |
 | 2 | False fixture docstring; phases 02–04 bypass AKANGA_SRC diagnostics | SERIOUS | **Resolved (W2)** |
-| 3 | Fixture name collisions; contradictory upsert contracts; false "positional" comment | MODERATE | **Accepted-pending** — Tier 3 batch |
+| 3 | Fixture name collisions; contradictory upsert contracts; false "positional" comment | MODERATE | **Resolved (W7)** |
 | 4 | Marker convention defined 4 ways; zero script tests | SERIOUS | **Resolved (W5)** |
 | 5 | Phase roster hand-enumerated ×9; silent-green loop guards | SERIOUS | **Resolved (W3)** |
-| 6 | No scripts/ shared core; 1A/1B convention in 5 parsers; help double-registration | MODERATE | **Accepted-pending** — Tier 3 batch |
+| 6 | No scripts/ shared core; 1A/1B convention in 5 parsers; help double-registration | MODERATE | **Resolved (W8)** |
 | 7 | Dead delete_edge/get_edges_touching with false docstrings; server hand-writes their SQL | SERIOUS | **Resolved (W4)** |
 | 8 | links.py missing parser.py's fence strip → phantom edges from fenced examples | SERIOUS | **Resolved (W1)** |
-| 9 | Ten Any-typed DB APIs; phantom second Node type | MODERATE | **Accepted-pending** — Tier 3; NodeRecord dataclass |
+| 9 | Ten Any-typed DB APIs; phantom second Node type | MODERATE | **Resolved (W9)** |
+
+## Verification gate for Tier 3 (all green 2026-06-12)
+
+- `make lint` clean across the repo; `make test-all` → 9/9 phases;
+  `make verify PHASE=8` → cumulative green; collect-only 185 tests, 0 errors
+- `sync_forward.py --check-all` → converged after 6 propagations
+  (db/graph/sync_worker/server × solutions, db/server × skeletons)
+- `make help` output byte-identical pre/post refactor; doc-contract lint
+  exit 0; skeleton_check 9/9 OK; marker pinning tests 3/3; mkdocs clean
+- `make vault-init && make vault-check PHASE=0` smoke: refactored manifest
+  parser extracts the phase-0 node table and reports the empty vault's
+  missing titles correctly
+- One deferred item logged: check_doc_contracts.run_checks extraction
+  (check_signatures/check_deliverables) — revisit only if that file grows
 
 ## Verification gate for Tier 2 (all green 2026-06-12)
 

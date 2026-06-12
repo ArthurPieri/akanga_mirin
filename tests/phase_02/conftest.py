@@ -39,23 +39,28 @@ def _load_parser():
 
 
 @pytest.fixture()
-def tmp_vault(tmp_path: Path) -> Path:
-    """A temporary vault directory with a minimal akanga.yaml config file."""
+def vault_dir(tmp_path: Path) -> Path:
+    """An empty vault subdirectory, with a minimal akanga.yaml next to it.
+
+    NOTE: the config file lives in the RETURNED DIRECTORY'S PARENT
+    (``tmp_path/akanga.yaml``), NOT inside the returned vault dir — config
+    discovery is expected to look upward from the vault.
+    """
     config_path = tmp_path / "akanga.yaml"
     config_path.write_text(yaml.dump(MINIMAL_VAULT_CONFIG), encoding="utf-8")
-    vault_dir = tmp_path / "vault"
-    vault_dir.mkdir()
-    return vault_dir
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    return vault
 
 
 @pytest.fixture()
-def tmp_db(tmp_path: Path):
-    """Return a path for a real SQLite database in tmp_path (file not yet created)."""
+def db_path(tmp_path: Path):
+    """A string path for a SQLite database in tmp_path — the file does NOT exist yet."""
     return str(tmp_path / "test.db")
 
 
 @pytest.fixture()
-def populated_db(tmp_path: Path, tmp_vault: Path):
+def populated_db(tmp_path: Path, vault_dir: Path):
     """
     A GraphDatabase pre-loaded with 3 sample nodes and 2 edges:
       - node_a (id: aaa...) title="Node Alpha"
@@ -63,16 +68,19 @@ def populated_db(tmp_path: Path, tmp_vault: Path):
       - node_c (id: ccc...) title="Node Gamma"
       - edge: node_a -> node_b  (relation="supports")
       - edge: node_b -> node_c  (relation="contradicts")
+
+    Contract note: upsert_node accepts a Node object or a plain dict — phase
+    3's fixtures exercise the dict form, so don't make your implementation
+    Node-only.
     """
     GraphDatabase = _load_db()
     Node = _load_parser().Node
 
-    db_path = str(tmp_path / "populated.db")
-    db = GraphDatabase(db_path)
+    db = GraphDatabase(str(tmp_path / "populated.db"))
 
     node_a = Node(
         id="aaaaaaaa-0000-0000-0000-000000000001",
-        path=str(tmp_vault / "node-alpha.md"),
+        path=str(vault_dir / "node-alpha.md"),
         title="Node Alpha",
         type="note",
         tags=[],
@@ -80,7 +88,7 @@ def populated_db(tmp_path: Path, tmp_vault: Path):
     )
     node_b = Node(
         id="bbbbbbbb-0000-0000-0000-000000000002",
-        path=str(tmp_vault / "node-beta.md"),
+        path=str(vault_dir / "node-beta.md"),
         title="Node Beta",
         type="note",
         tags=[],
@@ -88,7 +96,7 @@ def populated_db(tmp_path: Path, tmp_vault: Path):
     )
     node_c = Node(
         id="cccccccc-0000-0000-0000-000000000003",
-        path=str(tmp_vault / "node-gamma.md"),
+        path=str(vault_dir / "node-gamma.md"),
         title="Node Gamma",
         type="note",
         tags=[],
@@ -99,7 +107,9 @@ def populated_db(tmp_path: Path, tmp_vault: Path):
     db.upsert_node(node_b)
     db.upsert_node(node_c)
 
-    # upsert_edge is positional: (source_id, target_id, relation, relation_id)
+    # upsert_edge signature: upsert_edge(source_id, target_id=None,
+    # relation=None, relation_id=None) — keyword calls are equally fine
+    # (phase 3's fixture uses keywords); positional is used here for brevity.
     db.upsert_edge(node_a.id, node_b.id, "supports", "EP-001")
     db.upsert_edge(node_b.id, node_c.id, "contradicts", "EP-002")
 

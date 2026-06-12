@@ -1,35 +1,14 @@
 """Phase 06 conftest — resolves AKANGA_SRC and provides FastAPI server fixtures."""
 from __future__ import annotations
 
-import uuid
 from pathlib import Path
-from textwrap import dedent
 
 import pytest
 from tests._helpers import load_attr
 
-
-
-# ---------------------------------------------------------------------------
-# Vault + DB helpers
-# ---------------------------------------------------------------------------
-
-def _write_node(vault: Path, filename: str, *, title: str, node_type: str = "note") -> Path:
-    """Write a minimal well-formed .md node file into *vault*."""
-    node_id = str(uuid.uuid4())
-    content = dedent(f"""\
-        ---
-        id: {node_id}
-        title: {title}
-        type: {node_type}
-        tags: []
-        ---
-
-        Content of {title}.
-        """)
-    path = vault / filename
-    path.write_text(content, encoding="utf-8")
-    return path
+# Re-exported: tests/phase_06/test_server.py imports _write_node from this
+# conftest; the single definition lives in tests/_helpers.py.
+from tests._helpers import _write_node  # noqa: F401
 
 
 @pytest.fixture()

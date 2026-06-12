@@ -5,6 +5,7 @@ The DB_SCHEMA constant is provided for reference — do not modify it.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -45,6 +46,36 @@ CREATE TABLE IF NOT EXISTS sync_queue (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
+
+# ---------------------------------------------------------------------------
+# NodeRecord — the DB's read model (provided; nothing to implement here)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class NodeRecord:
+    """The DB's READ MODEL: one hydrated `nodes` row, exactly six fields.
+
+    Deliberately NOT the parser's `Node` dataclass. `Node` is the PARSE
+    model — it carries `content` and `frontmatter`, which the DB never
+    stores (the index holds metadata only; prose lives in the `.md`
+    files). Returning a `Node` with a silently empty `content` would be a
+    lie. An honest six-field record makes the gap explicit:
+    `record.content` raises `AttributeError`, and callers that need the
+    body must go back to disk (`parse_node_file`).
+
+    Frozen because a row snapshot is not a live view — mutating it would
+    change nothing in the DB. `tags` is JSON-decoded to a list before
+    construction (see `get_node`).
+    """
+
+    id: str
+    path: str
+    title: str
+    type: str
+    tags: list[str]
+    content_hash: str
+
 
 # ---------------------------------------------------------------------------
 # GraphDatabase
@@ -194,8 +225,8 @@ class GraphDatabase:
             "DELETE FROM edges WHERE target_id=? to clean backlinks."
         )
 
-    def get_node(self, node_id: str) -> Any | None:
-        """WHAT: Fetch one node by UUID and return it as a SimpleNamespace.
+    def get_node(self, node_id: str) -> NodeRecord | None:
+        """WHAT: Fetch one node by UUID and return it as a NodeRecord.
 
         WHY: Core lookup used by the API, TUI, indexer, and graph algorithms.
         Returning None (rather than raising) lets callers handle missing nodes
@@ -205,22 +236,23 @@ class GraphDatabase:
         1. Inside `with self._lock:`, execute:
              SELECT * FROM nodes WHERE id = ?
         2. Call `.fetchone()`. If the result is None, return None.
-        3. Convert the `sqlite3.Row` to a SimpleNamespace with tags decoded:
-             ns = types.SimpleNamespace(**dict(row))
-             ns.tags = json.loads(ns.tags)
-             return ns
+        3. Convert the `sqlite3.Row` to a NodeRecord with tags decoded:
+             data = dict(row)
+             data["tags"] = json.loads(data["tags"])
+             return NodeRecord(**data)
 
-        Tip: use `types.SimpleNamespace(**dict(row))` and decode tags with
-        `json.loads`. This gives attribute access (node.id, node.title, etc.)
-        which all downstream callers (Phase 06 server, Phase 08 RAG) use.
-        Do NOT return a plain dict — callers use attribute access.
+        Tip: NodeRecord (defined above) gives attribute access (node.id,
+        node.title, etc.), which all downstream callers (Phase 06 server,
+        Phase 08 RAG) use. Do NOT return a plain dict — callers use
+        attribute access — and do NOT return the parser's Node: the DB has
+        no content/frontmatter to fill it with.
         """
         raise NotImplementedError(
             "SELECT * FROM nodes WHERE id=?; fetchone(); if None return None; "
-            "else decode tags with json.loads and return a Node-like object"
+            "else decode tags with json.loads and return a NodeRecord"
         )
 
-    def list_nodes(self, limit: int = 100, offset: int = 0) -> list[Any]:
+    def list_nodes(self, limit: int = 100, offset: int = 0) -> list[NodeRecord]:
         """WHAT: Return a paginated list of all nodes.
 
         WHY: Powers the TUI node list and the API list endpoint. Pagination
@@ -230,15 +262,15 @@ class GraphDatabase:
         1. Inside `with self._lock:`, execute:
              SELECT * FROM nodes LIMIT ? OFFSET ?
            with `(limit, offset)` as parameters.
-        2. Call `.fetchall()` and convert each row to a Node-like object
+        2. Call `.fetchall()` and convert each row to a NodeRecord
            (same conversion as in `get_node`).
         3. Return the list.
         """
         raise NotImplementedError(
-            "SELECT * FROM nodes LIMIT ? OFFSET ?; fetchall(); convert each row to Node"
+            "SELECT * FROM nodes LIMIT ? OFFSET ?; fetchall(); convert each row to NodeRecord"
         )
 
-    def search_fts(self, query: str, limit: int = 20) -> list[Any]:
+    def search_fts(self, query: str, limit: int = 20) -> list[NodeRecord]:
         """WHAT: Full-text search using FTS5 MATCH and return matching nodes.
 
         WHY: FTS5 is orders of magnitude faster than LIKE for substring searches
@@ -265,7 +297,7 @@ class GraphDatabase:
            Note: qualify `rank` as `nodes_fts.rank` — the FTS5 rank column is
            ambiguous in some SQLite versions when used in a JOIN, and an
            unqualified `rank` may not sort by relevance.
-        5. Convert and return rows as Node-like objects.
+        5. Convert and return rows as NodeRecord objects (as in `get_node`).
 
         CRITICAL: Never interpolate user input directly into the SQL string —
         always use parameterised queries (`?` placeholders).
@@ -324,7 +356,7 @@ class GraphDatabase:
             "else return edge_id."
         )
 
-    def get_neighbors(self, node_id: str) -> list[Any]:
+    def get_neighbors(self, node_id: str) -> list[NodeRecord]:
         """WHAT: Return all nodes that `node_id` has outgoing edges pointing TO.
 
         WHY: Used by the ego-graph builder and the TUI neighbors panel to show
@@ -336,13 +368,13 @@ class GraphDatabase:
              JOIN edges ON nodes.id = edges.target_id
              WHERE edges.source_id = ?
            with `(node_id,)` as parameters.
-        2. Convert and return rows as Node-like objects.
+        2. Convert and return rows as NodeRecord objects (as in `get_node`).
         """
         raise NotImplementedError(
             "SELECT nodes.* JOIN edges ON nodes.id = edges.target_id WHERE edges.source_id = ?"
         )
 
-    def get_backlinks(self, node_id: str) -> list[Any]:
+    def get_backlinks(self, node_id: str) -> list[NodeRecord]:
         """WHAT: Return all nodes that have outgoing edges pointing TO `node_id`.
 
         WHY: Backlinks are the reverse of neighbors — they show what other nodes
@@ -355,13 +387,13 @@ class GraphDatabase:
              JOIN edges ON nodes.id = edges.source_id
              WHERE edges.target_id = ?
            with `(node_id,)` as parameters.
-        2. Convert and return rows as Node-like objects.
+        2. Convert and return rows as NodeRecord objects (as in `get_node`).
         """
         raise NotImplementedError(
             "SELECT nodes.* JOIN edges ON nodes.id = edges.source_id WHERE edges.target_id = ?"
         )
 
-    def get_edges_from(self, node_id: str) -> list[Any]:
+    def get_edges_from(self, node_id: str) -> list[tuple[NodeRecord, str, str]]:
         """WHAT: Return all outgoing edges of `node_id` as
         `(target_node, relation, relation_id)` tuples.
 
@@ -383,7 +415,7 @@ class GraphDatabase:
            (No DISTINCT — two different relations between the same pair are
            two distinct edges and must both be returned.)
         2. For each row, build the target node exactly as in `get_node`
-           (SimpleNamespace, tags decoded with `json.loads`) from the
+           (NodeRecord, tags decoded with `json.loads`) from the
            `nodes.*` columns, and pull `relation` / `relation_id` from the
            edge columns. Normalise NULL to `""`:
              relation = row["relation"] or ""
@@ -391,7 +423,7 @@ class GraphDatabase:
         3. Return `[(node, relation, relation_id), ...]` — a list of 3-tuples.
 
         Returns:
-            list of (Node-like, relation: str, relation_id: str) tuples for
+            list of (NodeRecord, relation: str, relation_id: str) tuples for
             every edge where `node_id` is the source.
         """
         raise NotImplementedError(
@@ -400,7 +432,7 @@ class GraphDatabase:
             "return [(node, relation or '', relation_id or ''), ...]"
         )
 
-    def get_edges_to(self, node_id: str) -> list[Any]:
+    def get_edges_to(self, node_id: str) -> list[tuple[NodeRecord, str, str]]:
         """WHAT: Return all incoming edges of `node_id` as
         `(source_node, relation, relation_id)` tuples.
 
@@ -425,7 +457,7 @@ class GraphDatabase:
            target. The edge's natural direction is `node.id → node_id`.
 
         Returns:
-            list of (Node-like, relation: str, relation_id: str) tuples for
+            list of (NodeRecord, relation: str, relation_id: str) tuples for
             every edge where `node_id` is the target.
         """
         raise NotImplementedError(

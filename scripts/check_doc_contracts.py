@@ -59,7 +59,11 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+# Shared scripts/ conventions (sibling module — scripts run as
+# `python scripts/x.py`): REPO_ROOT, the phase-identifier convention with its
+# 1A/1B split handling, and the "## Heading section" Markdown walker
+# (adversarial-analysis-v5 #6).
+from _common import REPO_ROOT, iter_md_section, normalize_phase
 
 # ---------------------------------------------------------------------------
 # Allowlist for INTENTIONAL doc simplifications.
@@ -149,9 +153,23 @@ class Finding:
 
 def rel(p: Path) -> str:
     try:
-        return str(p.relative_to(ROOT))
+        return str(p.relative_to(REPO_ROOT))
     except ValueError:
         return str(p)
+
+
+def strip_self_cls(params: list[str]) -> list[str]:
+    """Drop a leading `self`/`cls` — receivers are not contract parameters.
+
+    One definition for the three harvest paths (doc AST blocks, doc regex
+    fallback via parse_param_names, skeleton AST) so a doc method signature
+    always compares against a skeleton method signature on equal terms.
+    Local to this file on purpose: no second script strips receivers, and
+    _common is capped at conventions with multi-script callers.
+    """
+    if params and params[0] in ("self", "cls"):
+        return params[1:]
+    return params
 
 
 def split_top_level(s: str) -> list[str]:
@@ -195,9 +213,7 @@ def parse_param_names(param_src: str) -> list[str] | None:
         if not name.isidentifier():
             return None
         names.append(name)
-    if names and names[0] in ("self", "cls"):
-        names = names[1:]
-    return names
+    return strip_self_cls(names)
 
 
 # ---------------------------------------------------------------------------
@@ -213,9 +229,17 @@ _MAKE_RE = re.compile(r"(?:^|[\s;|&(`])make\s+([A-Za-z][A-Za-z0-9_.-]*)")
 
 
 def doc_phase_dir(doc_path: Path) -> str | None:
-    """phase-01a-data-modeling.md -> 'phase_01' (1A and 1B share a skeleton)."""
-    m = re.match(r"phase-(\d{2})", doc_path.name)
-    return f"phase_{m.group(1)}" if m else None
+    """phase-01a-data-modeling.md -> 'phase_01' (1A and 1B share a skeleton).
+
+    The a/b suffix is dropped via the shared split-phase convention
+    (_common.normalize_phase) — tests/skeletons are unified at the bare
+    phase number, exactly like the Makefile's PHASE_NUM.
+    """
+    m = re.match(r"phase-(\d{2}[ab]?)", doc_path.name)
+    if not m:
+        return None
+    num = normalize_phase(m.group(1), strip_split=True)  # '01a' -> '1'
+    return f"phase_{int(num):02d}"
 
 
 def iter_code_blocks(lines: list[str]) -> list[tuple[str, int, list[str], bool]]:
@@ -260,9 +284,9 @@ def defs_from_python_block(
         top_level_ids = {id(n) for n in tree.body}
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                params = [a.arg for a in node.args.posonlyargs + node.args.args]
-                if params and params[0] in ("self", "cls"):
-                    params = params[1:]
+                params = strip_self_cls(
+                    [a.arg for a in node.args.posonlyargs + node.args.args]
+                )
                 sigs.append(
                     DocSignature(
                         name=node.name,
@@ -310,19 +334,16 @@ def _dedent(src: str) -> str:
     return textwrap.dedent(src)
 
 
+_WHAT_YOU_BUILD_HEAD_RE = re.compile(r"^##\s+What You Build\s*$")
+
+
 def sigs_from_what_you_build_tables(
     lines: list[str], doc_file: Path
 ) -> list[DocSignature]:
     """Extract bare call signatures from 'What You Build' table rows."""
     sigs: list[DocSignature] = []
-    in_section = False
-    for i, line in enumerate(lines, start=1):
-        if re.match(r"^##\s+What You Build\s*$", line):
-            in_section = True
-            continue
-        if in_section and re.match(r"^##\s", line):
-            in_section = False
-        if not in_section or not line.lstrip().startswith("|"):
+    for i, line in iter_md_section(lines, _WHAT_YOU_BUILD_HEAD_RE):
+        if not line.lstrip().startswith("|"):
             continue
         for span in _BACKTICK_SPAN_RE.findall(line):
             m = _TABLE_SIG_RE.match(span.strip())
@@ -390,7 +411,6 @@ def parse_doc(doc_path: Path) -> tuple[
 # backtracks `test_db.py` into a phantom `test_d`.
 _TEST_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])test_[a-z0-9_]+(?![a-z0-9_])")
 _DELIVERABLE_HEAD_RE = re.compile(r"^##\s+Deliverables?\b")
-_SECTION_HEAD_RE = re.compile(r"^##\s")
 
 
 def deliverable_test_tokens(doc_path: Path) -> tuple[list[tuple[str, int]], bool]:
@@ -407,21 +427,14 @@ def deliverable_test_tokens(doc_path: Path) -> tuple[list[tuple[str, int]], bool
             illustrative_lines.update(range(start, start + len(block_lines)))
 
     tokens: list[tuple[str, int]] = []
-    section_found = False
-    in_section = False
-    for i, line in enumerate(lines, start=1):
-        if _DELIVERABLE_HEAD_RE.match(line):
-            section_found = True
-            in_section = True
-            continue
-        if in_section and _SECTION_HEAD_RE.match(line):
-            in_section = False
-        if not in_section or i in illustrative_lines:
+    for i, line in iter_md_section(lines, _DELIVERABLE_HEAD_RE):
+        if i in illustrative_lines:
             continue
         for m in _TEST_TOKEN_RE.finditer(line):
             if line[m.end() : m.end() + 3] == ".py":
                 continue  # a test FILE, not a test function
             tokens.append((m.group(0), i))
+    section_found = any(_DELIVERABLE_HEAD_RE.match(ln) for ln in lines)
     return tokens, section_found
 
 
@@ -466,9 +479,9 @@ def parse_skeleton_phase(phase_dir: Path) -> dict[str, list[SkeletonSignature]]:
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            params = [a.arg for a in node.args.posonlyargs + node.args.args]
-            if params and params[0] in ("self", "cls"):
-                params = params[1:]
+            params = strip_self_cls(
+                [a.arg for a in node.args.posonlyargs + node.args.args]
+            )
             by_name.setdefault(node.name, []).append(
                 SkeletonSignature(
                     name=node.name,
@@ -527,9 +540,9 @@ FIX_DIRECTION = (
 def run_checks() -> list[Finding]:
     findings: list[Finding] = []
 
-    docs = sorted(ROOT.glob(DOC_GLOB))
+    docs = sorted(REPO_ROOT.glob(DOC_GLOB))
     docs = [d for d in docs if "archive" not in d.parts]
-    makefile_targets = parse_makefile_targets(ROOT / "Makefile")
+    makefile_targets = parse_makefile_targets(REPO_ROOT / "Makefile")
     skeleton_cache: dict[str, dict[str, list[SkeletonSignature]]] = {}
     tests_cache: dict[str, dict[str, str]] = {}
     # Per-phase aggregation for check 4's reverse direction (1A + 1B share
@@ -544,7 +557,7 @@ def run_checks() -> list[Finding]:
 
         # ---- 1. signature drift  +  5. doc functions absent from skeleton ----
         if phase is not None:
-            phase_dir = ROOT / SKELETON_DIR / phase
+            phase_dir = REPO_ROOT / SKELETON_DIR / phase
             if phase_dir.is_dir():
                 if phase not in skeleton_cache:
                     skeleton_cache[phase] = parse_skeleton_phase(phase_dir)
@@ -602,7 +615,7 @@ def run_checks() -> list[Finding]:
         if phase is not None:
             tokens, section_found = deliverable_test_tokens(doc)
             if phase not in tests_cache:
-                tests_cache[phase] = parse_phase_tests(ROOT / TESTS_DIR / phase)
+                tests_cache[phase] = parse_phase_tests(REPO_ROOT / TESTS_DIR / phase)
             phase_tests = tests_cache[phase]
             docs_by_phase.setdefault(phase, []).append(doc)
             deliverable_seen_by_phase[phase] = (
@@ -649,7 +662,7 @@ def run_checks() -> list[Finding]:
         for fname, line in foundation_refs:
             if f"foundations:{fname}" in ALLOW:
                 continue
-            if not (ROOT / FOUNDATIONS_DIR / fname).is_file():
+            if not (REPO_ROOT / FOUNDATIONS_DIR / fname).is_file():
                 findings.append(
                     Finding(
                         kind="MISSING FOUNDATION DOC",

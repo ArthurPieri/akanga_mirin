@@ -47,14 +47,14 @@ def _write_md(directory: Path, filename: str, node_id: str, title: str, body: st
 # 1. index_file
 # ---------------------------------------------------------------------------
 
-def test_index_single_file(tmp_db: str, tmp_vault: Path):
+def test_index_single_file(db_path: str, vault_dir: Path):
     """index_file() parses a .md file and upserts the node into the DB."""
     index_file = _indexer_mod.index_file
 
-    db = GraphDatabase(tmp_db)
-    path = _write_md(tmp_vault, "single.md", "aaaa0001-0000-0000-0000-000000000001", "Single Node")
+    db = GraphDatabase(db_path)
+    path = _write_md(vault_dir, "single.md", "aaaa0001-0000-0000-0000-000000000001", "Single Node")
 
-    index_file(str(path), db, str(tmp_vault))
+    index_file(str(path), db, str(vault_dir))
 
     node = db.get_node("aaaa0001-0000-0000-0000-000000000001")
     assert node is not None
@@ -65,16 +65,16 @@ def test_index_single_file(tmp_db: str, tmp_vault: Path):
 # 2. full_scan_and_index
 # ---------------------------------------------------------------------------
 
-def test_full_scan_indexes_all_files(tmp_db: str, tmp_vault: Path):
+def test_full_scan_indexes_all_files(db_path: str, vault_dir: Path):
     """full_scan_and_index() indexes every .md file in the vault."""
     full_scan_and_index = _indexer_mod.full_scan_and_index
 
-    db = GraphDatabase(tmp_db)
-    _write_md(tmp_vault, "node1.md", "bbbb0001-0000-0000-0000-000000000001", "Alpha")
-    _write_md(tmp_vault, "node2.md", "bbbb0002-0000-0000-0000-000000000002", "Beta")
-    _write_md(tmp_vault, "node3.md", "bbbb0003-0000-0000-0000-000000000003", "Gamma")
+    db = GraphDatabase(db_path)
+    _write_md(vault_dir, "node1.md", "bbbb0001-0000-0000-0000-000000000001", "Alpha")
+    _write_md(vault_dir, "node2.md", "bbbb0002-0000-0000-0000-000000000002", "Beta")
+    _write_md(vault_dir, "node3.md", "bbbb0003-0000-0000-0000-000000000003", "Gamma")
 
-    full_scan_and_index(str(tmp_vault), db)
+    full_scan_and_index(str(vault_dir), db)
 
     ids = {"bbbb0001-0000-0000-0000-000000000001",
            "bbbb0002-0000-0000-0000-000000000002",
@@ -83,59 +83,59 @@ def test_full_scan_indexes_all_files(tmp_db: str, tmp_vault: Path):
         assert db.get_node(node_id) is not None
 
 
-def test_full_scan_skips_hidden_dirs(tmp_db: str, tmp_vault: Path):
+def test_full_scan_skips_hidden_dirs(db_path: str, vault_dir: Path):
     """Files inside hidden directories (e.g. .git/) are not indexed."""
     full_scan_and_index = _indexer_mod.full_scan_and_index
 
-    db = GraphDatabase(tmp_db)
-    hidden_dir = tmp_vault / ".git"
+    db = GraphDatabase(db_path)
+    hidden_dir = vault_dir / ".git"
     hidden_dir.mkdir()
     _write_md(hidden_dir, "secret.md", "cccc0001-0000-0000-0000-000000000001", "Hidden Node")
 
-    full_scan_and_index(str(tmp_vault), db)
+    full_scan_and_index(str(vault_dir), db)
 
     assert db.get_node("cccc0001-0000-0000-0000-000000000001") is None
 
 
-def test_full_scan_skips_non_md_files(tmp_db: str, tmp_vault: Path):
+def test_full_scan_skips_non_md_files(db_path: str, vault_dir: Path):
     """Non-.md files in the vault directory are silently skipped."""
     full_scan_and_index = _indexer_mod.full_scan_and_index
 
-    db = GraphDatabase(tmp_db)
-    txt_file = tmp_vault / "notes.txt"
+    db = GraphDatabase(db_path)
+    txt_file = vault_dir / "notes.txt"
     txt_file.write_text("this is plain text\n", encoding="utf-8")
     # Also add one valid node so the scan has something to process
-    _write_md(tmp_vault, "valid.md", "dddd0001-0000-0000-0000-000000000001", "Valid Node")
+    _write_md(vault_dir, "valid.md", "dddd0001-0000-0000-0000-000000000001", "Valid Node")
 
     # Must not raise even though notes.txt is not a markdown file.
-    full_scan_and_index(str(tmp_vault), db)
+    full_scan_and_index(str(vault_dir), db)
 
     assert db.get_node("dddd0001-0000-0000-0000-000000000001") is not None
 
 
-def test_full_scan_returns_count(tmp_db: str, tmp_vault: Path):
+def test_full_scan_returns_count(db_path: str, vault_dir: Path):
     """full_scan_and_index() returns the number of nodes successfully indexed."""
     full_scan_and_index = _indexer_mod.full_scan_and_index
 
-    db = GraphDatabase(tmp_db)
+    db = GraphDatabase(db_path)
     for i in range(3):
-        _write_md(tmp_vault, f"count_{i}.md", f"eeee000{i}-0000-0000-0000-00000000000{i}", f"Count Node {i}")
+        _write_md(vault_dir, f"count_{i}.md", f"eeee000{i}-0000-0000-0000-00000000000{i}", f"Count Node {i}")
 
-    count = full_scan_and_index(str(tmp_vault), db)
+    count = full_scan_and_index(str(vault_dir), db)
     assert count == 3
 
 
-def test_reindex_updates_node(tmp_db: str, tmp_vault: Path):
+def test_reindex_updates_node(db_path: str, vault_dir: Path):
     """Re-indexing a file whose title changed updates the DB record."""
     index_file = _indexer_mod.index_file
 
-    db = GraphDatabase(tmp_db)
-    path = _write_md(tmp_vault, "reindex.md", "ffff0001-0000-0000-0000-000000000001", "Old Title")
-    index_file(str(path), db, str(tmp_vault))
+    db = GraphDatabase(db_path)
+    path = _write_md(vault_dir, "reindex.md", "ffff0001-0000-0000-0000-000000000001", "Old Title")
+    index_file(str(path), db, str(vault_dir))
 
     # Overwrite with a new title
-    _write_md(tmp_vault, "reindex.md", "ffff0001-0000-0000-0000-000000000001", "New Title")
-    index_file(str(path), db, str(tmp_vault))
+    _write_md(vault_dir, "reindex.md", "ffff0001-0000-0000-0000-000000000001", "New Title")
+    index_file(str(path), db, str(vault_dir))
 
     node = db.get_node("ffff0001-0000-0000-0000-000000000001")
     assert node.title == "New Title"
@@ -145,7 +145,7 @@ def test_reindex_updates_node(tmp_db: str, tmp_vault: Path):
 # 3. Two-pass edge resolution + DB expendability (the phase's core promises)
 # ---------------------------------------------------------------------------
 
-def test_two_pass_edge_resolution(tmp_db: str, tmp_vault: Path):
+def test_two_pass_edge_resolution(db_path: str, vault_dir: Path):
     """A wikilink [[Beta]] in alpha.md must become a resolved edge A→B in the DB.
 
     alpha.md sorts before beta.md, so a single-pass indexer would try to
@@ -154,13 +154,13 @@ def test_two_pass_edge_resolution(tmp_db: str, tmp_vault: Path):
     """
     full_scan_and_index = _indexer_mod.full_scan_and_index
 
-    db = GraphDatabase(tmp_db)
+    db = GraphDatabase(db_path)
     id_alpha = "abab0001-0000-0000-0000-000000000001"
     id_beta  = "abab0002-0000-0000-0000-000000000002"
-    _write_md(tmp_vault, "a-alpha.md", id_alpha, "Alpha", body="This links to [[Beta]].")
-    _write_md(tmp_vault, "b-beta.md",  id_beta,  "Beta")
+    _write_md(vault_dir, "a-alpha.md", id_alpha, "Alpha", body="This links to [[Beta]].")
+    _write_md(vault_dir, "b-beta.md",  id_beta,  "Beta")
 
-    full_scan_and_index(str(tmp_vault), db)
+    full_scan_and_index(str(vault_dir), db)
 
     neighbors = db.get_neighbors(id_alpha)
     assert any(n.id == id_beta for n in neighbors), (
@@ -173,7 +173,7 @@ def test_two_pass_edge_resolution(tmp_db: str, tmp_vault: Path):
     )
 
 
-def test_db_is_expendable(tmp_db: str, tmp_vault: Path):
+def test_db_is_expendable(db_path: str, vault_dir: Path):
     """Delete the DB file, re-index, and get back the identical graph (doc Deliverable).
 
     This is the core architectural promise of the phase: the DB is a derived
@@ -183,33 +183,33 @@ def test_db_is_expendable(tmp_db: str, tmp_vault: Path):
 
     id_alpha = "cdcd0001-0000-0000-0000-000000000001"
     id_beta  = "cdcd0002-0000-0000-0000-000000000002"
-    _write_md(tmp_vault, "a-alpha.md", id_alpha, "Alpha", body="This links to [[Beta]].")
-    _write_md(tmp_vault, "b-beta.md",  id_beta,  "Beta")
+    _write_md(vault_dir, "a-alpha.md", id_alpha, "Alpha", body="This links to [[Beta]].")
+    _write_md(vault_dir, "b-beta.md",  id_beta,  "Beta")
 
     def _snapshot(db) -> tuple[set, set]:
         node_ids = {n.id for n in db.list_nodes(limit=10_000)}
-        conn = sqlite3.connect(tmp_db)
+        conn = sqlite3.connect(db_path)
         edges = set(
             conn.execute("SELECT source_id, target_id FROM edges").fetchall()
         )
         conn.close()
         return node_ids, edges
 
-    db = GraphDatabase(tmp_db)
-    full_scan_and_index(str(tmp_vault), db)
+    db = GraphDatabase(db_path)
+    full_scan_and_index(str(vault_dir), db)
     nodes_before, edges_before = _snapshot(db)
     assert len(nodes_before) == 2, "Precondition: both nodes must be indexed."
     db.close()
 
     # Destroy the derived index (including WAL sidecar files).
     for suffix in ("", "-wal", "-shm"):
-        sidecar = Path(tmp_db + suffix)
+        sidecar = Path(db_path + suffix)
         if sidecar.exists():
             sidecar.unlink()
-    assert not Path(tmp_db).exists(), "Precondition: DB file must be gone."
+    assert not Path(db_path).exists(), "Precondition: DB file must be gone."
 
-    db2 = GraphDatabase(tmp_db)
-    full_scan_and_index(str(tmp_vault), db2)
+    db2 = GraphDatabase(db_path)
+    full_scan_and_index(str(vault_dir), db2)
     nodes_after, edges_after = _snapshot(db2)
     db2.close()
 
@@ -231,15 +231,15 @@ def test_db_is_expendable(tmp_db: str, tmp_vault: Path):
 # 4. Error path
 # ---------------------------------------------------------------------------
 
-def test_index_missing_file_raises(tmp_db: str, tmp_vault: Path):
+def test_index_missing_file_raises(db_path: str, vault_dir: Path):
     """index_file() on a non-existent path raises an exception (FileNotFoundError or similar)."""
     index_file = _indexer_mod.index_file
 
-    db = GraphDatabase(tmp_db)
-    missing = str(tmp_vault / "does-not-exist.md")
+    db = GraphDatabase(db_path)
+    missing = str(vault_dir / "does-not-exist.md")
 
     with pytest.raises(Exception):
-        index_file(missing, db, str(tmp_vault))
+        index_file(missing, db, str(vault_dir))
 
 
 # ---------------------------------------------------------------------------
@@ -278,18 +278,18 @@ def _edge_pairs(db_path: str) -> list[tuple[str, str]]:
         conn.close()
 
 
-def _three_node_vault(tmp_vault: Path) -> tuple[str, str, str]:
+def _three_node_vault(vault_dir: Path) -> tuple[str, str, str]:
     """alpha → [[Beta]], beta → [[Gamma]], gamma plain. Returns the three ids."""
     id_alpha = "1d1d0001-0000-0000-0000-000000000001"
     id_beta  = "1d1d0002-0000-0000-0000-000000000002"
     id_gamma = "1d1d0003-0000-0000-0000-000000000003"
-    _write_md(tmp_vault, "a-alpha.md", id_alpha, "Alpha", body="Links to [[Beta]].")
-    _write_md(tmp_vault, "b-beta.md",  id_beta,  "Beta",  body="Links to [[Gamma]].")
-    _write_md(tmp_vault, "c-gamma.md", id_gamma, "Gamma")
+    _write_md(vault_dir, "a-alpha.md", id_alpha, "Alpha", body="Links to [[Beta]].")
+    _write_md(vault_dir, "b-beta.md",  id_beta,  "Beta",  body="Links to [[Gamma]].")
+    _write_md(vault_dir, "c-gamma.md", id_gamma, "Gamma")
     return id_alpha, id_beta, id_gamma
 
 
-def test_rescan_unchanged_vault_is_noop(tmp_db: str, tmp_vault: Path):
+def test_rescan_unchanged_vault_is_noop(db_path: str, vault_dir: Path):
     """Scanning the SAME unchanged vault twice must not change node or edge counts.
 
     This is the missing test class round 3 exposed: the reference indexer
@@ -298,19 +298,19 @@ def test_rescan_unchanged_vault_is_noop(tmp_db: str, tmp_vault: Path):
     """
     full_scan_and_index = _indexer_mod.full_scan_and_index
 
-    db = GraphDatabase(tmp_db)
-    _three_node_vault(tmp_vault)
+    db = GraphDatabase(db_path)
+    _three_node_vault(vault_dir)
 
-    full_scan_and_index(str(tmp_vault), db)
-    nodes_first = _node_count(tmp_db)
-    edges_first = _edge_row_count(tmp_db)
+    full_scan_and_index(str(vault_dir), db)
+    nodes_first = _node_count(db_path)
+    edges_first = _edge_row_count(db_path)
     assert nodes_first == 3, "Precondition: all 3 nodes must be indexed by the first scan."
     assert edges_first >= 2, "Precondition: both wikilink edges must exist after the first scan."
 
     # Nothing on disk changed — this scan must be a complete no-op.
-    full_scan_and_index(str(tmp_vault), db)
-    nodes_second = _node_count(tmp_db)
-    edges_second = _edge_row_count(tmp_db)
+    full_scan_and_index(str(vault_dir), db)
+    nodes_second = _node_count(db_path)
+    edges_second = _edge_row_count(db_path)
     db.close()
 
     assert nodes_second == nodes_first, (
@@ -333,7 +333,7 @@ def test_rescan_unchanged_vault_is_noop(tmp_db: str, tmp_vault: Path):
 
 
 def test_rescan_after_editing_one_file_changes_only_that_nodes_edges(
-    tmp_db: str, tmp_vault: Path
+    db_path: str, vault_dir: Path
 ):
     """Editing ONE file between scans must update only that node's outgoing edges.
 
@@ -343,16 +343,16 @@ def test_rescan_after_editing_one_file_changes_only_that_nodes_edges(
     """
     full_scan_and_index = _indexer_mod.full_scan_and_index
 
-    db = GraphDatabase(tmp_db)
-    id_alpha, id_beta, id_gamma = _three_node_vault(tmp_vault)
+    db = GraphDatabase(db_path)
+    id_alpha, id_beta, id_gamma = _three_node_vault(vault_dir)
 
-    full_scan_and_index(str(tmp_vault), db)
+    full_scan_and_index(str(vault_dir), db)
 
     # Edit alpha only: its link now points at Gamma instead of Beta.
-    _write_md(tmp_vault, "a-alpha.md", id_alpha, "Alpha", body="Links to [[Gamma]].")
-    full_scan_and_index(str(tmp_vault), db)
+    _write_md(vault_dir, "a-alpha.md", id_alpha, "Alpha", body="Links to [[Gamma]].")
+    full_scan_and_index(str(vault_dir), db)
 
-    pairs = _edge_pairs(tmp_db)
+    pairs = _edge_pairs(db_path)
     db.close()
 
     alpha_edges = [p for p in pairs if p[0] == id_alpha]
@@ -376,7 +376,7 @@ def test_rescan_after_editing_one_file_changes_only_that_nodes_edges(
     )
 
 
-def test_rescan_after_deleting_file_tombstones_node(tmp_db: str, tmp_vault: Path):
+def test_rescan_after_deleting_file_tombstones_node(db_path: str, vault_dir: Path):
     """Deleting a .md file then re-scanning must remove its node (and its edges).
 
     The DB is a derived index of the files — a note deleted on disk must not
@@ -384,17 +384,17 @@ def test_rescan_after_deleting_file_tombstones_node(tmp_db: str, tmp_vault: Path
     """
     full_scan_and_index = _indexer_mod.full_scan_and_index
 
-    db = GraphDatabase(tmp_db)
-    id_alpha, id_beta, _ = _three_node_vault(tmp_vault)
+    db = GraphDatabase(db_path)
+    id_alpha, id_beta, _ = _three_node_vault(vault_dir)
 
-    full_scan_and_index(str(tmp_vault), db)
+    full_scan_and_index(str(vault_dir), db)
     assert db.get_node(id_beta) is not None, "Precondition: Beta indexed by first scan."
 
-    (tmp_vault / "b-beta.md").unlink()
-    full_scan_and_index(str(tmp_vault), db)
+    (vault_dir / "b-beta.md").unlink()
+    full_scan_and_index(str(vault_dir), db)
 
     ghost = db.get_node(id_beta)
-    pairs = _edge_pairs(tmp_db)
+    pairs = _edge_pairs(db_path)
     db.close()
 
     assert ghost is None, (
@@ -420,7 +420,7 @@ def test_rescan_after_deleting_file_tombstones_node(tmp_db: str, tmp_vault: Path
 # ---------------------------------------------------------------------------
 
 def test_minted_uuid_is_written_back_and_stable_across_rescans(
-    tmp_db: str, tmp_vault: Path
+    db_path: str, vault_dir: Path
 ):
     """A no-id file gets its minted UUID written back to disk — once, forever.
 
@@ -431,14 +431,14 @@ def test_minted_uuid_is_written_back_and_stable_across_rescans(
     """
     full_scan_and_index = _indexer_mod.full_scan_and_index
 
-    db = GraphDatabase(tmp_db)
-    no_id_file = tmp_vault / "no-id.md"
+    db = GraphDatabase(db_path)
+    no_id_file = vault_dir / "no-id.md"
     no_id_file.write_text(
         "---\ntitle: No Id Note\ntype: note\ntags: []\n---\n\nBody text.\n",
         encoding="utf-8",
     )
 
-    full_scan_and_index(str(tmp_vault), db)
+    full_scan_and_index(str(vault_dir), db)
 
     nodes = list(db.list_nodes(limit=100))
     assert len(nodes) == 1, f"Precondition: exactly one node indexed, got {len(nodes)}."
@@ -455,7 +455,7 @@ def test_minted_uuid_is_written_back_and_stable_across_rescans(
     )
 
     # Re-scan: the persisted id must be parsed back, not re-minted.
-    full_scan_and_index(str(tmp_vault), db)
+    full_scan_and_index(str(vault_dir), db)
     nodes_after = list(db.list_nodes(limit=100))
     db.close()
 
@@ -500,7 +500,7 @@ def _edge_triples(db_path: str) -> list[tuple[str, str, str]]:
         conn.close()
 
 
-def test_inline_typed_edge_folds_on_index(tmp_db: str, tmp_vault: Path):
+def test_inline_typed_edge_folds_on_index(db_path: str, vault_dir: Path):
     """`[[Target Note | supports]]` in prose must become a TYPED edge in the DB
     and a folded `edges:` entry in the source file's frontmatter — and stay
     idempotent on re-scan.
@@ -508,20 +508,20 @@ def test_inline_typed_edge_folds_on_index(tmp_db: str, tmp_vault: Path):
     full_scan_and_index = _indexer_mod.full_scan_and_index
     parser_mod = _load_parser()
 
-    db = GraphDatabase(tmp_db)
+    db = GraphDatabase(db_path)
     id_source = "fade0001-0000-0000-0000-000000000001"
     id_target = "fade0002-0000-0000-0000-000000000002"
     source_path = _write_md(
-        tmp_vault, "a-source.md", id_source, "Source Note",
+        vault_dir, "a-source.md", id_source, "Source Note",
         body="This claim [[Target Note | supports]] the target's argument.",
     )
-    _write_md(tmp_vault, "b-target.md", id_target, "Target Note")
+    _write_md(vault_dir, "b-target.md", id_target, "Target Note")
 
-    full_scan_and_index(str(tmp_vault), db)
+    full_scan_and_index(str(vault_dir), db)
 
     # (a) The DB edge must carry the typed relation, not the untyped fallback.
     relations = {
-        rel for src, tgt, rel in _edge_triples(tmp_db)
+        rel for src, tgt, rel in _edge_triples(db_path)
         if src == id_source and tgt == id_target
     }
     assert "supports" in relations, (
@@ -553,11 +553,11 @@ def test_inline_typed_edge_folds_on_index(tmp_db: str, tmp_vault: Path):
     )
 
     # (c) Idempotence survives the fold: a second scan changes nothing.
-    nodes_before = _node_count(tmp_db)
-    edges_before = _edge_row_count(tmp_db)
-    full_scan_and_index(str(tmp_vault), db)
-    nodes_after = _node_count(tmp_db)
-    edges_after = _edge_row_count(tmp_db)
+    nodes_before = _node_count(db_path)
+    edges_before = _edge_row_count(db_path)
+    full_scan_and_index(str(vault_dir), db)
+    nodes_after = _node_count(db_path)
+    edges_after = _edge_row_count(db_path)
     db.close()
 
     assert (nodes_after, edges_after) == (nodes_before, edges_before), (

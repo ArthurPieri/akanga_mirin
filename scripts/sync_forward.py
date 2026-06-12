@@ -50,15 +50,12 @@ import argparse
 import difflib
 import sys
 import tomllib
-from pathlib import Path
 
-# Skeleton reference-marker convention — shared definition in _common (a
-# sibling module, resolvable because scripts run as `python scripts/x.py`)
-# so the drift gate and the skeleton merger can never disagree about what a
-# marker is (adversarial-analysis-v5 #4).
-from _common import is_marker_file
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
+# Shared scripts/ conventions live in _common (a sibling module, resolvable
+# because scripts run as `python scripts/x.py`): the marker convention so the
+# drift gate and the skeleton merger can never disagree about what a marker
+# is (adversarial-analysis-v5 #4), and REPO_ROOT (adversarial-analysis-v5 #6).
+from _common import REPO_ROOT, is_marker_file
 MANIFEST_PATH = REPO_ROOT / "scripts" / "sync_manifest.toml"
 MANIFEST_LABEL = "scripts/sync_manifest.toml"
 SOLUTIONS_DIR = REPO_ROOT / "solutions"

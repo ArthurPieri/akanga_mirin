@@ -24,8 +24,8 @@ def _load_sync_queue():
 
 
 @pytest.fixture()
-def tmp_db(tmp_path: Path):
-    """A bare SQLite connection with the sync_queue table already created."""
+def sync_queue_conn(tmp_path: Path):
+    """An open sqlite3.Connection with the sync_queue table already created."""
     conn = sqlite3.connect(str(tmp_path / "test.db"))
     conn.execute("""
         CREATE TABLE IF NOT EXISTS sync_queue (

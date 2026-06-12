@@ -1,12 +1,10 @@
 """Phase 05 conftest — resolves AKANGA_SRC and provides TUI fixtures."""
 from __future__ import annotations
 
-import uuid
 from pathlib import Path
-from textwrap import dedent
 
 import pytest
-from tests._helpers import load_attr
+from tests._helpers import _write_node, load_attr
 
 
 
@@ -32,29 +30,11 @@ def _load_indexer():
 
 
 # ---------------------------------------------------------------------------
-# Vault + DB helpers
+# Vault + DB fixtures (_write_node is shared infrastructure in tests/_helpers)
 # ---------------------------------------------------------------------------
 
-def _write_node(vault: Path, filename: str, *, title: str, node_type: str = "note") -> Path:
-    """Write a minimal well-formed .md node file into *vault*."""
-    node_id = str(uuid.uuid4())
-    content = dedent(f"""\
-        ---
-        id: {node_id}
-        title: {title}
-        type: {node_type}
-        tags: []
-        ---
-
-        Content of {title}.
-        """)
-    path = vault / filename
-    path.write_text(content, encoding="utf-8")
-    return path
-
-
 @pytest.fixture()
-def tmp_vault(tmp_path: Path) -> Path:
+def vault_with_nodes(tmp_path: Path) -> Path:
     """
     A temporary vault directory pre-populated with three sample nodes:
         - alpha.md  ("Alpha Node")
@@ -74,9 +54,10 @@ def empty_vault(tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
-def tmp_db(tmp_vault: Path, tmp_path: Path):
+def indexed_db(vault_with_nodes: Path, tmp_path: Path):
     """
-    A GraphDatabase with the three nodes from *tmp_vault* already indexed.
+    An OPEN GraphDatabase with the three nodes from *vault_with_nodes*
+    already indexed.
 
     Yields the open database; closes it after the test.
     """
@@ -85,7 +66,7 @@ def tmp_db(tmp_vault: Path, tmp_path: Path):
 
     db_path = tmp_path / "test.db"
     db = GraphDatabase(str(db_path))
-    full_scan_and_index(str(tmp_vault), db)
+    full_scan_and_index(str(vault_with_nodes), db)
     yield db
     db.close()
 

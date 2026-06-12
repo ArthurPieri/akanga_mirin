@@ -19,13 +19,20 @@ delegations to :func:`load_attr`, and the policy decisions live here, once:
   site — flat-first everywhere except Phase 8's MCP loader, which documents
   why it is package-first.
 
+This module is also the single home for :func:`_write_node`, the vault
+.md-file writer shared by the phase 5 and 6 conftests (previously two
+byte-identical copies, adversarial-analysis-v5 #3).
+
 Imports no learner code at import time, so importing this module is always
 safe during collection.
 """
 from __future__ import annotations
 
 import importlib
+import uuid
 from collections.abc import Callable
+from pathlib import Path
+from textwrap import dedent
 from typing import Any
 
 import pytest
@@ -74,3 +81,25 @@ def load_attr(
         "import/syntax problem and re-run. If it does not exist yet, check "
         "AKANGA_SRC and the phase doc's deliverable list."
     )
+
+
+def _write_node(vault: Path, filename: str, *, title: str, node_type: str = "note") -> Path:
+    """Write a minimal well-formed .md node file into *vault*.
+
+    Stdlib-only (no learner imports), so it is safe to call — and to import —
+    during collection. Shared by the phase 5 and 6 conftests.
+    """
+    node_id = str(uuid.uuid4())
+    content = dedent(f"""\
+        ---
+        id: {node_id}
+        title: {title}
+        type: {node_type}
+        tags: []
+        ---
+
+        Content of {title}.
+        """)
+    path = vault / filename
+    path.write_text(content, encoding="utf-8")
+    return path

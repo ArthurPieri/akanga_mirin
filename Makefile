@@ -95,7 +95,19 @@ run serve mcp: need-uv
 
 # =============================================================================
 # HELP — self-documenting (reads ## comments on target lines)
+#
+# Annotation format:   target: ## @group Description shown in help
+# Each section below filters by its @group tag, so a NEW target self-registers
+# in help the moment its ## comment carries a tag — no second list to edit
+# (adversarial-analysis-v5 #6). Groups: study vault run test example skeleton
+# setup progress quality docs facilitator diagnostics. Untagged/uncommented
+# targets (help itself, need-uv, print-max-phase) stay out of help on purpose.
 # =============================================================================
+
+# One grep per section: match a target line carrying the section's tag, then
+# strip the tag from the displayed description in awk. (The \#\# escapes keep
+# make from treating the rest of this assignment as a comment.)
+HELP_GREP = grep -E '^[A-Za-z][A-Za-z0-9_-]*:.*\#\# @$(1) ' $(MAKEFILE_LIST) | awk -F'\#\#' '{sub(/^ @[a-z-]+ /, " ", $$2); printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
 
 help: ## Show this help message
 	@printf '\n'
@@ -103,53 +115,41 @@ help: ## Show this help message
 	@printf '  Build a personal knowledge graph, phase by phase.\n'
 	@printf '\n'
 	@printf '  \033[1;33mStudy workflow\033[0m\n'
-	@grep -E '^(study|docs-phase|docs-all|foundations)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
-		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
+	@$(call HELP_GREP,study)
 	@printf '\n'
 	@printf '  \033[1;33mVault\033[0m\n'
-	@grep -E '^(vault-init|vault-check)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
-		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
+	@$(call HELP_GREP,vault)
 	@printf '\n'
 	@printf '  \033[1;33mRun your app\033[0m\n'
-	@grep -E '^(run|serve|mcp)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
-		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
+	@$(call HELP_GREP,run)
 	@printf '\n'
 	@printf '  \033[1;33mTesting workflow\033[0m\n'
-	@grep -E '^(test|test-solution|test-all|test-mine|test-phase-range)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
-		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
+	@$(call HELP_GREP,test)
 	@printf '\n'
 	@printf '  \033[1;33mExamples workflow\033[0m\n'
-	@grep -E '^(example|examples-all)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
-		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
+	@$(call HELP_GREP,example)
 	@printf '\n'
 	@printf '  \033[1;33mSkeleton workflow\033[0m\n'
-	@grep -E '^(skeleton|skeleton-check)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
-		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
+	@$(call HELP_GREP,skeleton)
 	@printf '\n'
 	@printf '  \033[1;33mSetup workflow\033[0m\n'
-	@grep -E '^(setup|setup-phase|setup-workshop)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
-		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
+	@$(call HELP_GREP,setup)
 	@printf '\n'
 	@printf '  \033[1;33mYour progress\033[0m\n'
-	@grep -E '^(resume|checkpoint|peek)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
-		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
+	@$(call HELP_GREP,progress)
 	@printf '\n'
 	@printf '  \033[1;33mQuality workflow\033[0m\n'
-	@grep -E '^(lint|typecheck|check)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
-		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
+	@$(call HELP_GREP,quality)
 	@printf '\n'
 	@printf '  \033[1;33mDocs workflow\033[0m\n'
-	@grep -E '^(docs-serve|docs-build)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
-		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
+	@$(call HELP_GREP,docs)
 	@printf '\n'
 	@printf '  \033[1;33mFacilitator workflow\033[0m\n'
-	@grep -E '^(verify|verify-all|commit-progress|push)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
-		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
+	@$(call HELP_GREP,facilitator)
 	@printf '\n'
 	@printf '\n'
 	@printf '  \033[1;33mDiagnostics\033[0m\n'
-	@grep -E '^(status|where-is-my-src|sync-forward)[[:space:]]*:.*##' $(MAKEFILE_LIST) \
-		| awk -F'##' '{printf "    \033[36m%-28s\033[0m %s\n", $$1, $$2}'
+	@$(call HELP_GREP,diagnostics)
 	@printf '\n'
 	@printf '  \033[2mVariables: PHASE=N (default 0)  FROM=N  TO=N  FILE=path  TOPIC=name  BASE=solutions|skeletons\033[0m\n'
 	@printf '\n'
@@ -158,11 +158,12 @@ help: ## Show this help message
 # STUDY — open tmux layout for a phase
 # =============================================================================
 
-study: ## Open tmux study session (PHASE=2 → phase 02)
+study: ## @study Open tmux study session (PHASE=2 → phase 02)
 	@AKANGA_DOCS="$(AKANGA_DOCS)" AKANGA_CODE="$(AKANGA_CODE)" \
 		bash scripts/study.sh $(PHASE)
 
-docs-phase: ## Open phase doc in glow without launching full tmux (PHASE=3, PHASE=1a)
+docs-phase: ## @study Open phase doc in glow without launching full tmux (PHASE=3, PHASE=1a)
+# 1A/1B split convention also implemented in scripts/_common.py:normalize_phase — keep in step.
 	@RAW="$(PHASE)"; SUB=""; \
 	case "$$RAW" in \
 		*[aAbB]) SUB=$$(printf '%s' "$${RAW#"$${RAW%?}"}" | tr 'AB' 'ab'); RAW="$${RAW%?}";; \
@@ -177,7 +178,7 @@ docs-phase: ## Open phase doc in glow without launching full tmux (PHASE=3, PHAS
 	fi; \
 	$(GLOW) -p "$$DOC"
 
-docs-all: ## Open all phase docs in glow sequentially (full review mode)
+docs-all: ## @study Open all phase docs in glow sequentially (full review mode)
 	@for pat in 00 01a 01b 02 03 04 05 06 07 08; do \
 		DOC=$$(find "$(AKANGA_DOCS)/learning" -name "phase-$${pat}-*.md" 2>/dev/null | sort | head -1); \
 		if [ -n "$$DOC" ]; then \
@@ -188,7 +189,7 @@ docs-all: ## Open all phase docs in glow sequentially (full review mode)
 		fi; \
 	done
 
-foundations: ## Open a foundations doc in glow (TOPIC=sqlite → sqlite-basics.md)
+foundations: ## @study Open a foundations doc in glow (TOPIC=sqlite → sqlite-basics.md)
 	@if [ -z "$(TOPIC)" ]; then \
 		printf '\033[1;36mAvailable foundations docs:\033[0m\n'; \
 		ls "$(AKANGA_DOCS)/foundations/" 2>/dev/null | sed 's/\.md$$//' | sort \
@@ -208,7 +209,7 @@ foundations: ## Open a foundations doc in glow (TOPIC=sqlite → sqlite-basics.m
 # VAULT — create and validate the learner's knowledge vault
 # =============================================================================
 
-vault-init: ## Create ./vault + akanga.yaml (owner from git config, Nhamandu default workspace)
+vault-init: ## @vault Create ./vault + akanga.yaml (owner from git config, Nhamandu default workspace)
 	@if [ -f "vault/akanga.yaml" ]; then \
 		echo "vault/akanga.yaml already exists — skipping."; \
 	else \
@@ -222,7 +223,7 @@ vault-init: ## Create ./vault + akanga.yaml (owner from git config, Nhamandu def
 	fi; \
 	printf 'Vault ready at \033[36m./vault/\033[0m\n'
 
-vault-check: ## Validate your vault (PHASE=N checks that phase's expected nodes; FULL=1 adds the >=50-node check)
+vault-check: ## @vault Validate your vault (PHASE=N checks that phase's expected nodes; FULL=1 adds the >=50-node check)
 	@ARGS=""; \
 	if [ "$(origin PHASE)" != "file" ]; then ARGS="--phase $(PHASE)"; fi; \
 	if [ -n "$(FULL)" ]; then ARGS="$$ARGS --full"; fi; \
@@ -232,7 +233,7 @@ vault-check: ## Validate your vault (PHASE=N checks that phase's expected nodes;
 # RUN — launch the learner's own app (TUI / REST API / MCP server)
 # =============================================================================
 
-run: ## Launch your TUI from AKANGA_SRC (Phase 5+; VAULT=./vault DB=./.akanga.db)
+run: ## @run Launch your TUI from AKANGA_SRC (Phase 5+; VAULT=./vault DB=./.akanga.db)
 	@if [ ! -d "$(AKANGA_SRC)" ]; then \
 		echo "error: AKANGA_SRC ($(AKANGA_SRC)) does not exist"; exit 1; \
 	fi; \
@@ -240,25 +241,25 @@ run: ## Launch your TUI from AKANGA_SRC (Phase 5+; VAULT=./vault DB=./.akanga.db
 	printf '\033[2mTip: the graph view (Kitty protocol) degrades inside tmux — run this in a plain Ghostty/Kitty window.\033[0m\n'; \
 	PYTHONPATH="$(AKANGA_SRC)" $(PYTHON) -m akanga_tui.app --vault "$${VAULT:-./vault}" --db "$${DB:-./.akanga.db}"
 
-serve: ## Launch your FastAPI server from AKANGA_SRC (Phase 6+; localhost:8000)
+serve: ## @run Launch your FastAPI server from AKANGA_SRC (Phase 6+; localhost:8000)
 	@if [ ! -d "$(AKANGA_SRC)" ]; then \
 		echo "error: AKANGA_SRC ($(AKANGA_SRC)) does not exist"; exit 1; \
 	fi; \
 	printf 'Launching REST API from \033[36m%s\033[0m on http://127.0.0.1:8000 ...\n' "$(AKANGA_SRC)"; \
 	PYTHONPATH="$(AKANGA_SRC)" $(PYTHON) -c "import uvicorn; from akanga_core.server import create_app; uvicorn.run(create_app(vault='$${VAULT:-./vault}', db_path='$${DB:-./.akanga.db}'), host='127.0.0.1', port=8000)"
 
-mcp: ## Launch your MCP server from AKANGA_SRC (Phase 8; binds 127.0.0.1)
+mcp: ## @run Launch your MCP server from AKANGA_SRC (Phase 8; binds 127.0.0.1)
 	@if [ ! -d "$(AKANGA_SRC)" ]; then \
 		echo "error: AKANGA_SRC ($(AKANGA_SRC)) does not exist"; exit 1; \
 	fi; \
 	printf 'Launching MCP server from \033[36m%s\033[0m ...\n' "$(AKANGA_SRC)"; \
 	PYTHONPATH="$(AKANGA_SRC)" $(PYTHON) -m akanga_mcp.server --vault "$${VAULT:-./vault}" --db "$${DB:-./.akanga.db}"
 
-docs-serve: ## Start MKDocs dev server with live reload (localhost:8000)
+docs-serve: ## @docs Start MKDocs dev server with live reload (localhost:8000)
 	@echo "Starting MKDocs dev server ..."; \
 	uv run mkdocs serve
 
-docs-build: ## Build static site into site/ directory
+docs-build: ## @docs Build static site into site/ directory
 	@echo "Building MKDocs site ..."; \
 	uv run mkdocs build
 
@@ -266,7 +267,7 @@ docs-build: ## Build static site into site/ directory
 # TESTING — run tests against learner's code or solutions
 # =============================================================================
 
-test: ## Run tests for one phase against AKANGA_SRC (PHASE=2)
+test: ## @test Run tests for one phase against AKANGA_SRC (PHASE=2)
 	@PHASE_PAD="$(PHASE_PAD)"; \
 	if [ ! -d "tests/phase_$${PHASE_PAD}" ]; then \
 		echo "error: tests/phase_$${PHASE_PAD}/ not found — tests may not exist yet"; exit 1; \
@@ -298,7 +299,7 @@ test: ## Run tests for one phase against AKANGA_SRC (PHASE=2)
 		exit "$$STATUS"; \
 	fi
 
-test-solution: ## Run tests for one phase against the reference solution (PHASE=2)
+test-solution: ## @test Run tests for one phase against the reference solution (PHASE=2)
 	@PHASE_PAD="$(PHASE_PAD)"; \
 	SOLUTION_SRC="solutions/phase_$${PHASE_PAD}/src"; \
 	if [ ! -d "$$SOLUTION_SRC" ]; then \
@@ -307,7 +308,7 @@ test-solution: ## Run tests for one phase against the reference solution (PHASE=
 	echo "Testing phase $${PHASE_PAD} against reference solution ..."; \
 	AKANGA_SRC="$$SOLUTION_SRC" $(PYTEST) tests/phase_$${PHASE_PAD}/ -v
 
-test-all: ## Run all phases against their solutions (full suite verification)
+test-all: ## @test Run all phases against their solutions (full suite verification)
 	@echo "Running full test suite against solutions ..."; \
 	FAILED=0; \
 	TESTED=0; \
@@ -332,11 +333,11 @@ test-all: ## Run all phases against their solutions (full suite verification)
 		printf '\n\033[0;32mAll phases passed.\033[0m\n'; \
 	fi
 
-test-mine: ## Run all tests against AKANGA_SRC (your own code)
+test-mine: ## @test Run all tests against AKANGA_SRC (your own code)
 	@echo "Testing all phases against $(AKANGA_SRC) ..."; \
 	AKANGA_SRC="$(AKANGA_SRC)" $(PYTEST) tests/ -v
 
-test-phase-range: ## Run phases FROM..TO against their solutions (FROM=0 TO=3)
+test-phase-range: ## @test Run phases FROM..TO against their solutions (FROM=0 TO=3)
 	@echo "Testing phases $(FROM)–$(TO) against solutions ..."; \
 	FAILED=0; \
 	TESTED=0; \
@@ -362,7 +363,7 @@ test-phase-range: ## Run phases FROM..TO against their solutions (FROM=0 TO=3)
 # VERIFICATION — cumulative solution correctness (facilitator targets)
 # =============================================================================
 
-verify: ## Verify solution N passes all tests 00..N cumulatively (PHASE=3)
+verify: ## @facilitator Verify solution N passes all tests 00..N cumulatively (PHASE=3)
 	@PHASE_PAD="$(PHASE_PAD)"; \
 	SOLUTION_SRC="solutions/phase_$${PHASE_PAD}/src"; \
 	if [ ! -d "$$SOLUTION_SRC" ]; then \
@@ -384,7 +385,7 @@ verify: ## Verify solution N passes all tests 00..N cumulatively (PHASE=3)
 		printf '\n\033[0;32mPhase %s solution is cumulative — all prior tests pass.\033[0m\n' "$${PHASE_PAD}"; \
 	fi
 
-verify-all: ## Verify all 9 phases are cumulative (facilitator, slow)
+verify-all: ## @facilitator Verify all 9 phases are cumulative (facilitator, slow)
 	@echo "Verifying cumulative correctness for all phases ..."; \
 	FAILED=0; \
 	VERIFIED=0; \
@@ -416,7 +417,7 @@ verify-all: ## Verify all 9 phases are cumulative (facilitator, slow)
 # EXAMPLES — standalone concept demo scripts
 # =============================================================================
 
-example: ## Run the standalone example script for a phase (PHASE=2)
+example: ## @example Run the standalone example script for a phase (PHASE=2)
 	@PHASE_PAD="$(PHASE_PAD)"; \
 	SCRIPT=$$(find examples -name "phase_$${PHASE_PAD}_*.py" 2>/dev/null | head -1); \
 	if [ -z "$$SCRIPT" ]; then \
@@ -425,7 +426,7 @@ example: ## Run the standalone example script for a phase (PHASE=2)
 	echo "Running $$SCRIPT ..."; \
 	$(PYTHON) "$$SCRIPT"
 
-examples-all: ## Run all 9 phase example scripts sequentially
+examples-all: ## @example Run all 9 phase example scripts sequentially
 	@FAILED=0; \
 	RAN=0; \
 	for n in $(PHASES); do \
@@ -449,7 +450,7 @@ examples-all: ## Run all 9 phase example scripts sequentially
 # SKELETON — set up or verify learner's starting point
 # =============================================================================
 
-skeleton: ## Copy skeleton for a phase into ./src/ as the learner's starting point (PHASE=2)
+skeleton: ## @skeleton Copy skeleton for a phase into ./src/ as the learner's starting point (PHASE=2)
 	@PHASE_PAD="$(PHASE_PAD)"; \
 	SKEL="skeletons/phase_$${PHASE_PAD}"; \
 	if [ ! -d "$$SKEL" ]; then \
@@ -476,7 +477,7 @@ skeleton: ## Copy skeleton for a phase into ./src/ as the learner's starting poi
 	echo "Done. Edit src/ to complete the implementation."; \
 	printf 'Next: \033[36mmake test PHASE=%s\033[0m\n' "$(PHASE)"
 
-skeleton-check: ## Verify skeleton still raises NotImplementedError — no solution leakage (PHASE=2)
+skeleton-check: ## @skeleton Verify skeleton still raises NotImplementedError — no solution leakage (PHASE=2)
 	@PHASE_PAD="$(PHASE_PAD)"; \
 	SKEL="skeletons/phase_$${PHASE_PAD}/src"; \
 	if [ ! -d "$$SKEL" ]; then \
@@ -489,17 +490,17 @@ skeleton-check: ## Verify skeleton still raises NotImplementedError — no solut
 # SETUP — install dependencies
 # =============================================================================
 
-setup: ## Install all dependencies for the full learning path
+setup: ## @setup Install all dependencies for the full learning path
 	@echo "Installing all dependencies via uv ..."; \
 	uv sync --all-extras; \
 	printf '\n\033[0;32mDone.\033[0m Run \033[36mmake test PHASE=0\033[0m to verify.\n'
 
-setup-phase: ## Install only the dependencies needed through a given phase (PHASE=2)
+setup-phase: ## @setup Install only the dependencies needed through a given phase (PHASE=2)
 	@echo "Installing dependencies for phases 0–$(PHASE) ..."; \
 	uv sync; \
 	printf '\033[0;32mDone.\033[0m\n'
 
-setup-workshop: ## Lean day-1 install: core deps + test runner, no heavy extras
+setup-workshop: ## @setup Lean day-1 install: core deps + test runner, no heavy extras
 	@echo "Installing workshop dependencies (core + dev test tooling) via uv ..."; \
 	uv sync --extra dev; \
 	printf '\033[0;32mDone.\033[0m Run \033[36mmake test PHASE=0\033[0m to verify.\n'; \
@@ -513,7 +514,7 @@ setup-workshop: ## Lean day-1 install: core deps + test runner, no heavy extras
 # QUALITY — lint, typecheck, full gate
 # =============================================================================
 
-lint: ## Lint all Python files in tests/ skeletons/ solutions/ examples/
+lint: ## @quality Lint all Python files in tests/ skeletons/ solutions/ examples/
 	@DIRS=""; \
 	for d in tests skeletons solutions examples src; do \
 		if [ -d "$$d" ]; then DIRS="$$DIRS $$d"; fi; \
@@ -523,7 +524,7 @@ lint: ## Lint all Python files in tests/ skeletons/ solutions/ examples/
 	fi; \
 	$(RUFF) check $$DIRS
 
-typecheck: ## Run mypy on solutions/phase_NN/src/ (PHASE=3)
+typecheck: ## @quality Run mypy on solutions/phase_NN/src/ (PHASE=3)
 	@PHASE_PAD="$(PHASE_PAD)"; \
 	SRC="solutions/phase_$${PHASE_PAD}/src"; \
 	if [ ! -d "$$SRC" ]; then \
@@ -531,7 +532,7 @@ typecheck: ## Run mypy on solutions/phase_NN/src/ (PHASE=3)
 	fi; \
 	$(MYPY) "$$SRC"
 
-check: ## Full quality gate: lint + test-all (run before a facilitator commit)
+check: ## @quality Full quality gate: lint + test-all (run before a facilitator commit)
 	@$(MAKE) lint
 	@$(MAKE) test-all
 	@printf '\n\033[0;32mAll checks passed.\033[0m\n'
@@ -540,7 +541,7 @@ check: ## Full quality gate: lint + test-all (run before a facilitator commit)
 # DIAGNOSTICS — understand the current state of the repo
 # =============================================================================
 
-status: ## Repo authoring status: which skeletons/tests/solutions are shipped
+status: ## @diagnostics Repo authoring status: which skeletons/tests/solutions are shipped
 	@printf '\n  \033[1;36mRepo authoring status (skeletons/tests/solutions shipped)\033[0m\n\n'; \
 	printf '  %-8s %-12s %-10s %-12s\n' 'Phase' 'Skeleton' 'Tests' 'Solution'; \
 	printf '  %-8s %-12s %-10s %-12s\n' '-----' '--------' '-----' '--------'; \
@@ -553,7 +554,7 @@ status: ## Repo authoring status: which skeletons/tests/solutions are shipped
 	done; \
 	printf '\n  \033[2mLooking for your own progress? → make resume\033[0m\n\n'
 
-where-is-my-src: ## Show which source directory 'make test' is pointing at
+where-is-my-src: ## @diagnostics Show which source directory 'make test' is pointing at
 	@if [ -d "$(AKANGA_SRC)" ]; then \
 		printf '\033[0;32mAKANGA_SRC = %s\033[0m (directory exists)\n' "$(AKANGA_SRC)"; \
 		printf 'Contents:\n'; \
@@ -563,7 +564,7 @@ where-is-my-src: ## Show which source directory 'make test' is pointing at
 		printf 'Set it: export AKANGA_SRC=/path/to/your/src\n'; \
 	fi
 
-sync-forward: ## Preview or apply a fix from phase FROM forward (FROM=2 FILE=src/... BASE=solutions|skeletons)
+sync-forward: ## @diagnostics Preview or apply a fix from phase FROM forward (FROM=2 FILE=src/... BASE=solutions|skeletons)
 	@if [ -z "$(FILE)" ]; then \
 		echo "Usage: make sync-forward FROM=2 FILE=src/akanga_core/parser.py BASE=solutions"; \
 		echo "       make sync-forward FROM=2 FILE=src/akanga_core/parser.py BASE=solutions APPLY=1"; \
@@ -583,7 +584,7 @@ sync-forward: ## Preview or apply a fix from phase FROM forward (FROM=2 FILE=src
 
 LEARNER_GIT := git --git-dir=.learner-git --work-tree=.
 
-resume: ## Show your last green phase and the commands to continue (3-week-return friendly)
+resume: ## @progress Show your last green phase and the commands to continue (3-week-return friendly)
 	@if [ ! -s .akanga-progress ]; then \
 		echo "No test runs recorded yet (.akanga-progress is empty)."; \
 		printf 'Start here: \033[36mmake skeleton PHASE=0\033[0m then \033[36mmake test PHASE=0\033[0m\n'; \
@@ -610,7 +611,7 @@ resume: ## Show your last green phase and the commands to continue (3-week-retur
 		printf '    \033[36mmake test PHASE=%s\033[0m         # run that phase'"'"'s tests\n\n' "$$NEXT"; \
 	fi
 
-checkpoint: ## Commit src/ + vault/ into your private learner repo (.learner-git, separate from this repo)
+checkpoint: ## @progress Commit src/ + vault/ into your private learner repo (.learner-git, separate from this repo)
 	@if [ ! -d .learner-git ]; then \
 		$(LEARNER_GIT) init -q; \
 		echo "Initialized your private learner repo at .learner-git/ (independent of the course repo)."; \
@@ -630,7 +631,7 @@ checkpoint: ## Commit src/ + vault/ into your private learner repo (.learner-git
 		printf '\033[0;32mCheckpoint committed.\033[0m History: \033[36mgit --git-dir=.learner-git log --oneline\033[0m\n'; \
 	fi
 
-peek: ## Look at one solution file after an honest attempt (PHASE=2 FILE=akanga_core/parser.py) — logged in PEEKS.md
+peek: ## @progress Look at one solution file after an honest attempt (PHASE=2 FILE=akanga_core/parser.py) — logged in PEEKS.md
 	@PHASE_PAD="$(PHASE_PAD)"; \
 	if [ -z "$(FILE)" ]; then \
 		echo "Usage: make peek PHASE=2 FILE=akanga_core/parser.py"; exit 2; \
@@ -656,14 +657,14 @@ peek: ## Look at one solution file after an honest attempt (PHASE=2 FILE=akanga_
 # GIT — facilitator workflow
 # =============================================================================
 
-commit-progress: ## Auto-commit progress with message 'progress: phase N tests passing'
+commit-progress: ## @facilitator Auto-commit progress with message 'progress: phase N tests passing'
 	@PHASE_PAD="$(PHASE_PAD)"; \
 	MSG="progress: phase $${PHASE_PAD} tests passing"; \
 	git add tests/ solutions/ skeletons/ examples/ docs/ scripts/ Makefile 2>/dev/null || true; \
 	git commit -m "$$MSG"; \
 	echo "Committed: $$MSG"
 
-push: ## Push to remote — prompts for confirmation before executing
+push: ## @facilitator Push to remote — prompts for confirmation before executing
 	@read -p "Push to remote? [y/N] " CONFIRM; \
 	if [ "$$CONFIRM" = "y" ] || [ "$$CONFIRM" = "Y" ]; then \
 		git push; \

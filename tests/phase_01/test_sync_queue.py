@@ -14,7 +14,7 @@ The sync_queue table schema (authoritative from Phase 02 DB_SCHEMA):
     processed    INTEGER NOT NULL DEFAULT 0  (0 = pending, 1 = done)
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 
-All tests receive a ``tmp_db`` fixture (a sqlite3.Connection with the table
+All tests receive a ``sync_queue_conn`` fixture (a sqlite3.Connection with the table
 pre-created) from conftest.py.  A separate ``tmp_path``-based test verifies
 persistence across connection re-opens.
 """
@@ -32,26 +32,26 @@ from tests.phase_01.conftest import _load_sync_queue
 # ---------------------------------------------------------------------------
 
 
-def test_enqueue_creates_row(tmp_db):
+def test_enqueue_creates_row(sync_queue_conn):
     """enqueue_title_sync inserts exactly one row into sync_queue."""
     m = _load_sync_queue()
 
-    m.enqueue_title_sync(tmp_db, node_id="node-001", new_title="New Title")
+    m.enqueue_title_sync(sync_queue_conn, node_id="node-001", new_title="New Title")
 
-    rows = tmp_db.execute("SELECT * FROM sync_queue").fetchall()
+    rows = sync_queue_conn.execute("SELECT * FROM sync_queue").fetchall()
     assert len(rows) == 1, (
         f"Expected 1 row in sync_queue after enqueue_title_sync, got {len(rows)}."
     )
 
 
-def test_enqueue_is_idempotent(tmp_db):
+def test_enqueue_is_idempotent(sync_queue_conn):
     """Calling enqueue_title_sync twice with the same node_id creates only one pending row."""
     m = _load_sync_queue()
 
-    m.enqueue_title_sync(tmp_db, node_id="node-001", new_title="Title A")
-    m.enqueue_title_sync(tmp_db, node_id="node-001", new_title="Title A")
+    m.enqueue_title_sync(sync_queue_conn, node_id="node-001", new_title="Title A")
+    m.enqueue_title_sync(sync_queue_conn, node_id="node-001", new_title="Title A")
 
-    rows = tmp_db.execute(
+    rows = sync_queue_conn.execute(
         "SELECT * FROM sync_queue WHERE entity_id = ? AND processed = 0",
         ("node-001",),
     ).fetchall()
@@ -61,41 +61,41 @@ def test_enqueue_is_idempotent(tmp_db):
     )
 
 
-def test_pending_jobs_returns_unprocessed(tmp_db):
+def test_pending_jobs_returns_unprocessed(sync_queue_conn):
     """pending_sync_jobs returns only rows where processed = 0."""
     m = _load_sync_queue()
 
-    m.enqueue_title_sync(tmp_db, node_id="node-001", new_title="Alpha")
-    m.enqueue_title_sync(tmp_db, node_id="node-002", new_title="Beta")
+    m.enqueue_title_sync(sync_queue_conn, node_id="node-001", new_title="Alpha")
+    m.enqueue_title_sync(sync_queue_conn, node_id="node-002", new_title="Beta")
 
     # Manually mark node-002 as processed so we have one pending and one done.
-    tmp_db.execute(
+    sync_queue_conn.execute(
         "UPDATE sync_queue SET processed = 1 WHERE entity_id = ?",
         ("node-002",),
     )
-    tmp_db.commit()
+    sync_queue_conn.commit()
 
-    pending = m.pending_sync_jobs(tmp_db)
+    pending = m.pending_sync_jobs(sync_queue_conn)
     assert len(pending) == 1, (
         f"Expected 1 pending job, got {len(pending)}.\n"
         "pending_sync_jobs must filter out rows where processed = 1."
     )
 
 
-def test_mark_processed_sets_flag(tmp_db):
+def test_mark_processed_sets_flag(sync_queue_conn):
     """mark_processed sets processed to 1."""
     m = _load_sync_queue()
 
-    m.enqueue_title_sync(tmp_db, node_id="node-001", new_title="Alpha")
+    m.enqueue_title_sync(sync_queue_conn, node_id="node-001", new_title="Alpha")
 
     # Retrieve the job id so we can mark it processed.
-    row = tmp_db.execute("SELECT id FROM sync_queue WHERE entity_id = ?", ("node-001",)).fetchone()
+    row = sync_queue_conn.execute("SELECT id FROM sync_queue WHERE entity_id = ?", ("node-001",)).fetchone()
     assert row is not None, "Precondition: enqueue_title_sync must have inserted a row."
     job_id = row[0]
 
-    m.mark_processed(tmp_db, job_id)
+    m.mark_processed(sync_queue_conn, job_id)
 
-    updated = tmp_db.execute(
+    updated = sync_queue_conn.execute(
         "SELECT processed FROM sync_queue WHERE id = ?", (job_id,)
     ).fetchone()
     assert updated is not None and updated[0] == 1, (

@@ -31,7 +31,7 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from .db import GraphDatabase
+from .db import GraphDatabase, NodeRecord
 from .indexer import full_scan_and_index
 from .parser import content_hash, parse_node_file, write_node_file
 
@@ -105,8 +105,8 @@ def _vault_root() -> Path:
 # ── Internal helpers ───────────────────────────────────────────────────────────
 
 
-def _node_dict(node: Any) -> dict[str, Any]:
-    """Convert a DB node (SimpleNamespace — not JSON-serializable) to a dict."""
+def _node_dict(node: NodeRecord) -> dict[str, Any]:
+    """Convert a DB NodeRecord (attribute access, not JSON-serializable) to a dict."""
     return {
         "id": node.id,
         "title": node.title,

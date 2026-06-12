@@ -49,6 +49,7 @@ fi
 # ── 1. Normalise the phase number ─────────────────────────────────────────────
 # Accept bare digits (0, 3, 08) and zero-pad to two digits (00, 03, 08).
 # Phase 1 is split into 1A/1B: accept "1a"/"1b" (case-insensitive) as a suffix.
+# Convention also implemented in scripts/_common.py:normalize_phase — keep in step.
 # 10#$PHASE forces base-10 so "08" isn't treated as invalid octal.
 PHASE="${1:-00}"
 SUB=""

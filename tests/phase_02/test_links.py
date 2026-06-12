@@ -25,13 +25,13 @@ def _bind_learner_modules():
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_node(node_id: str, title: str, tmp_vault: Path):
+def _make_node(node_id: str, title: str, vault_dir: Path):
     """Construct a minimal Node instance."""
     Node = _parser_mod.Node
 
     return Node(
         id=node_id,
-        path=str(tmp_vault / f"{node_id[:8]}.md"),
+        path=str(vault_dir / f"{node_id[:8]}.md"),
         title=title,
         type="note",
         tags=[],
@@ -113,35 +113,35 @@ def test_extract_wikilinks_ignores_fenced_code():
 # 2. resolve_wikilink
 # ---------------------------------------------------------------------------
 
-def test_resolve_wikilink_found(tmp_db: str, tmp_vault: Path):
+def test_resolve_wikilink_found(db_path: str, vault_dir: Path):
     """resolve_wikilink returns the node_id when the title exists in the DB."""
     resolve_wikilink = _links_mod.resolve_wikilink
 
-    db = GraphDatabase(tmp_db)
-    node = _make_node("aaaa1111-0000-0000-0000-000000000001", "Cognitive Load", tmp_vault)
+    db = GraphDatabase(db_path)
+    node = _make_node("aaaa1111-0000-0000-0000-000000000001", "Cognitive Load", vault_dir)
     db.upsert_node(node)
 
     result = resolve_wikilink("Cognitive Load", db)
     assert result == node.id
 
 
-def test_resolve_wikilink_case_insensitive(tmp_db: str, tmp_vault: Path):
+def test_resolve_wikilink_case_insensitive(db_path: str, vault_dir: Path):
     """resolve_wikilink matches titles case-insensitively."""
     resolve_wikilink = _links_mod.resolve_wikilink
 
-    db = GraphDatabase(tmp_db)
-    node = _make_node("aaaa2222-0000-0000-0000-000000000002", "Cognitive Load", tmp_vault)
+    db = GraphDatabase(db_path)
+    node = _make_node("aaaa2222-0000-0000-0000-000000000002", "Cognitive Load", vault_dir)
     db.upsert_node(node)
 
     result = resolve_wikilink("cognitive load", db)
     assert result == node.id
 
 
-def test_resolve_wikilink_not_found(tmp_db: str, tmp_vault: Path):
+def test_resolve_wikilink_not_found(db_path: str, vault_dir: Path):
     """resolve_wikilink returns None when the title has no matching node."""
     resolve_wikilink = _links_mod.resolve_wikilink
 
-    db = GraphDatabase(tmp_db)
+    db = GraphDatabase(db_path)
 
     result = resolve_wikilink("Nonexistent Node Title That Cannot Match", db)
     assert result is None

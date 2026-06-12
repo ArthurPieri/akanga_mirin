@@ -103,11 +103,11 @@ def _collect_rendered_text(app) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def test_tui_app_starts_without_crash(tmp_vault, tmp_db, tmp_path):
+async def test_tui_app_starts_without_crash(vault_with_nodes, indexed_db, tmp_path):
     """The TUI must mount and exit cleanly with no exceptions."""
     TUI = _load_tui_class()
     db_path = str(tmp_path / "test.db")
-    app = _make_app(TUI, vault=str(tmp_vault), db_path=db_path)
+    app = _make_app(TUI, vault=str(vault_with_nodes), db_path=db_path)
 
     async with app.run_test() as pilot:
         # Just mounting without crashing satisfies this test.
@@ -115,11 +115,11 @@ async def test_tui_app_starts_without_crash(tmp_vault, tmp_db, tmp_path):
         await pilot.press("q")
 
 
-async def test_tui_shows_node_titles(tmp_vault, tmp_db, tmp_path):
+async def test_tui_shows_node_titles(vault_with_nodes, indexed_db, tmp_path):
     """After mounting, node titles from the db must appear somewhere in the widget tree."""
     TUI = _load_tui_class()
     db_path = str(tmp_path / "test.db")
-    app = _make_app(TUI, vault=str(tmp_vault), db_path=db_path)
+    app = _make_app(TUI, vault=str(vault_with_nodes), db_path=db_path)
 
     expected_titles = {"Alpha Node", "Beta Node", "Gamma Node"}
 
@@ -143,11 +143,11 @@ async def test_tui_shows_node_titles(tmp_vault, tmp_db, tmp_path):
         await pilot.press("q")
 
 
-async def test_tui_quit_on_q(tmp_vault, tmp_db, tmp_path):
+async def test_tui_quit_on_q(vault_with_nodes, indexed_db, tmp_path):
     """Pressing 'q' must exit the application."""
     TUI = _load_tui_class()
     db_path = str(tmp_path / "test.db")
-    app = _make_app(TUI, vault=str(tmp_vault), db_path=db_path)
+    app = _make_app(TUI, vault=str(vault_with_nodes), db_path=db_path)
 
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -160,12 +160,12 @@ async def test_tui_quit_on_q(tmp_vault, tmp_db, tmp_path):
     )
 
 
-async def test_tui_search_mode_on_slash(tmp_vault, tmp_db, tmp_path):
+async def test_tui_search_mode_on_slash(vault_with_nodes, indexed_db, tmp_path):
     """Pressing '/' must activate a search input widget (visible or focused)."""
     pytest.importorskip("textual", reason="textual not installed — skipping TUI tests")
     TUI = _load_tui_class()
     db_path = str(tmp_path / "test.db")
-    app = _make_app(TUI, vault=str(tmp_vault), db_path=db_path)
+    app = _make_app(TUI, vault=str(vault_with_nodes), db_path=db_path)
 
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -189,14 +189,14 @@ async def test_tui_search_mode_on_slash(tmp_vault, tmp_db, tmp_path):
         await pilot.press("q")
 
 
-async def test_tui_node_count_matches_db(tmp_vault, tmp_db, tmp_path):
+async def test_tui_node_count_matches_db(vault_with_nodes, indexed_db, tmp_path):
     """The node list must contain exactly as many items as there are nodes in the db."""
     TUI = _load_tui_class()
     db_path = str(tmp_path / "test.db")
-    app = _make_app(TUI, vault=str(tmp_vault), db_path=db_path)
+    app = _make_app(TUI, vault=str(vault_with_nodes), db_path=db_path)
 
     # The db fixture indexed 3 nodes (alpha, beta, gamma).
-    expected_count = len(tmp_db.list_nodes())
+    expected_count = len(indexed_db.list_nodes())
     assert expected_count == 3, f"Precondition: expected 3 nodes in db, got {expected_count}"
 
     async with app.run_test() as pilot:
@@ -227,7 +227,7 @@ async def test_tui_node_count_matches_db(tmp_vault, tmp_db, tmp_path):
         await pilot.press("q")
 
 
-async def test_delete_requires_confirmation(tmp_vault, tmp_db, tmp_path):
+async def test_delete_requires_confirmation(vault_with_nodes, indexed_db, tmp_path):
     """Pressing 'd' ONCE must not delete the selected node — confirmation required.
 
     The keybinding spec: 'd' = Delete selected node (+ confirm). A single
@@ -236,9 +236,9 @@ async def test_delete_requires_confirmation(tmp_vault, tmp_db, tmp_path):
     """
     TUI = _load_tui_class()
     db_path = str(tmp_path / "test.db")
-    app = _make_app(TUI, vault=str(tmp_vault), db_path=db_path)
+    app = _make_app(TUI, vault=str(vault_with_nodes), db_path=db_path)
 
-    count_before = len(tmp_db.list_nodes())
+    count_before = len(indexed_db.list_nodes())
     assert count_before == 3, f"Precondition: expected 3 nodes in db, got {count_before}"
 
     async with app.run_test() as pilot:
@@ -248,7 +248,7 @@ async def test_delete_requires_confirmation(tmp_vault, tmp_db, tmp_path):
         await pilot.press("d")
         await pilot.pause()
 
-        count_after = len(tmp_db.list_nodes())
+        count_after = len(indexed_db.list_nodes())
         assert count_after == count_before, (
             f"A single 'd' keypress deleted a node ({count_before} → {count_after}).\n"
             "Delete must require confirmation: push a confirmation ModalScreen "
@@ -261,18 +261,18 @@ async def test_delete_requires_confirmation(tmp_vault, tmp_db, tmp_path):
         await pilot.press("q")
 
     # The vault files must also be untouched.
-    md_files = list(tmp_vault.glob("*.md"))
+    md_files = list(vault_with_nodes.glob("*.md"))
     assert len(md_files) == 3, (
         f"A single 'd' keypress removed a vault file (expected 3 .md files, "
         f"found {len(md_files)}). Never touch the filesystem before the user confirms."
     )
 
 
-async def test_help_overlay(tmp_vault, tmp_db, tmp_path):
+async def test_help_overlay(vault_with_nodes, indexed_db, tmp_path):
     """Pressing '?' must show the keybinding cheatsheet — a pushed screen or new content."""
     TUI = _load_tui_class()
     db_path = str(tmp_path / "test.db")
-    app = _make_app(TUI, vault=str(tmp_vault), db_path=db_path)
+    app = _make_app(TUI, vault=str(vault_with_nodes), db_path=db_path)
 
     async with app.run_test() as pilot:
         await pilot.pause()

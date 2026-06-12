@@ -13,12 +13,17 @@ to call ``drain()``.
 from __future__ import annotations
 
 import logging
+import sqlite3
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .indexer import scan_vault
 from .models import Node
 from .parser import parse_node_file, write_node_file
 from .sync_queue import mark_processed, pending_sync_jobs
+
+if TYPE_CHECKING:  # pragma: no cover — import only for type checkers
+    from .db import GraphDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +37,12 @@ class SyncWorker:
         processed = worker.drain(db, vault=Path("./vault"), limit=50)
     """
 
-    def drain(self, db, vault: Path, limit: int = 50) -> int:
+    def drain(
+        self,
+        db: GraphDatabase | sqlite3.Connection,
+        vault: Path,
+        limit: int = 50,
+    ) -> int:
         """Process up to *limit* pending sync jobs from the queue.
 
         For each job (a node rename recorded by ``enqueue_title_sync``)

@@ -40,17 +40,20 @@ import re
 import sys
 from pathlib import Path
 
+# Shared scripts/ conventions (sibling module — scripts run as
+# `python scripts/x.py`): REPO_ROOT, the phase-identifier convention with its
+# 1A/1B split handling, and the "## Heading section" Markdown walker
+# (adversarial-analysis-v5 #6).
+from _common import REPO_ROOT, iter_md_section, normalize_phase
+
 # ── Per-phase expected-node manifests — parsed at runtime from the docs ──────
 # Single source of truth: each phase doc's "## Vault Nodes to Create" table
 # (docs/learning/phase-*.md). The first backticked token in each table row is
 # the node title. Parsed once per run and cached (adversarial-analysis-v4 #11:
 # the previously embedded manifests were stale at the moment they shipped).
 
-LEARNING_DOCS_DIR = (
-    Path(__file__).resolve().parent.parent / "docs" / "learning"
-)
+LEARNING_DOCS_DIR = REPO_ROOT / "docs" / "learning"
 VAULT_NODES_HEADING_RE = re.compile(r"^##\s+Vault Nodes to Create\s*$")
-SECTION_HEADING_RE = re.compile(r"^##\s")
 TABLE_ROW_TITLE_RE = re.compile(r"^\s*\|\s*`([^`]+)`")
 DOC_PHASE_RE = re.compile(r"^phase-(\d{2})([ab]?)-")
 
@@ -89,19 +92,11 @@ def load_phase_manifests() -> tuple[dict[str, list[str]], list[str]]:
         lines = doc.read_text(encoding="utf-8").splitlines()
 
         titles: list[str] = []
-        heading_found = False
-        in_section = False
-        for line in lines:
-            if VAULT_NODES_HEADING_RE.match(line):
-                heading_found = True
-                in_section = True
-                continue
-            if in_section and SECTION_HEADING_RE.match(line):
-                break
-            if in_section:
-                row = TABLE_ROW_TITLE_RE.match(line)
-                if row:  # header/separator rows carry no backticked cell
-                    titles.append(row.group(1))
+        for _lineno, line in iter_md_section(lines, VAULT_NODES_HEADING_RE):
+            row = TABLE_ROW_TITLE_RE.match(line)
+            if row:  # header/separator rows carry no backticked cell
+                titles.append(row.group(1))
+        heading_found = any(VAULT_NODES_HEADING_RE.match(ln) for ln in lines)
 
         if not heading_found:
             errors.append(
@@ -127,21 +122,9 @@ CODE_BLOCK_RE = re.compile(r"```.*?```", flags=re.DOTALL)
 VOCAB_ROW_RE = re.compile(r"^\|\s*`([A-Z]{2}-\d{3})`\s*\|\s*`([a-z_]+)`", re.MULTILINE)
 
 
-def normalize_phase(raw: str) -> str:
-    """'01a' → '1a', '00' → '0', '2' → '2'. Returns lowercase, no leading zeros."""
-    p = raw.strip().lower()
-    m = re.fullmatch(r"0*(\d+)([ab]?)", p)
-    if not m:
-        return p
-    return m.group(1) + m.group(2)
-
-
 def load_vocabulary() -> dict[str, str]:
     """Return {relation_name: relation_id} from relation-vocabulary.md, or {} if missing."""
-    vocab_path = (
-        Path(__file__).resolve().parent.parent
-        / "docs" / "foundations" / "relation-vocabulary.md"
-    )
+    vocab_path = REPO_ROOT / "docs" / "foundations" / "relation-vocabulary.md"
     if not vocab_path.is_file():
         return {}
     text = vocab_path.read_text(encoding="utf-8")
@@ -340,8 +323,9 @@ def validate_vault(
     # ── 4. Per-phase expected nodes (parsed live from the phase doc tables) ──
     if phase is not None:
         manifests, manifest_errors = load_phase_manifests()
-        key = normalize_phase(phase)
-        keys = ["1a", "1b"] if key == "1" else [key]
+        # '1' expands to ['1a', '1b'] (split-phase table in _common); every
+        # other phase checks exactly its own manifest.
+        keys = normalize_phase(phase, expand_split=True)
         if any(k not in manifests for k in keys):
             print(
                 f"Error: no usable node manifest for phase '{phase}'.",

@@ -23,7 +23,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover — import only for type checkers
-    from akanga_core.db import GraphDatabase
+    from akanga_core.db import GraphDatabase, NodeRecord
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -65,13 +65,20 @@ class EgoEdge:
 class EgoGraph:
     """The subgraph centred on a single root node.
 
+    Nodes are `db.NodeRecord` instances — the DB's six-field read model
+    (id/path/title/type/tags/content_hash), NOT `models.Node`: the graph
+    is built from index rows, so there is no `.content` here. The import
+    lives under `TYPE_CHECKING` (annotation-only; db.py is not needed at
+    runtime in this module).
+
     Attributes:
-        root:  The root Node object.
-        nodes: UUID → Node mapping for every node in the subgraph (including root).
+        root:  The root NodeRecord.
+        nodes: UUID → NodeRecord mapping for every node in the subgraph
+               (including root).
         edges: All EgoEdge objects in the subgraph.
     """
-    root: object                  # Node (typed loosely to avoid import cycle)
-    nodes: dict[str, object]      # {node_id: Node}
+    root: NodeRecord
+    nodes: dict[str, NodeRecord]
     edges: list[EgoEdge]
 
 
@@ -117,7 +124,7 @@ def build_ego_graph(
     if root is None:
         raise ValueError(f"Node {root_id!r} not found")
 
-    ego_nodes: dict[str, object] = {root_id: root}
+    ego_nodes: dict[str, NodeRecord] = {root_id: root}
     ego_edges: list[EgoEdge] = []
     seen_edges: set[tuple[str, str, str]] = set()
     visited: set[str] = {root_id}

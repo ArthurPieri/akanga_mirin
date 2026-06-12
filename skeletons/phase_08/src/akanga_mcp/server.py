@@ -115,8 +115,10 @@ def search_nodes(query: str) -> list[dict]:
     HOW:
     1. db = _get_db()
     2. nodes = db.search_fts(query, limit=10)
-    3. Return list of dicts using attribute access (db.search_fts returns Node-like
-       objects — SimpleNamespace or dataclass — not plain dicts):
+    3. Return list of dicts using attribute access. DB read methods return
+       a small record object — attribute access like n.title, NOT a dict
+       (the reference solution names it NodeRecord); it has no .content or
+       .frontmatter fields, so build response dicts explicitly:
        [{"id": str(n.id), "title": n.title, "type": n.type}
         for n in nodes]
 
@@ -141,12 +143,15 @@ def get_node(node_id: str) -> dict | None:
     1. db = _get_db()
     2. node = db.get_node(node_id)
     3. If node is None: return None
-    4. Return node as dict (db.get_node already returns a dict in most
-       implementations — verify and serialize if it returns a dataclass)
+    4. Build the dict explicitly from the returned record object
+       (attribute access, not a dict — see the search_nodes note):
+           return {"id": str(node.id), "title": node.title,
+                   "type": node.type, "tags": node.tags,
+                   "path": str(node.path)}
     """
     raise NotImplementedError(
         "db.get_node(node_id). Return None if not found. "
-        "Serialize to dict if db returns a dataclass."
+        "Build the response dict explicitly from the record's attributes."
     )
 
 

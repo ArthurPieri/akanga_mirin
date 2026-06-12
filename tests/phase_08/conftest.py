@@ -159,9 +159,11 @@ def tmp_vault_with_nodes(tmp_path: Path):
             "content_hash": f"hash_{nid[:8]}",
         })
 
-    # Wire up the edges — upsert_edge is positional:
-    # (source_id, target_id, relation, relation_id), ids from the registry
-    # in docs/foundations/relation-vocabulary.md
+    # Wire up the edges — upsert_edge signature: upsert_edge(source_id,
+    # target_id=None, relation=None, relation_id=None); keyword calls are
+    # equally fine (phase 3's fixture uses keywords), positional is used here
+    # for brevity. relation_id values come from the registry in
+    # docs/foundations/relation-vocabulary.md
     db.upsert_edge(_ID_COGNITION, _ID_ATTENTION, "supports",      "EP-001")
     db.upsert_edge(_ID_COGNITION, _ID_MEMORY,    "is_related_to", "CC-007")
     db.upsert_edge(_ID_COGNITION, _ID_LEARNING,  "enables",       "CT-002")

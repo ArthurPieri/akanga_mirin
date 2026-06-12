@@ -31,9 +31,12 @@ import json
 import logging
 import sqlite3
 import threading
-import types
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
+
+if TYPE_CHECKING:  # pragma: no cover — import only for type checkers
+    from .models import Node
 
 logger = logging.getLogger(__name__)
 
@@ -80,15 +83,41 @@ CREATE TABLE IF NOT EXISTS sync_queue (
 _NODE_FIELDS = ("id", "path", "title", "type", "tags", "content_hash")
 
 
-def _row_to_node(row: sqlite3.Row) -> types.SimpleNamespace:
-    """Convert a `nodes` row to an attribute-access object with tags decoded.
+@dataclass(frozen=True, slots=True)
+class NodeRecord:
+    """The DB's READ MODEL: one hydrated `nodes` row, exactly six fields.
+
+    Deliberately NOT `models.Node`. `Node` is the PARSE model — it carries
+    `content` and `frontmatter`, which the DB never stores (the index holds
+    metadata only; prose lives in the `.md` files). Returning a `Node` with
+    a silently empty `content` would be a lie: `db_node.content` would look
+    valid and be wrong. An honest six-field record makes the gap explicit —
+    `record.content` raises `AttributeError`, and callers that need the body
+    must go back to disk (`parse_node_file`). One vocabulary for the seam:
+    write path takes a Node (or dict), read path returns a NodeRecord.
+
+    Frozen because a row snapshot is not a live view: mutating it would
+    change nothing in the DB. To change a node, edit the file and re-index
+    (or `upsert_node`). `tags` is already JSON-decoded to a list.
+    """
+
+    id: str
+    path: str
+    title: str
+    type: str
+    tags: list[str]
+    content_hash: str
+
+
+def _row_to_node(row: sqlite3.Row) -> NodeRecord:
+    """Hydrate a `nodes` row into a `NodeRecord` with tags decoded.
 
     Downstream callers (Phase 6 server, Phase 8 RAG) use attribute access
     (`node.id`, `node.title`), so a plain dict is not acceptable here.
     """
-    node = types.SimpleNamespace(**dict(row))
-    node.tags = json.loads(node.tags)
-    return node
+    data = dict(row)
+    data["tags"] = json.loads(data["tags"])
+    return NodeRecord(**data)
 
 
 class GraphDatabase:
@@ -137,11 +166,13 @@ class GraphDatabase:
     # Node operations
     # ------------------------------------------------------------------
 
-    def upsert_node(self, node: Any) -> None:
+    def upsert_node(self, node: Node | NodeRecord | dict[str, Any]) -> None:
         """Insert or replace a node row, keeping the FTS5 index in sync.
 
         Idempotent: upserting the same node twice leaves exactly one row.
-        Accepts a Node dataclass or a plain dict.
+        Accepts anything carrying the six `_NODE_FIELDS`: a parsed
+        `models.Node`, a `NodeRecord` round-tripped from a read, or a
+        plain dict (Phase 3 fixtures use dicts).
 
         FTS5 external-content maintenance must happen in the SAME locked
         transaction as the upsert: the 'delete' command needs the OLD
@@ -241,7 +272,7 @@ class GraphDatabase:
             self.conn.execute("DELETE FROM edges WHERE source_id = ?", (node_id,))
             self.conn.execute("DELETE FROM edges WHERE target_id = ?", (node_id,))
 
-    def get_node(self, node_id: str) -> Any | None:
+    def get_node(self, node_id: str) -> NodeRecord | None:
         """Fetch one node by UUID; return None (never raise) when missing."""
         with self._lock:
             row = self.conn.execute(
@@ -249,7 +280,7 @@ class GraphDatabase:
             ).fetchone()
         return None if row is None else _row_to_node(row)
 
-    def get_node_by_path(self, path: str) -> Any | None:
+    def get_node_by_path(self, path: str) -> NodeRecord | None:
         """Fetch one node by its stored path; return None when missing.
 
         The indexer's idempotence fast-path: hash the file, look the row
@@ -264,7 +295,7 @@ class GraphDatabase:
             ).fetchone()
         return None if row is None else _row_to_node(row)
 
-    def list_nodes(self, limit: int = 100, offset: int = 0) -> list[Any]:
+    def list_nodes(self, limit: int = 100, offset: int = 0) -> list[NodeRecord]:
         """Return a paginated list of all nodes (insertion-rowid order)."""
         with self._lock:
             rows = self.conn.execute(
@@ -272,7 +303,7 @@ class GraphDatabase:
             ).fetchall()
         return [_row_to_node(row) for row in rows]
 
-    def search_fts(self, query: str, limit: int = 20) -> list[Any]:
+    def search_fts(self, query: str, limit: int = 20) -> list[NodeRecord]:
         """Full-text search over title + tags via FTS5 MATCH.
 
         SEC-06: each whitespace-separated term is wrapped in FTS5 `"..."`
@@ -383,7 +414,7 @@ class GraphDatabase:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def get_neighbors(self, node_id: str) -> list[Any]:
+    def get_neighbors(self, node_id: str) -> list[NodeRecord]:
         """Return the nodes that `node_id` has outgoing edges pointing TO."""
         with self._lock:
             rows = self.conn.execute(
@@ -394,7 +425,7 @@ class GraphDatabase:
             ).fetchall()
         return [_row_to_node(row) for row in rows]
 
-    def get_backlinks(self, node_id: str) -> list[Any]:
+    def get_backlinks(self, node_id: str) -> list[NodeRecord]:
         """Return the nodes that have outgoing edges pointing TO `node_id`."""
         with self._lock:
             rows = self.conn.execute(
@@ -405,7 +436,7 @@ class GraphDatabase:
             ).fetchall()
         return [_row_to_node(row) for row in rows]
 
-    def get_edges_from(self, node_id: str) -> list[Any]:
+    def get_edges_from(self, node_id: str) -> list[tuple[NodeRecord, str, str]]:
         """Outgoing edges as `(target_node, relation, relation_id)` tuples.
 
         Unlike `get_neighbors`, the relation label and registry id travel
@@ -424,7 +455,7 @@ class GraphDatabase:
             ).fetchall()
         return [self._row_to_edge_tuple(row) for row in rows]
 
-    def get_edges_to(self, node_id: str) -> list[Any]:
+    def get_edges_to(self, node_id: str) -> list[tuple[NodeRecord, str, str]]:
         """Incoming edges as `(source_node, relation, relation_id)` tuples.
 
         The returned node is the edge's SOURCE; the edge's natural
@@ -443,7 +474,7 @@ class GraphDatabase:
         return [self._row_to_edge_tuple(row) for row in rows]
 
     @staticmethod
-    def _row_to_edge_tuple(row: sqlite3.Row) -> tuple[Any, str, str]:
+    def _row_to_edge_tuple(row: sqlite3.Row) -> tuple[NodeRecord, str, str]:
         """Split a joined nodes+edges row into `(node, relation, relation_id)`.
 
         The node is built from the `nodes.*` columns only; NULL relation
@@ -452,6 +483,6 @@ class GraphDatabase:
         data = dict(row)
         relation = data.pop("relation", None) or ""
         relation_id = data.pop("relation_id", None) or ""
-        node = types.SimpleNamespace(**{k: data[k] for k in _NODE_FIELDS})
-        node.tags = json.loads(node.tags)
-        return (node, relation, relation_id)
+        fields = {k: data[k] for k in _NODE_FIELDS}
+        fields["tags"] = json.loads(fields["tags"])
+        return (NodeRecord(**fields), relation, relation_id)
