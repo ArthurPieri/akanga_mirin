@@ -41,11 +41,34 @@ from .models import Edge, Node
 # A plain wikilink [[Target]] has no pipe and therefore never matches.
 _INLINE_EDGE_RE = re.compile(r"\[\[([^\]|]+)\|([^\]]+)\]\]")
 
-# Matches fenced code blocks so example syntax inside ``` fences is ignored.
+# Matches fenced code blocks and inline code spans so example syntax inside
+# ``` fences or `backticks` is ignored.
 _FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
+_INLINE_CODE_RE = re.compile(r"`[^`]+`")
+
+# THE wikilink pipe grammar (single source). A pipe segment is a RELATION only
+# when it is slug-shaped after stripping; anything else (spaces, uppercase, a
+# leading digit, punctuation, an escaped `\|`) is an Obsidian-style display
+# alias and yields a plain wikilink, not a typed edge.
+RELATION_SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 
 # Characters allowed in a filename slug after lowercasing and hyphenating.
 _SLUG_STRIP_RE = re.compile(r"[^a-z0-9\-_]")
+
+
+def split_pipe_segment(segment: str) -> tuple[str, str]:
+    """Classify the text after a wikilink pipe: relation vs display alias.
+
+    Returns ``("relation", slug)`` when ``segment`` (after stripping) matches
+    ``^[a-z][a-z0-9_-]*$`` — a lowercase slug such as ``supports`` or
+    ``relates-to``. Otherwise returns ``("alias", text)``: spaces, uppercase, a
+    leading digit, or punctuation all mean an Obsidian-style display alias,
+    which is NOT a typed relation. Callers detect an escaped ``\\|`` first.
+    """
+    text = segment.strip()
+    if RELATION_SLUG_RE.match(text):
+        return ("relation", text)
+    return ("alias", text)
 
 
 # ---------------------------------------------------------------------------
@@ -147,21 +170,31 @@ def extract_inline_edges(body: str) -> list[Edge]:
     to frontmatter. This is step one of the write-back pipeline: extract
     here, then :func:`merge_edges` into frontmatter.
 
-    Two deliberate exclusions:
+    Three deliberate exclusions:
 
-    - Fenced code blocks are stripped first, so example syntax inside
-      triple-backtick fences is never mistaken for a real edge.
+    - Fenced code blocks and inline code spans are stripped first, so example
+      syntax inside ``` fences or `backticks` is never mistaken for a real edge.
     - Plain wikilinks (``[[Target]]`` with no pipe) carry no relation and
       therefore produce no edges.
+    - The pipe grammar (:func:`split_pipe_segment`) decides what counts: only a
+      slug-shaped segment is a relation. A display alias (``[[Note | My
+      Alias]]``) or an escaped pipe (``[[Note \\| text]]``) is NOT a typed edge —
+      it stays a plain wikilink.
 
     ``relation_id`` and ``target_id`` are left empty — resolving them is the
     resolver/sync-queue's job, not the extractor's.
     """
-    stripped = _FENCED_CODE_RE.sub("", body)
-    return [
-        Edge(relation=relation.strip(), relation_id="", target=target.strip(), target_id="")
-        for target, relation in _INLINE_EDGE_RE.findall(stripped)
-    ]
+    stripped = _INLINE_CODE_RE.sub("", _FENCED_CODE_RE.sub("", body))
+    edges: list[Edge] = []
+    for target, segment in _INLINE_EDGE_RE.findall(stripped):
+        if target.endswith("\\"):
+            continue  # escaped pipe → display alias, never a relation
+        kind, slug = split_pipe_segment(segment)
+        if kind == "relation":
+            edges.append(
+                Edge(relation=slug, relation_id="", target=target.strip(), target_id="")
+            )
+    return edges
 
 
 def merge_edges(existing: list[Edge], inline: list[Edge]) -> list[Edge]:

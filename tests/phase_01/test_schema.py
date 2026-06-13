@@ -343,3 +343,67 @@ def test_write_back_preserves_existing_edges(tmp_vault: Path):
     relations = {e["relation"] for e in raw_edges}
     assert "supports" in relations
     assert "contradicts" in relations
+
+
+# ---------------------------------------------------------------------------
+# Alias rule (N4) — only slug-shaped pipe segments are relations; single edge
+# ---------------------------------------------------------------------------
+
+def test_alias_with_spaces_is_not_inline_edge():
+    """`[[Note | My Display Alias]]` is an Obsidian alias, not a typed edge."""
+    m = _load_module()
+    edges = m.extract_inline_edges("See [[Note | My Display Alias]] here.")
+    assert edges == [], f"a spaced/aliased segment must not mint a relation; got {edges!r}"
+
+
+def test_uppercase_segment_is_alias_not_edge():
+    """An uppercase pipe segment is a display alias, not a relation."""
+    m = _load_module()
+    assert m.extract_inline_edges("[[Note | Supports]]") == []
+
+
+def test_digit_first_segment_is_alias():
+    """A digit-first pipe segment is a display alias, not a relation."""
+    m = _load_module()
+    assert m.extract_inline_edges("[[Note | 2nd Draft]]") == []
+
+
+def test_escaped_pipe_never_a_relation():
+    r"""`[[Note \| supports]]` — an escaped pipe is always an alias, no edge."""
+    m = _load_module()
+    assert m.extract_inline_edges(r"[[Note \| supports]]") == []
+
+
+def test_spaced_canonical_syntax_still_typed():
+    """The curriculum's canonical spaced syntax still classifies as a relation."""
+    m = _load_module()
+    edges = m.extract_inline_edges("[[Blink — Gladwell | contradicts]]")
+    assert len(edges) == 1 and edges[0].relation == "contradicts", (
+        f"slug-shaped relations after a space must still type the edge; got {edges!r}"
+    )
+
+
+def test_inline_code_is_ignored():
+    """`[[X | supports]]` inside an inline code span is never a real edge."""
+    m = _load_module()
+    assert m.extract_inline_edges("Example: `[[X | supports]]` in code.") == []
+
+
+@pytest.mark.parametrize(
+    "segment,expected",
+    [
+        ("supports", ("relation", "supports")),
+        ("relates-to", ("relation", "relates-to")),
+        ("is_applied_in", ("relation", "is_applied_in")),
+        ("  supports  ", ("relation", "supports")),
+        ("My Alias", ("alias", "My Alias")),
+        ("Supports", ("alias", "Supports")),
+        ("2nd", ("alias", "2nd")),
+        ("a b c", ("alias", "a b c")),
+        ("", ("alias", "")),
+    ],
+)
+def test_split_pipe_segment_table(segment, expected):
+    """The pipe grammar: slug-shaped → relation, everything else → alias."""
+    m = _load_module()
+    assert m.split_pipe_segment(segment) == expected

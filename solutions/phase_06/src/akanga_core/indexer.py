@@ -45,7 +45,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from .links import extract_wikilinks, resolve_wikilink
-from .parser import content_hash, parse_node_file, write_back, write_node_file
+from .parser import _fm_get, content_hash, parse_node_file, write_back, write_node_file
 
 if TYPE_CHECKING:  # pragma: no cover — import only for type checkers
     from .db import GraphDatabase
@@ -202,25 +202,27 @@ def _reindex_edges(parsed: Node | Any, db: GraphDatabase) -> None:
                 parsed.id,
             )
 
-    # Frontmatter `edges:` entries → typed edges. A stored target_id
-    # wins; otherwise the display-cache title is resolved like a wikilink.
+    # Frontmatter `edges:` entries → typed edges. A stored target_id wins;
+    # otherwise the display-cache title is resolved like a wikilink. Keys are
+    # read tolerantly (underscore OR hyphen, N11) via `_fm_get`.
     for raw in parsed.frontmatter.get("edges") or []:
         if not isinstance(raw, dict):
             continue
-        target_id = raw.get("target_id") or resolve_wikilink(raw.get("target", ""), db)
+        target_title = _fm_get(raw, "target")
+        target_id = _fm_get(raw, "target_id") or resolve_wikilink(target_title, db)
         if target_id and target_id != parsed.id:
             db.upsert_edge(
                 parsed.id,
                 target_id,
-                raw.get("relation") or "",
-                raw.get("relation_id") or "",
+                _fm_get(raw, "relation"),
+                _fm_get(raw, "relation_id"),
             )
         elif not target_id:
             logger.warning(
                 "Unresolvable edge target %r (relation %r) in node %s — "
                 "entry kept in file, no edge created",
-                raw.get("target", ""),
-                raw.get("relation", ""),
+                target_title,
+                _fm_get(raw, "relation"),
                 parsed.id,
             )
 

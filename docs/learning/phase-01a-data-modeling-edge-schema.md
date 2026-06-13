@@ -2,6 +2,16 @@
 
 **Estimated time: 2–3h + ~1h vault/reflect**
 
+!!! warning "Changed 2026-06 (noteapp-alignment round)"
+    The pipe grammar changed: a pipe segment is a relation only when it matches
+    `^[a-z][a-z0-9_-]*$` (after strip) — spaces, uppercase, digit-first, or an escaped `\|`
+    now mean an Obsidian-style display alias, which yields a plain wikilink instead. The
+    grammar lives in one new public helper, `split_pipe_segment`, and a typed link now
+    produces exactly ONE edge (the typed one). Seven new tests in `tests/phase_01/test_schema.py`.
+    If you finished this phase before the change: run `make skeleton PHASE=1` — the merge
+    appends the new `split_pipe_segment` stub into your `parser.py` without modifying your
+    code — then implement the classification and update `extract_inline_edges` to use it.
+
 **Core concept:** Deciding how to represent a *connection* between two nodes as plain
 text. Phase 0 gave you a file with metadata and a body. Phase 1A asks: what does a
 typed edge look like inside a file? What happens when a user writes connections
@@ -121,30 +131,45 @@ The canonical frontmatter edge block:
 ```yaml
 edges:
   - relation: contradicts
-    relation-id: EP-002
+    relation_id: EP-002
     target: Blink — Malcolm Gladwell
-    target-id: d4e1f9cc-5678-1234-efab-012345678901
+    target_id: d4e1f9cc-5678-1234-efab-012345678901
   - relation: supports
-    relation-id: EP-001
+    relation_id: EP-001
     target: Kahneman System 1 and System 2
-    target-id: b2c3d4e5-abcd-ef01-2345-678901234567
+    target_id: b2c3d4e5-abcd-ef01-2345-678901234567
 ```
+
+Underscore keys are canonical — they match the `Edge` dataclass fields below.
+Hyphenated spellings (`relation-id:`/`target-id:`) found in hand-authored or
+Obsidian-exported vaults are tolerated on read (the parser accepts both) and
+normalized to underscores on the next write-back: **read both, write underscores.**
 
 The dual-key pattern applies to both fields:
 - `relation` — human-readable display cache; may be stale after a relation rename
-- `relation-id` — stable ID from the vocabulary (`EP-002`, `CT-005`, etc.); never changes
+- `relation_id` — stable ID from the vocabulary (`EP-002`, `CT-005`, etc.); never changes
 - `target` — human-readable title; may be stale after the target node is renamed
-- `target-id` — UUID of the target node; stable forever; empty string if unresolved
+- `target_id` — UUID of the target node; stable forever; empty string if unresolved
 
-For custom relation types not in the built-in vocabulary, `relation-id` is a UUID
+For custom relation types not in the built-in vocabulary, `relation_id` is a UUID
 generated at first use. Built-in IDs use the category-prefix format (`EP-001`…`TC-004`)
 — see `docs/foundations/relation-vocabulary.md` for the full table.
 
 **Inline shorthand in prose:** `[[Target Title | relation]]`
 
-On write-back, this becomes an entry in the `edges:` block. `target-id` is resolved
+On write-back, this becomes an entry in the `edges:` block. `target_id` is resolved
 by looking up the title in the DB index — left empty if the target node does not exist
 yet (dangling reference, resolved on next sync after the target is created).
+
+**Not every pipe is a relation.** Akanga shares the `[[Title | text]]` syntax with
+Obsidian, where the pipe means a display *alias*. The grammar that settles the overload
+(`split_pipe_segment`): a segment is a **relation** only when it is slug-shaped —
+`^[a-z][a-z0-9_-]*$` after stripping (e.g. `supports`, `relates-to`). Anything with
+spaces, uppercase, a leading digit, or an escaped pipe (`[[Note \| text]]`) is an
+Obsidian-style **display alias** and yields a plain wikilink, never a typed edge. The
+canonical spaced form `[[Target Title | relation]]` still works — the segment is
+stripped before classification. One consequence: a typed link produces exactly **one**
+edge (the typed one), not a typed edge plus a redundant untyped wikilink.
 
 ---
 
@@ -177,14 +202,15 @@ class Edge:
 
 The dual-key pattern applies to both the relation and the target: `relation` and
 `target` are human-readable display caches; `relation_id` and `target_id` are the
-stable machine keys. The relation registry (in `akanga.yaml` or `vocabulary.yaml`)
+stable machine keys. The relation registry (`docs/foundations/relation-vocabulary.md`)
 maps IDs to names, descriptions, and flags (symmetric, inverse pair).
 
 **New functions in `parser.py`:**
 
 | Function | What it does |
 |---|---|
-| `extract_inline_edges(body) → list[Edge]` | Regex scan for `[[Target \| relation]]`; skips code blocks |
+| `extract_inline_edges(body) → list[Edge]` | Scan for `[[Target \| relation]]`; skips code blocks and inline code; only slug-shaped segments are relations |
+| `split_pipe_segment(segment) → tuple[str, str]` | Classify a pipe segment: `("relation", slug)` when it matches `^[a-z][a-z0-9_-]*$` after strip, else `("alias", text)` |
 | `merge_edges(existing, inline) → list[Edge]` | Deduplicate: add inline edges not already in existing |
 | `write_back(path)` | parse → extract inline → merge → write atomically if changed |
 
@@ -197,13 +223,17 @@ edge does not override a resolved `target_id` in frontmatter.
 ## Deliverable
 
 The snippets below are illustrative — the shipped suite is
-`tests/phase_01/test_schema.py` (15 tests; the names differ):
+`tests/phase_01/test_schema.py` (the names differ):
 `test_extract_inline_edges_basic` / `_multiple` / `_ignores_code_blocks` /
 `_ignores_regular_wikilinks` / `_empty_body`, `test_merge_edges_deduplicates` /
 `_adds_new` / `_empty_inputs` / `_conflicting_target_id_keeps_existing`,
 `test_merge_is_not_order_sensitive`, `test_edge_dataclass_fields`,
 `test_write_back_moves_inline_to_frontmatter` / `_idempotent` /
-`_preserves_existing_edges` / `_malformed_edges_yaml_raises`.
+`_preserves_existing_edges` / `_malformed_edges_yaml_raises`, plus the alias-rule
+tests (2026-06): `test_alias_with_spaces_is_not_inline_edge`,
+`test_uppercase_segment_is_alias_not_edge`, `test_digit_first_segment_is_alias`,
+`test_escaped_pipe_never_a_relation`, `test_spaced_canonical_syntax_still_typed`,
+`test_inline_code_is_ignored`, `test_split_pipe_segment_table`.
 
 The illustrative sketches:
 
