@@ -455,3 +455,233 @@ def test_delete_nonexistent_node(test_client):
     assert resp.status_code == 404, (
         f"Expected 404 when deleting a non-existent node, got {resp.status_code}"
     )
+
+
+# ---------------------------------------------------------------------------
+# File-first manual edges (N1) — the API must persist edges to the source
+# node's frontmatter and stay rebuildable from the files (Phase 2 doctrine).
+# ---------------------------------------------------------------------------
+
+def _read_fm(path):
+    """Return (frontmatter_dict, body) for a node file written by the server."""
+    import yaml
+
+    text = path.read_text(encoding="utf-8")
+    assert text.startswith("---"), f"not a frontmatter file: {path}"
+    _, fm_block, body = text.split("---", 2)
+    return (yaml.safe_load(fm_block) or {}), body
+
+
+def _edges_of(client, node_id):
+    resp = client.get(f"/api/v1/nodes/{node_id}/edges")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    return body.get("edges", body) if isinstance(body, dict) else body
+
+
+def test_post_edge_writes_frontmatter_entry(test_client, tmp_vault):
+    """POST /edges must write a typed entry into the SOURCE node's frontmatter."""
+    node_a = _create_node(test_client, title="FM Source")
+    node_b = _create_node(test_client, title="FM Target")
+    resp = test_client.post(
+        "/api/v1/edges",
+        json={"source_id": _node_id(node_a), "target_id": _node_id(node_b), "relation": "supports"},
+    )
+    assert resp.status_code == 201, resp.text
+
+    fm, _body = _read_fm(tmp_vault / "fm-source.md")
+    entries = fm.get("edges") or []
+    assert any(
+        e.get("relation") == "supports" and e.get("target_id") == _node_id(node_b)
+        for e in entries
+    ), f"frontmatter edges must carry the manual edge; got: {entries!r}"
+
+
+def test_post_self_edge_returns_400(test_client):
+    """A self-edge is rejected with 400."""
+    node_a = _create_node(test_client, title="Self Edge Node")
+    resp = test_client.post(
+        "/api/v1/edges",
+        json={"source_id": _node_id(node_a), "target_id": _node_id(node_a), "relation": "supports"},
+    )
+    assert resp.status_code == 400, resp.text
+
+
+def test_post_reserved_relation_returns_400(test_client):
+    """A manual edge using the reserved `wikilink` relation is rejected with 400."""
+    node_a = _create_node(test_client, title="Reserved Source")
+    node_b = _create_node(test_client, title="Reserved Target")
+    resp = test_client.post(
+        "/api/v1/edges",
+        json={"source_id": _node_id(node_a), "target_id": _node_id(node_b), "relation": "wikilink"},
+    )
+    assert resp.status_code == 400, resp.text
+
+
+def test_post_duplicate_edge_returns_409(test_client):
+    """POSTing the same (source, target, relation) twice returns 409."""
+    node_a = _create_node(test_client, title="Dup Source")
+    node_b = _create_node(test_client, title="Dup Target")
+    payload = {"source_id": _node_id(node_a), "target_id": _node_id(node_b), "relation": "supports"}
+    assert test_client.post("/api/v1/edges", json=payload).status_code == 201
+    assert test_client.post("/api/v1/edges", json=payload).status_code == 409
+
+
+def test_reindex_after_post_does_not_duplicate(test_client):
+    """A second POST re-indexes the source; the first edge stays a single row."""
+    node_a = _create_node(test_client, title="Reindex Source")
+    node_b = _create_node(test_client, title="Reindex Target B")
+    node_c = _create_node(test_client, title="Reindex Target C")
+    test_client.post(
+        "/api/v1/edges",
+        json={"source_id": _node_id(node_a), "target_id": _node_id(node_b), "relation": "supports"},
+    )
+    # This POST re-derives ALL of A's edges from frontmatter; A->B must not double.
+    test_client.post(
+        "/api/v1/edges",
+        json={"source_id": _node_id(node_a), "target_id": _node_id(node_c), "relation": "supports"},
+    )
+    edges = _edges_of(test_client, _node_id(node_a))
+    ab = [e for e in edges if e.get("target_id") == _node_id(node_b) and e.get("relation") == "supports"]
+    assert len(ab) == 1, f"A->B must be exactly one row after reindex; got {ab!r}"
+
+
+def test_delete_edge_removes_frontmatter_entry(test_client, tmp_vault):
+    """DELETE /edges removes the frontmatter entry (not just the DB row)."""
+    node_a = _create_node(test_client, title="Del Source")
+    node_b = _create_node(test_client, title="Del Target")
+    edge = test_client.post(
+        "/api/v1/edges",
+        json={"source_id": _node_id(node_a), "target_id": _node_id(node_b), "relation": "supports"},
+    ).json()
+
+    assert test_client.delete(f"/api/v1/edges/{edge['id']}").status_code == 204
+    fm, _body = _read_fm(tmp_vault / "del-source.md")
+    entries = fm.get("edges") or []
+    assert not any(e.get("relation") == "supports" for e in entries), (
+        f"the deleted edge's frontmatter entry must be gone; got {entries!r}"
+    )
+
+
+def test_manual_edge_survives_db_rebuild(tmp_path):
+    """The doctrine test: a manual edge survives `rm *.db && rescan`."""
+    from starlette.testclient import TestClient
+
+    from tests.phase_06.conftest import _load_create_app
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    db_path = tmp_path / "rebuild.db"
+    create_app = _load_create_app()
+
+    with TestClient(create_app(vault=str(vault), db_path=str(db_path))) as client:
+        a = client.post("/api/v1/nodes", json={"path": "a.md", "title": "Rebuild A"}).json()
+        b = client.post("/api/v1/nodes", json={"path": "b.md", "title": "Rebuild B"}).json()
+        assert client.post(
+            "/api/v1/edges",
+            json={"source_id": a["id"], "target_id": b["id"], "relation": "supports"},
+        ).status_code == 201
+
+    # Nuke the derived index entirely.
+    for suffix in ("", "-wal", "-shm"):
+        p = tmp_path / f"rebuild.db{suffix}"
+        if p.exists():
+            p.unlink()
+
+    with TestClient(create_app(vault=str(vault), db_path=str(db_path))) as client:
+        edges = _edges_of(client, a["id"])
+        ab = [e for e in edges if e.get("target_id") == b["id"] and e.get("relation") == "supports"]
+        assert len(ab) == 1, (
+            f"manual edge must rebuild from the file exactly once after rm *.db; got {ab!r}"
+        )
+
+
+def test_delete_folded_typed_edge_stays_dead(tmp_path):
+    """Deleting a FOLDED typed edge must remove it for good — no resurrection.
+
+    A typed inline `[[Target | relation]]` folds to a frontmatter entry with
+    target_id="". DELETE must remove the entry AND de-type the shorthand, so a
+    full rebuild cannot re-fold it. A plain wikilink edge legitimately remains.
+    """
+    import uuid
+
+    from starlette.testclient import TestClient
+
+    from tests.phase_06.conftest import _load_create_app
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    db_path = tmp_path / "folded.db"
+    (vault / "b-target.md").write_text(
+        "---\nid: %s\ntitle: Target Note\ntype: note\ntags: []\n---\n\nbody\n" % uuid.uuid4(),
+        encoding="utf-8",
+    )
+    (vault / "a-source.md").write_text(
+        "---\nid: %s\ntitle: Source Note\ntype: note\ntags: []\n---\n\n"
+        "Links to [[Target Note | supports]] in prose.\n" % uuid.uuid4(),
+        encoding="utf-8",
+    )
+    create_app = _load_create_app()
+
+    with TestClient(create_app(vault=str(vault), db_path=str(db_path))) as client:
+        nodes = client.get("/api/v1/nodes").json()
+        a_id = next(n["id"] for n in nodes if n["title"] == "Source Note")
+        b_id = next(n["id"] for n in nodes if n["title"] == "Target Note")
+        edges = _edges_of(client, a_id)
+        supports = [e for e in edges if e.get("relation") == "supports"]
+        assert len(supports) == 1, f"lifespan must fold the typed inline edge; got {edges!r}"
+        assert client.delete(f"/api/v1/edges/{supports[0]['id']}").status_code == 204
+
+    # Rebuild from the files: the de-typed body must NOT re-fold a supports edge.
+    for suffix in ("", "-wal", "-shm"):
+        p = tmp_path / f"folded.db{suffix}"
+        if p.exists():
+            p.unlink()
+    with TestClient(create_app(vault=str(vault), db_path=str(db_path))) as client:
+        edges = _edges_of(client, a_id)
+        assert not any(e.get("relation") == "supports" for e in edges), (
+            f"a deleted folded edge must not resurrect on rebuild; got {edges!r}"
+        )
+        # The prose reference survives as a plain wikilink edge — that's expected.
+        assert any(
+            e.get("relation") == "wikilink" and e.get("target_id") == b_id for e in edges
+        ), f"de-typed [[Target Note]] should re-derive an untyped wikilink edge; got {edges!r}"
+
+    fm, body = _read_fm(vault / "a-source.md")
+    assert not (fm.get("edges") or []), f"frontmatter edge entry must be gone; got {fm.get('edges')!r}"
+    assert "[[Target Note]]" in body and "[[Target Note | supports]]" not in body, (
+        f"body must be de-typed to a plain wikilink; got: {body!r}"
+    )
+
+
+def test_post_duplicate_of_folded_edge_returns_409(tmp_path):
+    """POSTing an edge that already exists as a FOLDED entry (target_id='') → 409."""
+    import uuid
+
+    from starlette.testclient import TestClient
+
+    from tests.phase_06.conftest import _load_create_app
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "b-target.md").write_text(
+        "---\nid: %s\ntitle: Target Note\ntype: note\ntags: []\n---\n\nbody\n" % uuid.uuid4(),
+        encoding="utf-8",
+    )
+    (vault / "a-source.md").write_text(
+        "---\nid: %s\ntitle: Source Note\ntype: note\ntags: []\n---\n\n"
+        "Links to [[Target Note | supports]] in prose.\n" % uuid.uuid4(),
+        encoding="utf-8",
+    )
+    create_app = _load_create_app()
+    with TestClient(create_app(vault=str(vault), db_path=str(tmp_path / "dup.db"))) as client:
+        nodes = client.get("/api/v1/nodes").json()
+        a_id = next(n["id"] for n in nodes if n["title"] == "Source Note")
+        b_id = next(n["id"] for n in nodes if n["title"] == "Target Note")
+        resp = client.post(
+            "/api/v1/edges",
+            json={"source_id": a_id, "target_id": b_id, "relation": "supports"},
+        )
+        assert resp.status_code == 409, (
+            f"a folded edge (target_id='') must be detected as a duplicate; got {resp.status_code}"
+        )

@@ -385,6 +385,22 @@ class GraphDatabase:
             cursor = self.conn.execute("DELETE FROM edges WHERE id = ?", (edge_id,))
         return cursor.rowcount > 0
 
+    def get_edge(self, edge_id: str) -> dict[str, Any] | None:
+        """Fetch one edge row by UUID as a dict; return None when missing.
+
+        The Phase 6 delete-edge route needs the edge's `relation` and
+        `target_id` to locate and remove the matching frontmatter `edges:`
+        entry — this is the sanctioned read so the route never hand-writes
+        SQL against `db.conn` (exemplar honesty).
+        """
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT id, source_id, target_id, relation, relation_id "
+                "FROM edges WHERE id = ?",
+                (edge_id,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
     def delete_edges_from(self, node_id: str) -> int:
         """Delete every OUTGOING edge of `node_id`; return how many died.
 

@@ -2,6 +2,17 @@
 
 **Estimated time:** 3–4 hours + ~1h vault/reflect
 
+!!! warning "Changed 2026-06 (noteapp-alignment round)"
+    Manual edge endpoints became file-first: `POST /api/v1/edges` now writes an `edges:`
+    entry into the source note's frontmatter and reindexes (DELETE removes the entry), with
+    new guards — 400 for self-edges, the reserved `wikilink` relation, or missing endpoints;
+    409 for duplicates. New tests in `tests/phase_06/test_server.py`, including one that
+    deletes the DB and asserts the edge survives. If you finished this phase before the
+    change: rework `create_edge`/`delete_edge` per the rewritten WHAT/WHY/HOW in
+    `skeletons/phase_06/src/akanga_core/server.py` (re-running `make skeleton PHASE=6`
+    cannot update docstrings inside files you already own — open the skeleton file directly),
+    and add the small `get_edge` accessor to your `GraphDatabase`.
+
 **Core concept:** The TUI talks directly to `akanga_core` as a Python library — same
 process, no network. The REST API adds a second surface: an HTTP server that exposes
 everything the library can do over a network boundary. This enables external clients
@@ -177,8 +188,8 @@ GET    /api/v1/nodes/{id}/edges         all edges touching this node
 GET    /api/v1/nodes/{id}/neighbors     neighbor nodes (outgoing)
 GET    /api/v1/nodes/{id}/backlinks     nodes linking TO this node
 
-POST   /api/v1/edges                    create manual edge
-DELETE /api/v1/edges/{id}              delete edge
+POST   /api/v1/edges                    create manual edge (writes frontmatter edges: entry, then indexes)
+DELETE /api/v1/edges/{id}              delete edge (removes the frontmatter entry; de-types the prose)
 
 GET    /api/v1/templates                list available node templates
 ```
@@ -418,6 +429,8 @@ All three must return HTTP 400. SECURITY.md lists symlink escape as in-scope; th
 
 **Not handling the DELETE of a non-existent node:** If the file is already gone (e.g., manual deletion), the DELETE endpoint should still return 404, not 500.
 
+**DB-only manual edges violate Phase 2's "expendable DB" invariant.** The naive `POST /api/v1/edges` handler just calls `db.upsert_edge` and returns — the edge lives only in the index. But Phase 2 established that the DB is *derived*: `_reindex_edges` wipes a node's outgoing edges and rebuilds them from the file (`delete_edges_from` + re-derive) on the next index, and `rm *.db && scan` rebuilds the whole graph from the vault. A DB-only manual edge survives neither. The fix is *file-first*: write the edge into the **source node's frontmatter `edges:` block** (Phase 1A's source of truth) and then `index_file` the source, so the row is derived from the file like every other edge. `test_manual_edge_survives_db_rebuild` is the doctrine test — it deletes the `.db` and asserts the edge comes back. Two further wrinkles the suite pins: a typed inline `[[Target | relation]]` folds to a frontmatter entry with `target_id: ""`, so duplicate-detection and deletion must match by target title as well as id; and DELETE must *de-type the originating prose shorthand* (`[[Target | relation]]` → `[[Target]]`), or the next index re-folds the entry and the edge resurrects.
+
 ---
 
 ## Deliverable
@@ -435,6 +448,11 @@ Happy-path tests:
 - `test_list_nodes_search` — `?query=` returns only matching nodes (FTS5 or LIKE fallback)
 - `test_list_nodes_pagination` — `limit=2&offset=2` over 5 nodes returns exactly 2
 - `test_create_and_get_edge` — `POST /api/v1/edges` returns 201; the edge appears in `/edges`
+- `test_post_edge_writes_frontmatter_entry` — the edge is persisted to the source node's frontmatter `edges:` block
+- `test_manual_edge_survives_db_rebuild` — the doctrine test: delete the `.db`, rescan, the edge is still there
+- `test_reindex_after_post_does_not_duplicate` — re-indexing the source keeps each manual edge a single row
+- `test_post_self_edge_returns_400` / `test_post_reserved_relation_returns_400` / `test_post_duplicate_edge_returns_409` — the guards
+- `test_delete_edge_removes_frontmatter_entry` / `test_delete_folded_typed_edge_stays_dead` / `test_post_duplicate_of_folded_edge_returns_409` — delete removes the entry and de-types the prose; folded edges (`target_id: ""`) are matched by title
 - `test_get_neighbors` / `test_get_backlinks` — A→B traversal in both directions
 - `test_list_templates` — `GET /api/v1/templates` returns a non-empty list of template names
 
