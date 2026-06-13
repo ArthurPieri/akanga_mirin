@@ -1,6 +1,17 @@
 site_name: "Akanga Mirin — Learning Path"
 site_description: "Build a personal knowledge graph in 10 phases"
 
+strict: true
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    anchors: warn
+    unrecognized_links: warn
+
 # Contributor-facing planning docs are kept in docs/ for the repo but excluded
 # from the published site (mkdocs >= 1.5 gitignore-style globs).
 # deployment.md stays public deliberately.
@@ -8,6 +19,7 @@ exclude_docs: |
   README.md
   adversarial-analysis*.md
   analysis-and-enhancements.md
+  noteapp-alignment-audit.md
   implementation-plan.md
   plan-*.md
   user-stories.md
@@ -45,6 +57,8 @@ nav:
   - Architecture:
     - "Overview": architecture-overview.md
     - "Detailed Reference": architecture-detailed.md
+  - Operations:
+    - "Deployment": deployment.md
   - Foundations:
     - "Asyncio Primer": foundations/asyncio-primer.md
     - "Design Patterns": foundations/design-patterns.md

@@ -66,9 +66,10 @@ Round 5 remediation is **COMPLETE** — all 9 findings of
 running handoff log with per-finding status and adopted decisions (W1–W9) is
 `docs/status-remediation.md`.
 
-No round is currently in progress — `make status` and
-`docs/status-remediation.md` are the live state. One deferred item with a
-trigger: `check_doc_contracts.run_checks` extraction, revisit only if that
+**Noteapp-alignment round IN PROGRESS** — plan: `docs/plan-noteapp-alignment.md`;
+findings: `docs/noteapp-alignment-audit.md` + `docs/adversarial-analysis-v6.md`;
+running log: the N-series section of `docs/status-remediation.md`. One deferred item
+with a trigger: `check_doc_contracts.run_checks` extraction, revisit only if that
 file grows.
 
 ---
