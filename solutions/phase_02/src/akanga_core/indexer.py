@@ -28,10 +28,13 @@ no ids would never converge.
 
 Two-pass design, changed files only: edges reference target nodes by
 UUID, so every node must be in the `nodes` table BEFORE any edge can be
-resolved — pass 1 upserts the changed nodes, pass 2 re-derives edges
-for exactly those nodes. Known limit: a wikilink in an UNCHANGED file
-that only now became resolvable stays unresolved until that file next
-changes; `rm *.db && scan` re-resolves everything (expendable DB).
+resolved — pass 1 upserts the changed nodes, pass 2 re-derives edges for
+exactly those nodes. Rederive-all trigger: when a scan ADDS or REMOVES
+any file, link resolution can change for unchanged sources too (a
+wikilink whose target only now exists, or just vanished), so pass 2
+re-derives EVERY node's edges instead of only the changed ones. The
+per-file path (`index_file`, the watcher's path) still re-derives only
+the changed node and defers cross-file resolution to the next full scan.
 """
 from __future__ import annotations
 
@@ -112,21 +115,27 @@ def _persist_minted_id(node: Node | Any, path: str) -> bool:
     return True
 
 
-def _index_node(path: str, db: GraphDatabase, vault_path: str) -> tuple[Any, Any | None]:
-    """Index one file's NODE row; return `(node, parsed_or_None)`.
+def _index_node(
+    path: str, db: GraphDatabase, vault_path: str
+) -> tuple[Any, Any | None, bool]:
+    """Index one file's NODE row; return `(node, parsed_or_None, is_new)`.
 
     `parsed` is None when nothing was written: either the content hash
     matched (unchanged file) or a duplicate-id conflict was refused.
     When `parsed` is a Node the caller still owes the edge re-derive
     (`_reindex_edges`) — kept separate so `full_scan_and_index` can
     defer edges until every changed node exists (the two-pass rule).
+
+    `is_new` is True only when this path had NO row before — the signal
+    `full_scan_and_index` uses to fire the rederive-all trigger (a new
+    file can resolve wikilinks in unchanged files).
     """
     rel_path = _vault_relative(path, vault_path)
     file_hash = content_hash(path)  # ONE read; no parse on the fast path
 
     existing = db.get_node_by_path(rel_path)
     if existing is not None and existing.content_hash == file_hash:
-        return existing, None  # unchanged — zero parses, zero writes
+        return existing, None, False  # unchanged — zero parses, zero writes
 
     # CHANGED file: fold inline `[[Target | relation]]` captures into the
     # frontmatter `edges:` block BEFORE parsing. `write_back` is atomic
@@ -161,12 +170,12 @@ def _index_node(path: str, db: GraphDatabase, vault_path: str) -> tuple[Any, Any
                 current.path,
                 rel_path,
             )
-            return current, None
+            return current, None, False
 
     node.path = rel_path
     node.content_hash = file_hash
     db.upsert_node(node)
-    return node, node
+    return node, node, existing is None
 
 
 def _reindex_edges(parsed: Node | Any, db: GraphDatabase) -> None:
@@ -179,11 +188,19 @@ def _reindex_edges(parsed: Node | Any, db: GraphDatabase) -> None:
     """
     db.delete_edges_from(parsed.id)
 
-    # Wikilinks in the body → untyped "wikilink" edges.
+    # Wikilinks in the body → untyped "wikilink" edges. An unresolved
+    # wikilink never silently evaporates — it logs a warning (N3).
     for title in extract_wikilinks(parsed.content or ""):
         target_id = resolve_wikilink(title, db)
         if target_id is not None and target_id != parsed.id:
             db.upsert_edge(parsed.id, target_id, relation="wikilink")
+        elif target_id is None:
+            logger.warning(
+                "Unresolved wikilink [[%s]] in node %s — no edge created "
+                "(target not indexed)",
+                title,
+                parsed.id,
+            )
 
     # Frontmatter `edges:` entries → typed edges. A stored target_id
     # wins; otherwise the display-cache title is resolved like a wikilink.
@@ -197,6 +214,14 @@ def _reindex_edges(parsed: Node | Any, db: GraphDatabase) -> None:
                 target_id,
                 raw.get("relation") or "",
                 raw.get("relation_id") or "",
+            )
+        elif not target_id:
+            logger.warning(
+                "Unresolvable edge target %r (relation %r) in node %s — "
+                "entry kept in file, no edge created",
+                raw.get("target", ""),
+                raw.get("relation", ""),
+                parsed.id,
             )
 
 
@@ -223,7 +248,7 @@ def index_file(path: str, db: GraphDatabase, vault_path: str) -> Node | Any:
     Exceptions (missing file, malformed YAML) propagate to the caller —
     `full_scan_and_index` logs and counts them.
     """
-    node, parsed = _index_node(path, db, vault_path)
+    node, parsed, _is_new = _index_node(path, db, vault_path)
     if parsed is not None:
         _reindex_edges(parsed, db)
     return node
@@ -245,14 +270,16 @@ def full_scan_and_index(vault_path: str, db: GraphDatabase) -> int:
     """
     count = 0
     errors = 0
+    new_files = False
     changed: list[Any] = []
 
     # ---- Pass 1: nodes (changed files only) ----------------------------
     for path in scan_vault(vault_path):
         try:
-            _, parsed = _index_node(path, db, vault_path)
+            _, parsed, is_new = _index_node(path, db, vault_path)
             if parsed is not None:
                 changed.append(parsed)
+            new_files = new_files or is_new
             count += 1
         except Exception:  # noqa: BLE001 — one bad file must not abort the scan
             logger.warning("Failed to index %s", path, exc_info=True)
@@ -264,16 +291,34 @@ def full_scan_and_index(vault_path: str, db: GraphDatabase) -> int:
     # A node whose file is gone leaves the index entirely — row, FTS
     # entry, and edges in BOTH directions via delete_node. Otherwise
     # deleted notes haunt search results and RAG context forever.
+    removed = 0
     for node in db.list_nodes(limit=10_000):
         if not os.path.exists(_node_disk_path(node.path, vault_path)):
             logger.info("Tombstone: %s (%s) no longer on disk — removing", node.path, node.id)
             db.delete_node(node.id)
+            removed += 1
 
-    # ---- Pass 2: edges for changed nodes (registry is now complete) -----
-    for parsed in changed:
-        try:
-            _reindex_edges(parsed, db)
-        except Exception:  # noqa: BLE001 — one bad node must not abort the scan
-            logger.warning("Edge re-derive failed for node %s", parsed.id, exc_info=True)
+    # ---- Pass 2: edges (registry is now complete) -----------------------
+    # Rederive-all trigger: adding or removing any file can change link
+    # resolution for UNCHANGED sources, so re-derive every node's edges.
+    # Otherwise the changed-only path is enough and far cheaper.
+    rederive_all = new_files or removed > 0
+    if rederive_all:
+        by_id = {p.id: p for p in changed}
+        for node in db.list_nodes(limit=10_000):
+            try:
+                parsed = by_id.get(node.id)
+                if parsed is None:
+                    parsed = parse_node_file(_node_disk_path(node.path, vault_path))
+                    parsed.id = node.id  # the stored id is canonical
+                _reindex_edges(parsed, db)
+            except Exception:  # noqa: BLE001 — one bad node must not abort the scan
+                logger.warning("Edge re-derive failed for node %s", node.id, exc_info=True)
+    else:
+        for parsed in changed:
+            try:
+                _reindex_edges(parsed, db)
+            except Exception:  # noqa: BLE001 — one bad node must not abort the scan
+                logger.warning("Edge re-derive failed for node %s", parsed.id, exc_info=True)
 
     return count

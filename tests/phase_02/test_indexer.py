@@ -626,3 +626,98 @@ def test_inline_typed_edge_folds_on_index(db_path: str, vault_dir: Path):
         "and re-folds the file forever, and the scan;scan no-op contract "
         "breaks."
     )
+
+
+# ---------------------------------------------------------------------------
+# Rederive-all trigger (N2) and unresolved-link warnings (N3)
+# ---------------------------------------------------------------------------
+
+def test_new_file_resolves_links_in_unchanged_files(db_path: str, vault_dir: Path):
+    """Adding a file re-derives edges for UNCHANGED sources (rederive-all trigger)."""
+    full_scan_and_index = _indexer_mod.full_scan_and_index
+    db = GraphDatabase(db_path)
+    a_id = "aaaa1001-0000-0000-0000-000000000001"
+    b_id = "aaaa1002-0000-0000-0000-000000000002"
+
+    _write_md(vault_dir, "a.md", a_id, "Alpha", body="See [[Beta]].")
+    full_scan_and_index(str(vault_dir), db)
+    assert db.get_edges_from(a_id) == [], "Beta does not exist yet → no edge"
+
+    # Add Beta and rescan WITHOUT touching a.md — its hash is unchanged.
+    _write_md(vault_dir, "b-beta.md", b_id, "Beta")
+    full_scan_and_index(str(vault_dir), db)
+
+    titles = [n.title for (n, _rel, _rid) in db.get_edges_from(a_id)]
+    assert "Beta" in titles, (
+        "adding Beta must fire the rederive-all trigger so [[Beta]] in the "
+        f"unchanged a.md resolves; got edges to {titles!r}"
+    )
+
+
+def test_rederive_all_not_triggered_on_pure_rescan(db_path: str, vault_dir: Path):
+    """A second scan over an unchanged vault is a no-op — node counts stay stable."""
+    full_scan_and_index = _indexer_mod.full_scan_and_index
+    db = GraphDatabase(db_path)
+    _write_md(vault_dir, "x.md", "aaaa2001-0000-0000-0000-000000000001", "Xeno")
+    _write_md(vault_dir, "y.md", "aaaa2002-0000-0000-0000-000000000002", "Yota")
+
+    full_scan_and_index(str(vault_dir), db)
+    n1 = len(db.list_nodes(limit=100))
+    full_scan_and_index(str(vault_dir), db)
+    n2 = len(db.list_nodes(limit=100))
+    assert n1 == n2 == 2, f"pure rescan must be a no-op; counts {n1} then {n2}"
+
+
+def test_unresolved_wikilink_logs_warning(db_path: str, vault_dir: Path, caplog):
+    """An unresolved wikilink warns (never silently evaporates) and creates no edge (N3)."""
+    import logging
+
+    full_scan_and_index = _indexer_mod.full_scan_and_index
+    db = GraphDatabase(db_path)
+    a_id = "aaaa3001-0000-0000-0000-000000000001"
+    _write_md(vault_dir, "a.md", a_id, "Alpha", body="Link to [[Ghost Note]].")
+
+    with caplog.at_level(logging.WARNING):
+        full_scan_and_index(str(vault_dir), db)
+
+    assert "Ghost Note" in caplog.text, (
+        f"an unresolved wikilink must log a warning naming the target; got {caplog.text!r}"
+    )
+    assert db.get_edges_from(a_id) == [], "no edge for an unresolved wikilink"
+
+
+def test_unresolvable_fm_edge_logs_warning_and_stays_in_file(db_path: str, vault_dir: Path, caplog):
+    """An unresolvable frontmatter edge warns, keeps no DB row, but stays in the file (N3)."""
+    import logging
+    from textwrap import dedent
+
+    full_scan_and_index = _indexer_mod.full_scan_and_index
+    db = GraphDatabase(db_path)
+    a_id = "aaaa4001-0000-0000-0000-000000000001"
+    content = dedent(f"""\
+        ---
+        id: {a_id}
+        title: Alpha
+        type: note
+        tags: []
+        edges:
+          - relation: supports
+            relation_id: ''
+            target: Nonexistent Target
+            target_id: ''
+        ---
+
+        body
+        """)
+    (vault_dir / "a.md").write_text(content, encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        full_scan_and_index(str(vault_dir), db)
+
+    assert "Nonexistent Target" in caplog.text, (
+        f"an unresolvable frontmatter edge must warn; got {caplog.text!r}"
+    )
+    assert db.get_edges_from(a_id) == [], "no DB edge for an unresolvable target"
+    assert "Nonexistent Target" in (vault_dir / "a.md").read_text(encoding="utf-8"), (
+        "the frontmatter entry must stay in the file (never deleted) — it may resolve later"
+    )

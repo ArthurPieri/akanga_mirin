@@ -10,11 +10,14 @@ two halves of that pipeline live here:
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover — import only for type checkers
     from .db import GraphDatabase
+
+logger = logging.getLogger(__name__)
 
 # `[[Title]]` — the capture stops at `|`, so the `[[Target | relation]]`
 # inline-edge shorthand yields only the bare target title, never the raw
@@ -41,14 +44,28 @@ def extract_wikilinks(content: str) -> list[str]:
 def resolve_wikilink(title: str, db: GraphDatabase) -> str | None:
     """Look up a node by title (case-insensitive) and return its UUID string.
 
-    Returns None when no node matches, letting the indexer silently skip
-    unresolvable wikilinks instead of aborting the scan. If multiple
-    nodes share a title, the first match wins — disambiguation is out of
-    scope for Phase 02. The title is bound as a `?` parameter, never
-    interpolated into the SQL string.
+    Returns None when no node matches, letting the indexer skip-and-warn on
+    unresolvable wikilinks instead of aborting the scan. Duplicate titles
+    resolve DETERMINISTICALLY: matches are ordered by vault path (`path` is
+    NOT NULL UNIQUE — a total order) and the first wins, with a warning that
+    names every shadowed duplicate. Path order is stable across `rm *.db`
+    rebuilds, unlike insertion order (N10). The title is bound as a `?`
+    parameter, never interpolated into the SQL string.
     """
     with db._lock:
-        row = db.conn.execute(
-            "SELECT id FROM nodes WHERE lower(title) = lower(?)", (title,)
-        ).fetchone()
-    return None if row is None else row["id"]
+        rows = db.conn.execute(
+            "SELECT id, path FROM nodes WHERE lower(title) = lower(?) ORDER BY path ASC",
+            (title,),
+        ).fetchall()
+    if not rows:
+        return None
+    if len(rows) > 1:
+        logger.warning(
+            "Duplicate title %r: resolving to %s (%s) — first in vault path order; "
+            "shadowed: %s",
+            title,
+            rows[0]["id"],
+            rows[0]["path"],
+            ", ".join(f"{r['id']} ({r['path']})" for r in rows[1:]),
+        )
+    return rows[0]["id"]

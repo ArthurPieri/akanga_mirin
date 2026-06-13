@@ -145,3 +145,34 @@ def test_resolve_wikilink_not_found(db_path: str, vault_dir: Path):
 
     result = resolve_wikilink("Nonexistent Node Title That Cannot Match", db)
     assert result is None
+
+
+def test_duplicate_title_resolves_deterministically(db_path: str, vault_dir: Path, caplog):
+    """Duplicate titles resolve by vault path order (N10), not insertion order — with a warning."""
+    import logging
+
+    resolve_wikilink = _links_mod.resolve_wikilink
+    Node = _parser_mod.Node
+
+    db = GraphDatabase(db_path)
+    # Insert "b-second.md" FIRST so insertion order != path order: if resolution
+    # used rowid/insertion order it would return this one; path order must not.
+    db.upsert_node(Node(
+        id="aaaa5001-0000-0000-0000-000000000001", path="b-second.md",
+        title="Shared Title", type="note", tags=[], content_hash="h1",
+    ))
+    db.upsert_node(Node(
+        id="aaaa5002-0000-0000-0000-000000000002", path="a-first.md",
+        title="Shared Title", type="note", tags=[], content_hash="h2",
+    ))
+
+    with caplog.at_level(logging.WARNING):
+        result = resolve_wikilink("Shared Title", db)
+
+    assert result == "aaaa5002-0000-0000-0000-000000000002", (
+        "duplicate titles must resolve to the node first in vault PATH order "
+        "(a-first.md), deterministically across rebuilds — not by insertion order"
+    )
+    assert "Duplicate title" in caplog.text, (
+        f"resolving an ambiguous title must warn and name the shadowed node; got {caplog.text!r}"
+    )
