@@ -76,10 +76,13 @@ class EgoGraph:
         nodes: UUID → NodeRecord mapping for every node in the subgraph
                (including root).
         edges: All EgoEdge objects in the subgraph.
+        truncated: True if a node budget (`limit`) stopped the traversal before
+               it reached its natural depth boundary — the answer is partial.
     """
     root: NodeRecord
     nodes: dict[str, NodeRecord]
     edges: list[EgoEdge]
+    truncated: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +94,7 @@ def build_ego_graph(
     root_id: str,
     db: GraphDatabase,
     max_depth: int = 2,
+    limit: int | None = None,
 ) -> EgoGraph:
     """WHAT: Build the subgraph centred on `root_id` using breadth-first search.
 
@@ -98,6 +102,20 @@ def build_ego_graph(
     The visited set is checked AT ENQUEUE TIME — the moment a neighbour is
     first seen — so each node enters the queue exactly once even in cyclic
     graphs (cycles are legal data in Akanga: A supports B, B supports A).
+
+    The node budget (`limit`): depth alone does not bound size — a depth-2 ego
+    graph around a hub note can still reach into the hundreds (see the Supernode
+    section of `docs/foundations/graph-theory-basics.md`). `limit` caps the
+    total node count (root included). When admitting a NEW neighbour would push
+    `len(nodes)` past `limit`, that neighbour is not added to `nodes` or the
+    queue and its edge is NOT recorded — so the invariant "every edge's two
+    endpoints are in `nodes`" still holds — and `truncated` is set True on the
+    first such drop. A budget is an API contract, so the caller must be TOLD
+    when it bit (a silent partial answer is a lie): read `EgoGraph.truncated`.
+    `limit=None` is the unbounded default; `limit < 1` is a ValueError. Note
+    that edges between two nodes both sitting AT `max_depth` are never
+    enumerated regardless of `limit` — a property of depth-bounded BFS (neither
+    endpoint is expanded), independent of the budget.
 
     HOW (the three load-bearing decisions):
 
@@ -120,6 +138,9 @@ def build_ego_graph(
     Raises:
         ValueError: if `root_id` does not exist in the database.
     """
+    if limit is not None and limit < 1:
+        raise ValueError(f"limit must be >= 1 (the root always counts), got {limit!r}")
+
     root = db.get_node(root_id)
     if root is None:
         raise ValueError(f"Node {root_id!r} not found")
@@ -129,6 +150,24 @@ def build_ego_graph(
     seen_edges: set[tuple[str, str, str]] = set()
     visited: set[str] = {root_id}
     queue: deque[tuple[str, int]] = deque([(root_id, 0)])
+    truncated = False
+
+    def _admit(node: NodeRecord, depth: int) -> bool:
+        """Add a newly-seen neighbour unless the node budget is full.
+
+        Returns True if the node is in `ego_nodes` afterwards (either just
+        added, or already present), so the caller may record its edge.
+        """
+        nonlocal truncated
+        if node.id in visited:
+            return True
+        if limit is not None and len(ego_nodes) >= limit:
+            truncated = True
+            return False  # budget full: drop the node AND its edge
+        visited.add(node.id)
+        ego_nodes[node.id] = node
+        queue.append((node.id, depth + 1))
+        return True
 
     def _record(source_id: str, target_id: str, relation: str, relation_id: str,
                 direction: EdgeDirection) -> None:
@@ -154,22 +193,16 @@ def build_ego_graph(
 
         # Outgoing: current → neighbour, already in natural direction.
         for node, relation, relation_id in db.get_edges_from(current_id):
-            if node.id not in visited:
-                visited.add(node.id)
-                ego_nodes[node.id] = node
-                queue.append((node.id, depth + 1))
-            _record(current_id, node.id, relation, relation_id, EdgeDirection.OUTGOING)
+            if _admit(node, depth):
+                _record(current_id, node.id, relation, relation_id, EdgeDirection.OUTGOING)
 
         # Incoming: neighbour → current. The OTHER node is the source —
         # natural direction is preserved, never swapped.
         for node, relation, relation_id in db.get_edges_to(current_id):
-            if node.id not in visited:
-                visited.add(node.id)
-                ego_nodes[node.id] = node
-                queue.append((node.id, depth + 1))
-            _record(node.id, current_id, relation, relation_id, EdgeDirection.INCOMING)
+            if _admit(node, depth):
+                _record(node.id, current_id, relation, relation_id, EdgeDirection.INCOMING)
 
-    return EgoGraph(root=root, nodes=ego_nodes, edges=ego_edges)
+    return EgoGraph(root=root, nodes=ego_nodes, edges=ego_edges, truncated=truncated)
 
 
 def render_ascii(ego: EgoGraph) -> str:

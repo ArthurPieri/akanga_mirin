@@ -56,10 +56,13 @@ class EgoGraph:
         root:  The root Node object.
         nodes: UUID → Node mapping for every node in the subgraph (including root).
         edges: All EgoEdge objects in the subgraph.
+        truncated: True if a node budget (`limit`) stopped the traversal early —
+                   the answer is partial. False for an unbounded build.
     """
     root: object                  # Node (typed loosely to avoid import cycle)
     nodes: dict[str, object]      # {node_id: Node}
     edges: list[EgoEdge]
+    truncated: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +74,7 @@ def build_ego_graph(
     root_id: str,
     db: "GraphDatabase",
     max_depth: int = 2,
+    limit: int | None = None,
 ) -> EgoGraph:
     """WHAT: Build the subgraph centred on `root_id` using breadth-first search (BFS).
 
@@ -78,7 +82,9 @@ def build_ego_graph(
     showing the entire vault graph (which would be overwhelming), it shows the
     local neighbourhood of a node — what it links to, what links to it, and
     optionally what *those* nodes link to. Depth 1 is "immediate neighbours";
-    depth 2 is "friends-of-friends".
+    depth 2 is "friends-of-friends". Depth alone does not bound size, though —
+    a hub note can reach hundreds at depth 2 — so `limit` is a hard node budget
+    (see the Node Budget concept in the phase doc).
 
     HOW:
     1. Fetch the root node: `root = db.get_node(root_id)`.
@@ -89,9 +95,16 @@ def build_ego_graph(
          seen_edges: set[tuple[str, str, str]] = set()   # (source_id, target_id, relation)
          visited: set[str] = {root_id}
          queue: deque = deque([(root_id, 0)])   # (node_id, current_depth)
+       Track `truncated = False`; the budget step (below) flips it.
     3. BFS loop — while queue is not empty:
          a. Dequeue `(current_id, depth)`.
          b. If `depth >= max_depth`, skip (do not expand further).
+         Node budget: validate `limit` up front (`limit < 1` → ValueError; the
+         root always counts). When you meet a NEW neighbour `n` (`n.id` not in
+         visited), only admit it if `limit is None or len(ego_nodes) < limit`;
+         otherwise set `truncated = True` and skip BOTH the node AND its edge
+         (so every recorded edge still has both endpoints in `ego_nodes`). A
+         neighbour already in `visited` is fine — record its edge as usual.
          c. Fetch outgoing edges WITH their relation labels:
               `for n, relation, relation_id in db.get_edges_from(current_id):`
               - If `n.id` not in visited:
@@ -117,7 +130,8 @@ def build_ego_graph(
        is in `seen_edges`, skip it, otherwise add it to `seen_edges` and
        append the EgoEdge. (Keying on relation too preserves two DIFFERENT
        relations between the same pair as two edges.)
-    5. Return `EgoGraph(root=root, nodes=ego_nodes, edges=ego_edges)`.
+    5. Return `EgoGraph(root=root, nodes=ego_nodes, edges=ego_edges,
+       truncated=truncated)` — the caller must be told when the budget bit.
 
     Relation field: `db.get_edges_from` / `db.get_edges_to` (Phase 2) return
     `(node, relation, relation_id)` tuples — pass both values through to the
@@ -130,8 +144,9 @@ def build_ego_graph(
         "3. At each node: db.get_edges_from (OUTGOING) + db.get_edges_to (INCOMING) — "
         "both yield (node, relation, relation_id); keep the natural direction. "
         "4. Add unvisited nodes to queue at depth+1; dedup edges by "
-        "(source_id, target_id, relation) before appending. "
-        "5. Return EgoGraph(root, nodes_dict, edges_list)."
+        "(source_id, target_id, relation) before appending. Honour `limit`: "
+        "drop a new neighbour AND its edge once len(nodes) would exceed it, and "
+        "set truncated=True. 5. Return EgoGraph(root, nodes, edges, truncated)."
     )
 
 

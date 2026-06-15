@@ -2,6 +2,15 @@
 
 **Estimated time:** 2–3 hours + ~1h vault/reflect
 
+!!! warning "Changed 2026-06 (noteapp-alignment round)"
+    `build_ego_graph` gained a node budget: a `limit` keyword (default `None` = the old
+    unbounded behavior) and an `EgoGraph.truncated` flag. Your existing implementation still
+    passes every pre-existing test, but the two NEW tests call `build_ego_graph(..., limit=3)`
+    and read `ego.truncated` — a previously green Phase 3 FAILS them (TypeError, then
+    AttributeError) until you add both. See the new "Node Budget (Supernode Guard)" concept
+    and the updated traversal block; `make skeleton PHASE=3` will print a signature-change
+    notice but cannot edit your file — the small addition is yours to make.
+
 **Core concept:** This is the phase where you actually write graph code. Every previous
 phase built the data — files, edges, DB rows. Phase 3 asks: given a node, what does
 its neighborhood look like? The answer requires implementing a real traversal
@@ -96,6 +105,29 @@ neighbors of neighbors; and so on.
 
 > Akanga node: `Ego-Graph`
 
+### Node Budget (Supernode Guard)
+
+Depth alone does not bound an ego-graph's size. Hub notes are inevitable — a daily
+index, a broad topic like "Systems Thinking" — and a depth-2 ego graph around one can
+reach ~170 nodes at 1k-note scale (Phase 8 measures this). That is too many to render,
+and on a large vault it is a real cost. The **node budget** is a `limit` keyword on
+`build_ego_graph`: a hard ceiling on how many nodes the result may contain (root
+included). When admitting a new neighbour would exceed the budget, that neighbour and
+its edge are left out — so the invariant *every edge's endpoints are in `nodes`* still
+holds.
+
+The budget is an **API contract**, which means the caller must be told when it bit: a
+silent partial answer is a lie. `EgoGraph.truncated` is `True` whenever the budget
+dropped at least one node, so a UI can show "showing 50 of many" instead of pretending
+it rendered the whole neighbourhood. `limit=None` (the default) is unbounded; `limit < 1`
+is a `ValueError` (the root always counts). This budget is distinct from the ASCII
+render ceiling below — one caps the *data*, the other caps what the *text view* can
+legibly draw.
+
+> Akanga node: `Node Budget`
+
+> → Foundation doc: `docs/foundations/graph-theory-basics.md` (Supernodes)
+
 ### Directed Edge Traversal
 
 In a directed graph, edges have a source and a target. When building an ego-graph, you
@@ -144,6 +176,7 @@ feature requiring a proper canvas.
 | `Ego-Graph` | note | `uses` → `BFS`; `is_applied_in` → `Akanga TUI`; `enables` → `Graph Navigation` |
 | `Directed Edge Traversal` | note | `qualifies` → `BFS`; `enables` → `Incoming and Outgoing Display` |
 | `Graph Density Ceiling` | note | `qualifies` → `ASCII Ego-Graph` |
+| `Node Budget` | note | `qualifies` → `Ego-Graph`; `mitigates` → `Graph Density Ceiling` |
 | `Canvas Renderer in v2` | note | `motivated_by` → `Graph Density Ceiling` |
 
 ---
@@ -174,6 +207,7 @@ class EgoGraph:
     root:  NodeRecord
     nodes: dict[str, NodeRecord]   # the DB read model — six fields, no content (includes root)
     edges: list[EgoEdge]
+    truncated: bool = False        # True if the node budget (limit) stopped the build early
 ```
 
 (No `depth` field — the requested depth is an argument to `build_ego_graph`, not part
@@ -182,7 +216,10 @@ of the result. The skeleton and tests agree on this shape.)
 **The traversal — written out explicitly, because this is the learning (`build_ego_graph`):**
 
 ```python
-def build_ego_graph(root_id: str, db: GraphDatabase, max_depth: int = 2) -> EgoGraph:
+def build_ego_graph(root_id: str, db: GraphDatabase, max_depth: int = 2,
+                    limit: int | None = None) -> EgoGraph:
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be >= 1 (the root always counts)")
     root = db.get_node(root_id)
     if root is None:
         raise ValueError(f"Node {root_id!r} not found")
@@ -192,6 +229,21 @@ def build_ego_graph(root_id: str, db: GraphDatabase, max_depth: int = 2) -> EgoG
     seen_edges = set()   # dedup key: (source_id, target_id, relation)
     visited    = {root_id}
     queue      = deque([(root_id, 0)])
+    truncated  = False
+
+    def _admit(node, depth):
+        # Add a newly-seen neighbour unless the node budget is full. Returns
+        # True if the node is in `nodes` afterwards, so its edge may be recorded.
+        nonlocal truncated
+        if node.id in visited:
+            return True
+        if limit is not None and len(nodes) >= limit:
+            truncated = True
+            return False     # budget full: drop the node AND its edge
+        visited.add(node.id)
+        nodes[node.id] = node
+        queue.append((node.id, depth + 1))
+        return True
 
     def _record(source_id, target_id, relation, relation_id, direction):
         key = (source_id, target_id, relation)
@@ -208,26 +260,18 @@ def build_ego_graph(root_id: str, db: GraphDatabase, max_depth: int = 2) -> EgoG
             continue   # include the node but don't expand further
 
         # Outgoing — get_edges_from returns (target_node, relation, relation_id)
-        # TUPLES (Phase 2 API): unpack them; the neighbour NodeRecord is the
-        # first element, so no extra get_node() lookup is needed.
+        # TUPLES (Phase 2 API): the neighbour NodeRecord is the first element.
         for node, relation, relation_id in db.get_edges_from(current_id):
-            if node.id not in visited:
-                visited.add(node.id)
-                nodes[node.id] = node
-                queue.append((node.id, depth + 1))
-            _record(current_id, node.id, relation, relation_id, EdgeDirection.OUTGOING)
+            if _admit(node, depth):
+                _record(current_id, node.id, relation, relation_id, EdgeDirection.OUTGOING)
 
         # Incoming — get_edges_to returns (source_node, relation, relation_id):
-        # the OTHER node is the edge's source. Natural direction is preserved;
-        # only the direction flag differs.
+        # the OTHER node is the edge's source. Natural direction is preserved.
         for node, relation, relation_id in db.get_edges_to(current_id):
-            if node.id not in visited:
-                visited.add(node.id)
-                nodes[node.id] = node
-                queue.append((node.id, depth + 1))
-            _record(node.id, current_id, relation, relation_id, EdgeDirection.INCOMING)
+            if _admit(node, depth):
+                _record(node.id, current_id, relation, relation_id, EdgeDirection.INCOMING)
 
-    return EgoGraph(root=root, nodes=nodes, edges=edges)
+    return EgoGraph(root=root, nodes=nodes, edges=edges, truncated=truncated)
 ```
 
 Edge deduplication is a **core deliverable**, not an advanced extra: when BFS visits
@@ -273,7 +317,7 @@ same serialization Phase 8 will use.
 
 ## Deliverable
 
-The complete test suite is in `tests/phase_03/test_graph.py` — 12 tests in three groups:
+The complete test suite is in `tests/phase_03/test_graph.py` — 14 tests in four groups:
 
 **Depth semantics (`TestBuildEgoGraphDepth`):**
 
@@ -296,12 +340,17 @@ The complete test suite is in `tests/phase_03/test_graph.py` — 12 tests in thr
 - `test_render_ascii_returns_string` — non-empty `str`, no crash
 - `test_render_ascii_contains_node_title` — the root's title appears in the output
 
+**Node budget (`TestEgoGraphNodeBudget`):**
+
+- `test_ego_graph_limit_truncates` — a root with 5 neighbours and `limit=3` yields exactly 3 nodes, `truncated=True`, and every edge's endpoints are kept nodes (asserts counts and the flag, never which neighbours survived)
+- `test_ego_graph_no_limit_not_truncated` — `limit=None` keeps every neighbour and leaves `truncated=False`
+
 All tests call `build_ego_graph(root_id, db, max_depth=N)` — the keyword is
 `max_depth`, matching the skeleton signature. The cycle tests are the most important:
 they prove the visited-set fix works and reflect a deliberate design choice (cycles
 permitted, traversal safe).
 
-Plus 8 vault nodes with typed edges.
+Plus 9 vault nodes with typed edges.
 
 ---
 

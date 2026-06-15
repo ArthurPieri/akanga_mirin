@@ -198,7 +198,7 @@ The following are stretch endpoints — not in the skeleton and not tested. Buil
 only after the core suite is green (see "Stretch deliverables" in the Deliverable section):
 
 ```
-GET    /api/v1/nodes/{id}/ego-graph     ego-graph data (depth param)
+GET    /api/v1/nodes/{id}/ego-graph     ego-graph data (?depth= · ?limit= — response carries "truncated": bool)
 GET    /api/v1/workspaces               list workspaces (from config)
 GET    /api/v1/relations                list relation vocabulary (from config)
 POST   /api/v1/sync/drain               trigger sync queue drain
