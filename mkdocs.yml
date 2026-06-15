@@ -64,6 +64,8 @@ nav:
     - "Design Patterns": foundations/design-patterns.md
     - "Direnv Basics": foundations/direnv-basics.md
     - "Git Basics": foundations/git-basics.md
+    - "Graph Algorithms Beyond BFS": foundations/graph-algorithms-beyond-bfs.md
+    - "Graph Theory Basics": foundations/graph-theory-basics.md
     - "HTTP Fundamentals": foundations/http-fundamentals.md
     - "JSON-RPC Basics": foundations/json-rpc-basics.md
     - "Makefile Basics": foundations/makefile-basics.md
