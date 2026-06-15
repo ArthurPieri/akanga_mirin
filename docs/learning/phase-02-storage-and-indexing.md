@@ -262,8 +262,11 @@ CREATE TABLE IF NOT EXISTS edges (
     target_id TEXT,
     relation TEXT,
     relation_id TEXT,
+    UNIQUE (source_id, target_id, relation),
     FOREIGN KEY (source_id) REFERENCES nodes(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_id);
+CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
     title,
     tags,

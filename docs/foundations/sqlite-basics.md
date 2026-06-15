@@ -167,31 +167,40 @@ concurrently. WAL lets HTTP reads proceed while the watcher indexes changed file
 SQLite's FTS5 extension adds full-text search capabilities. It maintains an inverted index over
 one or more text columns and supports fast keyword searches with the `MATCH` operator.
 
-### Creating an FTS5 virtual table
+### Creating an FTS5 virtual table (external content)
+
+This is the exact table Akanga builds in Phase 2:
 
 ```sql
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
-    id UNINDEXED,
     title,
-    content,
-    content='nodes',     -- shadow the 'nodes' table for triggers
+    tags,
+    content='nodes',
     content_rowid='rowid'
 );
 ```
 
-- `UNINDEXED` columns are stored but not tokenized (useful for IDs you want to retrieve but not
-  search).
-- `content='nodes'` tells FTS5 this is a "content table" — it reads the actual text from `nodes`
-  but maintains its own inverted index. You must keep it in sync manually (via triggers or
-  explicit inserts).
+- **Only `title` and `tags` are indexed — never the prose body.** Full-text-indexing
+  every note's body would bloat the index for little gain; searching note *bodies* is
+  ripgrep's job (a separate, content-addressed scan). FTS5 here is for the metadata you
+  query structurally.
+- **`content='nodes'` makes this an *external-content* table.** FTS5 does **not** store a
+  second copy of your text — it stores only the inverted index and reads the real columns
+  from `nodes` (matched by `content_rowid='rowid'`). That keeps the database small, but it
+  means FTS5 cannot see writes to `nodes` on its own: **keeping the two in sync is your
+  job**, and getting the sync wrong silently corrupts the index (see the `'delete'`-command
+  dance below).
 
 ### Searching with MATCH
 
+Because the index is external, a search joins back to `nodes` through the shared `rowid`:
+
 ```sql
-SELECT id, title
-FROM nodes_fts
-WHERE nodes_fts MATCH 'knowledge graph'
-ORDER BY rank;
+SELECT nodes.id, nodes.title
+FROM nodes
+JOIN nodes_fts ON nodes.rowid = nodes_fts.rowid
+WHERE nodes_fts MATCH ?
+ORDER BY nodes_fts.rank;
 ```
 
 `MATCH` supports:
@@ -200,24 +209,47 @@ ORDER BY rank;
 - Prefix queries: `MATCH 'pyth*'`
 - Boolean: `MATCH 'python AND sqlite'`
 
-The built-in `rank` column returns a relevance score (more negative = more relevant when sorted
-ascending, or use `ORDER BY rank` which SQLite sorts correctly).
+The built-in `rank` column returns a relevance score (more negative = more relevant when
+sorted ascending, so `ORDER BY nodes_fts.rank` puts the best matches first).
 
-### Keeping FTS5 in sync
+### Keeping external-content FTS5 in sync — the `'delete'`-command dance
 
-FTS5 does not automatically mirror changes to the base table. You must update it explicitly. The
-common pattern is to delete the old entry and insert the new one:
+An external-content table will not mirror changes to `nodes` automatically, and a plain
+`DELETE` against the index does not work — for an external-content table the *only*
+sanctioned way to retract a row's tokens is the special `'delete'` command, and it needs the **old**
+`title`/`tags` values to know which tokens to remove. The correct update is four steps inside
+**one locked transaction**:
 
 ```python
-cursor.execute("DELETE FROM nodes_fts WHERE id = ?", (node_id,))
-cursor.execute(
-    "INSERT INTO nodes_fts (id, title, content) VALUES (?, ?, ?)",
-    (node_id, title, body_text),
-)
+with self._lock, self._conn:                       # one atomic transaction
+    old = self._conn.execute(                       # 1. fetch the OLD row FIRST
+        "SELECT rowid, title, tags FROM nodes WHERE id = ?", (node_id,)
+    ).fetchone()
+
+    self._conn.execute("INSERT OR REPLACE INTO nodes ...", (...))   # 2. upsert the node
+
+    if old is not None:                             # 3. retract the OLD tokens
+        self._conn.execute(
+            "INSERT INTO nodes_fts(nodes_fts, rowid, title, tags) "
+            "VALUES('delete', ?, ?, ?)",
+            (old["rowid"], old["title"], old["tags"]),
+        )
+
+    new_rowid = self._conn.execute(                 # 4. index the NEW tokens
+        "SELECT rowid FROM nodes WHERE id = ?", (node_id,)
+    ).fetchone()["rowid"]
+    self._conn.execute(
+        "INSERT INTO nodes_fts(rowid, title, tags) VALUES(?, ?, ?)",
+        (new_rowid, title, tags),
+    )
 ```
 
-Akanga's `GraphDatabase` does this inside its `upsert_node` method so the FTS index always
-reflects the current vault state.
+Two traps this guards against: `INSERT OR REPLACE` on `nodes` destroys the old row and
+assigns a **new** rowid, so you must capture the old title/tags *before* the upsert — they
+are the tokens FTS5 still has indexed under the old rowid, and feeding the `'delete'` command
+the wrong values leaves stale tokens behind that corrupt every future search. Akanga runs
+exactly this dance inside `GraphDatabase.upsert_node` (and the symmetric retract-only form in
+`delete_node`); the Phase 2 skeleton walks through it line by line.
 
 ---
 
@@ -439,26 +471,36 @@ class GraphDatabase:
                 );
 
                 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
-                    id UNINDEXED,
                     title,
-                    content
+                    content='nodes',          -- external content: index only, text stays in nodes
+                    content_rowid='rowid'
                 );
             """)
             self._conn.commit()
 
     def upsert_node(self, id: str, title: str, type: str,
-                    file_path: str, content_hash: str, body: str) -> None:
+                    file_path: str, content_hash: str) -> None:
         with self._lock:
+            old = self._conn.execute(
+                "SELECT rowid, title FROM nodes WHERE id = ?", (id,)
+            ).fetchone()                          # capture OLD tokens BEFORE the upsert
             self._conn.execute(
                 """INSERT OR REPLACE INTO nodes (id, title, type, file_path, content_hash)
                    VALUES (?, ?, ?, ?, ?)""",
                 (id, title, type, file_path, content_hash),
             )
-            # Keep FTS in sync
-            self._conn.execute("DELETE FROM nodes_fts WHERE id = ?", (id,))
+            # External-content FTS5: retract the OLD tokens with the 'delete'
+            # command (a plain DELETE by id is not allowed), then index the new.
+            if old is not None:
+                self._conn.execute(
+                    "INSERT INTO nodes_fts(nodes_fts, rowid, title) VALUES('delete', ?, ?)",
+                    (old["rowid"], old["title"]),
+                )
+            new_rowid = self._conn.execute(
+                "SELECT rowid FROM nodes WHERE id = ?", (id,)
+            ).fetchone()["rowid"]
             self._conn.execute(
-                "INSERT INTO nodes_fts (id, title, content) VALUES (?, ?, ?)",
-                (id, title, body),
+                "INSERT INTO nodes_fts(rowid, title) VALUES(?, ?)", (new_rowid, title),
             )
             self._conn.commit()
 
@@ -467,18 +509,25 @@ class GraphDatabase:
             cursor = self._conn.execute(
                 """SELECT n.id, n.title, n.type
                    FROM nodes n
-                   JOIN nodes_fts f ON n.id = f.id
+                   JOIN nodes_fts ON n.rowid = nodes_fts.rowid
                    WHERE nodes_fts MATCH ?
-                   ORDER BY rank""",
+                   ORDER BY nodes_fts.rank""",
                 (query,),
             )
             return [dict(row) for row in cursor.fetchall()]
 
     def delete_node(self, node_id: str) -> None:
         with self._lock:
+            old = self._conn.execute(
+                "SELECT rowid, title FROM nodes WHERE id = ?", (node_id,)
+            ).fetchone()
             self._conn.execute("DELETE FROM edges WHERE source_id = ? OR target_id = ?",
                                (node_id, node_id))
-            self._conn.execute("DELETE FROM nodes_fts WHERE id = ?", (node_id,))
+            if old is not None:                   # retract the row's FTS tokens first
+                self._conn.execute(
+                    "INSERT INTO nodes_fts(nodes_fts, rowid, title) VALUES('delete', ?, ?)",
+                    (old["rowid"], old["title"]),
+                )
             self._conn.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
             self._conn.commit()
 
