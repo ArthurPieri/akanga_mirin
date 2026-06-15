@@ -1,5 +1,7 @@
 # Design Patterns in Akanga
 
+**Audience:** developers reading Akanga's code who want the *why* behind each design choice · **Read time:** ~18 min
+
 This document explains the software design patterns used in the Akanga knowledge graph. You will encounter all of these patterns as you work through Phases 0–8. Understanding the pattern before you write the code makes the "why" of each design decision legible.
 
 ---

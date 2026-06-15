@@ -1,7 +1,6 @@
 # Direnv Basics
 
-**Estimated read time:** 15 minutes
-**Prerequisite:** None — this doc assumes only that you can open a terminal.
+**Audience:** anyone who can open a terminal — no prior direnv experience · **Read time:** ~15 min
 
 ---
 

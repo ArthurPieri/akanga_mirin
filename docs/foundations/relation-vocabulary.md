@@ -1,5 +1,7 @@
 # Relation Vocabulary — The 72 Built-in Relation Types
 
+**Audience:** anyone choosing a relation type for an edge · **Read time:** ~10 min skim; reference, don't memorize
+
 **This file is THE relation registry.** Every relation ID used anywhere in the
 repository — phase docs, skeletons, tests, solutions, examples — is defined here
 and only here.

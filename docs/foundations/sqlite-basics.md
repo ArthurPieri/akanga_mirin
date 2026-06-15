@@ -1,5 +1,7 @@
 # SQLite Basics
 
+**Audience:** Python developers working with an embedded database for the first time · **Read time:** ~18 min
+
 A practical guide for Python developers working with embedded databases in a local-first tool.
 
 ---

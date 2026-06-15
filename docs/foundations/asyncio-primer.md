@@ -1,5 +1,7 @@
 # asyncio Primer
 
+**Audience:** developers comfortable with Python functions who have read `python-threading.md` — this is the async half of Akanga's concurrency model · **Read time:** ~12 min
+
 This doc covers the **async** half of akanga's concurrency model. Read `python-threading.md` first — the two models run side by side in the system you build and meet at `EventBus.publish()`.
 
 ---

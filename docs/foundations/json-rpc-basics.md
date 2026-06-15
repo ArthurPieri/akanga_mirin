@@ -1,5 +1,7 @@
 # JSON-RPC Basics
 
+**Audience:** developers heading into Phase 8's MCP server who want the protocol underneath · **Read time:** ~10 min
+
 A practical reference for the JSON-RPC 2.0 protocol and how it underlies MCP
 (Model Context Protocol) — the technology behind Phase 8 of the akanga learning
 path.

@@ -1,7 +1,6 @@
 # MKDocs Basics
 
-**Estimated read time:** 20 minutes
-**Prerequisite:** None — this doc assumes you can open a terminal and edit a YAML file.
+**Audience:** anyone who can open a terminal and edit YAML — no prior MkDocs experience · **Read time:** ~20 min
 
 ---
 

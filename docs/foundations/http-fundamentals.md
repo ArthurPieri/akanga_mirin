@@ -1,5 +1,7 @@
 # HTTP Fundamentals
 
+**Audience:** Python developers about to read or write the Phase 6 FastAPI server · **Read time:** ~12 min
+
 A practical reference for HTTP, REST, and how FastAPI implements them —
 directly applicable to reading `server.py` in akanga.
 

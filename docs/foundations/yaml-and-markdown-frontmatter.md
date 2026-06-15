@@ -1,5 +1,7 @@
 # YAML and Markdown Frontmatter
 
+**Audience:** Python developers working with YAML frontmatter in the vault · **Read time:** ~18 min
+
 A practical guide for Python developers working with structured text files in a knowledge graph.
 
 ---
