@@ -81,6 +81,9 @@ git-diffable, and editable in any text editor — no proprietary format, no lock
 
 > Akanga node: `YAML Frontmatter`
 
+> → Foundation sidebar: `yaml-and-markdown-frontmatter.md` ("When Would Frontmatter
+> Earn a Schema?") — why the vault normalizes user files instead of validating them.
+
 > → Foundation doc: `docs/foundations/yaml-and-markdown-frontmatter.md`
 
 !!! warning "Security: YAML injection and the safe loader"

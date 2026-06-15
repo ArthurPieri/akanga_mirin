@@ -52,7 +52,7 @@ Fifteen background explainers, referenced from the phase docs. Read them when a
 phase mentions a concept you're not confident about.
 
 - [Asyncio Primer](foundations/asyncio-primer.md) — event loop, coroutines, `run_coroutine_threadsafe`
-- [Design Patterns](foundations/design-patterns.md) — Observer, Debounce, Repository, Facade, Labeled Property Graph, Graph Traversal
+- [Design Patterns](foundations/design-patterns.md) — Observer, Debounce, Repository, Facade, Labeled Property Graph, Graph Traversal, Anemic Domain Model
 - [Direnv Basics](foundations/direnv-basics.md) — per-directory environments with `.envrc`
 - [Git Basics](foundations/git-basics.md) — git workflow, GitPython, commits and branches
 - [HTTP Fundamentals](foundations/http-fundamentals.md) — verbs, status codes, FastAPI, WebSocket, security

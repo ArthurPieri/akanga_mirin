@@ -171,6 +171,31 @@ canonical spaced form `[[Target Title | relation]]` still works — the segment 
 stripped before classification. One consequence: a typed link produces exactly **one**
 edge (the typed one), not a typed edge plus a redundant untyped wikilink.
 
+!!! note "Design Decision: what does the pipe mean? (interop vs typed edges)"
+    The pipe in `[[Title|segment]]` is overloaded. Obsidian reads it as a display
+    alias; Akanga also wants it for relations. Both readings cannot win — and this is
+    exactly the kind of syntax overload you must **decide before data accretes**. A
+    vault already full of ambiguous pipes is far more expensive to disambiguate later
+    than a rule chosen on day one (the real lesson behind the R2 interop review).
+
+    Akanga resolves it by **shape**:
+
+    | You write | Segment shape | Result |
+    |---|---|---|
+    | `[[Auth]]` | — | plain edge, relation `wikilink` |
+    | `[[Auth\|depends_on]]` | slug `^[a-z][a-z0-9_-]*$` | **typed edge**, relation `depends_on` |
+    | `[[Auth\|the auth note]]` | has spaces | plain edge, alias "the auth note" |
+    | `[[Auth\|Supports]]` | has uppercase | plain edge, alias "Supports" |
+    | `[[Auth\\|alias]]` | escaped pipe | always an alias, never a relation |
+
+    **The accepted residual:** a slug-shaped Obsidian alias — `[[Title|the-talk]]` —
+    still mints a relation, because shape is all the parser can see. Akanga adopts the
+    shape rule anyway (decision N4): it keeps the common cases compatible in both
+    directions, and the residual is the documented cost of reusing one pipe for two
+    jobs. Opening an Akanga vault in Obsidian renders a typed link's relation as its
+    link text; a future importer with slug-alias quarantine is the planned mitigation.
+    The classification is pinned by `split_pipe_segment`'s tests (this phase's Deliverable).
+
 ---
 
 ## Vault Nodes to Create
@@ -188,6 +213,10 @@ edge (the typed one), not a typed edge plus a redundant untyped wikilink.
 ## What You Build
 
 Extensions to `parser.py` from Phase 0.
+
+> `Edge` and `Node` are deliberately *anemic* dataclasses — data with no behavior; the
+> logic lives in module functions like `write_back` and `build_ego_graph`. See
+> `docs/foundations/design-patterns.md` §11 for why Akanga models data this way.
 
 **`Edge` dataclass:**
 

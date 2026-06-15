@@ -244,6 +244,39 @@ def ego_graph(db, root_id: str, max_depth: int = 2) -> set[str]:
 
 ---
 
+## 11. Dataclasses + Services (the deliberately anemic domain model)
+
+**What it is:** Domain data lives in plain dataclasses that carry no behavior; the behavior lives in module-level functions that take their dependencies as arguments. The opposite of the *rich* domain object (`node.save()`, `node.link_to(other)`) you may expect from object-oriented Python — Martin Fowler calls this the "anemic domain model," and means it as a warning. Akanga adopts it on purpose.
+
+**Where:** `models.Node` and `db.NodeRecord` are pure data; `graph.build_ego_graph(root_id, db)` and the indexer functions are the behavior.
+
+```python
+# Not this — the rich/active-record object
+node.save()
+node.link_to(other)
+graph = node.ego_graph()        # where does the db come from?
+
+# This — dumb data + a function that names its dependency
+record = db.get_node(node_id)            # a frozen NodeRecord, no methods
+ego = build_ego_graph(node_id, db)       # the db is right there in the signature
+```
+
+**Why Akanga uses it:** Graphs are the textbook OOP example — a `Node` object holding methods and direct references to its neighbours feels like the obvious model, and that instinct is fair. Three concrete forces push the other way:
+
+1. **A self-saving `Node` welds the parse model to the storage model.** Akanga keeps two models apart on purpose (decision W9): `models.Node` is the round-trip parse model — it carries `content` and `frontmatter`; `db.NodeRecord` is the six-field DB read model — `@dataclass(frozen=True, slots=True)`, no body. A `node.save()` method would force one class to know both the frontmatter shape and the SQL schema, so a frontmatter change could ripple into a schema change. Two dumb dataclasses keep that seam honest: write path takes a `Node`, read path returns a `NodeRecord`.
+
+2. **Behavior lives where its dependencies live.** `build_ego_graph(root_id, db)` openly declares the `db` it needs in its signature — which is exactly what makes Dependency Injection (§6) and isolated testing work. A `node.ego_graph()` method has no parameter to inject; it would have to reach for a hidden module-level `db` global, the very anti-pattern §6 exists to avoid.
+
+3. **Dumb data crosses boundaries cleanly; live objects do not.** A `NodeRecord` is just six fields — it pickles, serializes to JSON, and travels across the watcher/async thread boundary without complaint. An object holding a live SQLite handle or a `threading.Lock` cannot be pickled, cannot be handed to another thread, and cannot be returned as an HTTP response body.
+
+**Where the line is — this is not "never use classes":** `GraphDatabase` *is* a class, because it owns a resource: one shared connection plus the `threading.Lock` that serializes writes. That is the Repository pattern (§3), and a resource-owning object is precisely where a class earns its keep. The distinction is about what the object holds, not about avoiding `class`.
+
+**The rule, stated crisply:** state that owns a resource → a class; data that crosses a boundary → a dataclass; behavior → a module function with injected dependencies.
+
+> → You build the first of these dataclasses (`Edge`, `Node`) in Phase 1A.
+
+---
+
 ## Summary Table
 
 | Pattern | Where in codebase | Problem it solves |
@@ -258,6 +291,7 @@ def ego_graph(db, root_id: str, max_depth: int = 2) -> set[str]:
 | Two-Phase Commit | `indexer.py` | Ensure referenced nodes exist before creating edges |
 | Labeled Property Graph | `models.py`, frontmatter schema | Typed, queryable edges instead of anonymous links |
 | Graph Traversal (BFS) | `graph.py` | Bounded ego-graphs with cycle-safe iteration |
+| Anemic Domain Model | `models.py` + `graph.py` functions | Keep parse/storage models apart; data crosses boundaries, behavior is injected |
 
 ---
 

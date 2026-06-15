@@ -518,6 +518,34 @@ Key design decisions:
 
 ---
 
+## When Would Frontmatter Earn a Schema?
+
+It is tempting to give frontmatter a typed schema — a Pydantic `FRONTMATTER_SCHEMA` with
+`extra="allow"`, say — so a malformed note fails loudly instead of silently. Akanga sketched
+that and **rejected** it. Three reasons:
+
+1. **Frontmatter is user-authored text.** The vault is a folder of files the user owns and
+   edits in any editor. A schema turns an honest typo (`tag:` instead of `tags:`) into a
+   *parse failure* on a file the user controls — the tool refusing to open the user's own
+   note. Contrast Phase 6: the REST API's request bodies ARE Pydantic-validated, because the
+   trust boundary there is different — the bytes arrive from a client over the wire, not from
+   a file the user hand-edited.
+2. **`extra="allow"` launders the known keys.** Keeping unknown keys sounds safe, but Pydantic
+   still coerces and re-emits the keys it *does* know — silently rewriting the user's text (a
+   quoted UUID comes back unquoted; a date string becomes a `date` object) on round-trip.
+3. **The vault must round-trip.** `parse → write_back` has to return a file byte-near the
+   original; an aggressive normalization layer breaks that contract.
+
+What Akanga does instead is one **targeted coercion at the parse boundary** — `_normalize_fm`
+fixes only the few shapes that actually bite (see *Implicit Typing: The Value You See Is Not
+the Type You Get* above — the Norway problem, dates, hex-looking strings) and leaves
+everything else verbatim.
+
+**The rule:** validate at boundaries you own (the API), normalize at boundaries you don't
+(user files); reach for a real schema only when a wrong shape must be a hard error.
+
+---
+
 ## Akanga's Vault Config: `akanga.yaml`
 
 In addition to per-node frontmatter, the vault root holds an `akanga.yaml` config file
