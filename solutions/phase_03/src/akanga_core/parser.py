@@ -33,6 +33,7 @@ import frontmatter
 import yaml
 
 from .models import Edge, Node
+from .textutil import slugify, unique_path
 
 # `[[Target | relation]]` — group 1 is the target title, group 2 the pipe segment.
 _INLINE_EDGE_RE = re.compile(r"\[\[([^\]|]+)\|([^\]]+)\]\]")
@@ -205,8 +206,7 @@ def create(
     if default_workspace:
         fm["graph"] = [default_workspace]
 
-    slug = re.sub(r"[^a-z0-9-]", "", title.lower().replace(" ", "-")) or "untitled"
-    target = Path(vault) / f"{slug}.md"
+    target = Path(unique_path(str(vault), slugify(title)))
     write_node_file(str(target), fm, "")
     return parse_node_file(str(target))
 

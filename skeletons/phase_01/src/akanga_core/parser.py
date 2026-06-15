@@ -233,15 +233,15 @@ def create(
        "note" or "reference"), `tags=[]`, and `id`.
        If `type == "reference"`, also set the three top-level keys:
        `url`, `external_type`, and `description`.
-    4. Convert the title to a filename-safe slug — e.g.
-       `title.lower().replace(" ", "-") + ".md"` (strip remaining special
-       characters as needed). Write the file atomically to
-       `Path(vault) / slug` using `write_node_file`.
+    4. Derive a collision-safe filename with
+       `textutil.unique_path(str(vault), textutil.slugify(title))` (the shared
+       Phase 0 rule — never overwrite an existing note). Write the file
+       atomically with `write_node_file`.
     5. Return `parse_node_file` on the written file to get the final Node.
     """
     raise NotImplementedError(
         "Generate str(uuid4()), read akanga.yaml with yaml.safe_load for defaults, "
         "build frontmatter (plus url/external_type/description when type='reference'), "
-        "derive slug via title.lower().replace(' ', '-'), write_node_file, "
-        "return parse_node_file result."
+        "derive the filename via textutil.unique_path(vault, textutil.slugify(title)), "
+        "write_node_file, return parse_node_file result."
     )

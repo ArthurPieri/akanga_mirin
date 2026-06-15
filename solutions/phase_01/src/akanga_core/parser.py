@@ -35,6 +35,7 @@ import frontmatter
 import yaml
 
 from .models import Edge, Node
+from .textutil import slugify, unique_path
 
 # Matches the inline edge shorthand: [[Target Title | relation-name]].
 # Group 1 = target title (no ']' or '|'), group 2 = relation name (no ']').
@@ -51,9 +52,6 @@ _INLINE_CODE_RE = re.compile(r"`[^`]+`")
 # leading digit, punctuation, an escaped `\|`) is an Obsidian-style display
 # alias and yields a plain wikilink, not a typed edge.
 RELATION_SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
-
-# Characters allowed in a filename slug after lowercasing and hyphenating.
-_SLUG_STRIP_RE = re.compile(r"[^a-z0-9\-_]")
 
 
 def split_pipe_segment(segment: str) -> tuple[str, str]:
@@ -278,17 +276,6 @@ def write_back(path: str | Path) -> None:
 # Phase 0 create(), extended in 1B for reference nodes
 # ---------------------------------------------------------------------------
 
-def _slugify(title: str) -> str:
-    """Convert a node title to a filename-safe slug.
-
-    Lowercase, spaces to hyphens, then strip anything outside
-    ``[a-z0-9-_]``. ``"Fast Thinking is Unreliable"`` →
-    ``"fast-thinking-is-unreliable"``.
-    """
-    slug = _SLUG_STRIP_RE.sub("", title.lower().replace(" ", "-")).strip("-")
-    return slug or "untitled"
-
-
 def create(
     title: str,
     node_type: str,
@@ -336,6 +323,6 @@ def create(
         fm["external_type"] = external_type
         fm["description"] = description
 
-    node_path = vault / f"{_slugify(title)}.md"
+    node_path = Path(unique_path(str(vault), slugify(title)))
     write_node_file(node_path, fm, "")
     return parse_node_file(node_path)

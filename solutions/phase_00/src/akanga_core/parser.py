@@ -15,7 +15,6 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
-import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -26,6 +25,7 @@ import frontmatter
 import yaml
 
 from .models import Node
+from .textutil import slugify, unique_path
 
 
 def parse_node_file(path: str) -> Node:
@@ -123,7 +123,6 @@ def create(title: str, node_type: str, vault: str) -> Node:
     if default_workspace:
         fm["graph"] = [default_workspace]
 
-    slug = re.sub(r"[^a-z0-9-]", "", title.lower().replace(" ", "-")) or "untitled"
-    target = Path(vault) / f"{slug}.md"
+    target = Path(unique_path(str(vault), slugify(title)))
     write_node_file(str(target), fm, "")
     return parse_node_file(str(target))

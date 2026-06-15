@@ -31,6 +31,7 @@ from akanga_core.db import GraphDatabase
 from akanga_core.indexer import full_scan_and_index
 from akanga_core.parser import content_hash, parse_node_file, write_node_file
 from akanga_core.rag import build_context
+from akanga_core.textutil import slugify, unique_path
 
 logger = logging.getLogger(__name__)
 
@@ -126,18 +127,6 @@ def _load_relation_registry() -> list[dict]:
     return _relation_registry
 
 
-def _slugify(title: str) -> str:
-    """Reduce a title to a filesystem-safe slug (SEC-02).
-
-    Only [a-z0-9-] survive, so path separators, dots, and traversal sequences
-    cannot reach the filesystem layer.
-    """
-    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
-    if not slug:
-        raise ValueError(f"Title {title!r} does not yield a usable filename slug.")
-    return slug
-
-
 # ---------------------------------------------------------------------------
 # Tool functions — plain callables; build_server() registers them with FastMCP
 # ---------------------------------------------------------------------------
@@ -205,13 +194,11 @@ def create_node(title: str, type: str = "note", content: str = "") -> dict:
     if db is None or vault_path is None:
         return {"error": "Server not initialized — call init_server() first."}
 
-    slug = _slugify(title)
     vault_root = vault_path.resolve()
-    target = vault_root / f"{slug}.md"
-    counter = 2
-    while target.exists():
-        target = vault_root / f"{slug}-{counter}.md"
-        counter += 1
+    # textutil.slugify is the single title→filename rule (shared with create()
+    # and the Phase 6 API); unique_path returns a str, so wrap it in Path before
+    # the SEC-02 resolve() below.
+    target = Path(unique_path(str(vault_root), slugify(title)))
 
     # SEC-02: defense in depth — resolve() collapses any traversal and
     # follows symlinks; the result must stay inside the vault root.

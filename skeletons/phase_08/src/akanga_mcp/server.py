@@ -237,14 +237,13 @@ def create_node(title: str, type: str = "note", content: str = "") -> dict:  # n
     HOW:
     1. db = _get_db()
     2. vault = _get_vault()
-    3. Slugify title to generate a filename. Strip any path-separator or
-       parent-traversal sequences from the slug BEFORE joining with vault —
-       this makes the intent explicit and adds defense-in-depth on top of
-       the is_relative_to check below:
-           slug = title.lower().replace(" ", "_")
-           # Remove any path-separator characters and parent-traversal sequences
-           slug = slug.replace("/", "").replace("\\", "").replace("..", "")
-           file_path = vault / f"{slug}.md"
+    3. Derive the filename with the SHARED rule (the same `textutil.slugify`
+       used by Phase 0 `create` and the Phase 6 API — one rule, no per-surface
+       drift). `slugify` keeps only `[a-z0-9-]`, so path separators and
+       traversal sequences cannot survive into the filename:
+           from akanga_core.textutil import slugify, unique_path
+           # unique_path returns a str → wrap in Path before .resolve() below
+           file_path = Path(unique_path(str(vault.resolve()), slugify(title)))
     4. SECURITY (SEC-02): Verify the resolved path stays inside vault.
        Resolve file_path directly (it is already vault/<slug>.md — do NOT
        re-join with vault, which is a no-op when the RHS is absolute and

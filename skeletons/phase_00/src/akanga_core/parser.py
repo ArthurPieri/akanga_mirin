@@ -106,15 +106,16 @@ def create(title: str, node_type: str, vault: str) -> Node:
        installed as a dependency of `python-frontmatter` so `import yaml` works. If the
        file is absent, use defaults (owner="", default_workspace={}).
     3. Build a Node with the given title, node_type, and a stub frontmatter dict.
-    4. Convert the title to a filename-safe slug — e.g.
-       `title.lower().replace(" ", "-") + ".md"` (strip any remaining special characters
-       as needed). For example: "My Note" → "my-note.md".
-       Write the file atomically to `Path(vault) / slug` using write_node_file.
+    4. Derive a collision-safe filename: `textutil.unique_path(str(vault),
+       textutil.slugify(title))`. Use `slugify` (the single title→filename rule
+       — implement it in `textutil.py`), and `unique_path` so a second `create`
+       with the same title NEVER overwrites the first. Write the file atomically
+       with `write_node_file`.
     5. Return parse_node_file on the written file to get the final Node.
     """
     raise NotImplementedError(
         "Generate UUID, read akanga.yaml with yaml.safe_load (import yaml — available via "
-        "python-frontmatter dep) for owner/workspace defaults, build Node, derive slug via "
-        "title.lower().replace(' ', '-'), call write_node_file to persist it, "
-        "return parse_node_file result."
+        "python-frontmatter dep) for owner/workspace defaults, build Node, derive the "
+        "filename via textutil.unique_path(vault, textutil.slugify(title)) (never overwrite), "
+        "call write_node_file to persist it, return parse_node_file result."
     )

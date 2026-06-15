@@ -24,6 +24,15 @@
 version = 2
 phases = [0, 1, 2, 3, 4, 5, 6, 7, 8]
 
+# ── Phase 0: shared text utilities ───────────────────────────────────────────
+# textutil.slugify is the single title→filename rule; it lands in Phase 0
+# (create's flagship deliverable) and is byte-identical in every later phase.
+
+[[modules]]
+file = "src/akanga_core/textutil.py"
+introduced_in = 0
+applies_to = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+
 # ── Phase 2 family: persistence + parsing core ────────────────────────────────
 # parser.py/models.py also exist in phases 00-01 as smaller pre-introduction
 # forms — those layers are out of scope by design (applies_to starts at the

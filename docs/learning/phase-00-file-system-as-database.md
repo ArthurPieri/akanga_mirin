@@ -2,6 +2,15 @@
 
 **Estimated time: 2–3h + ~1h vault/reflect**
 
+!!! warning "Changed 2026-06 (noteapp-alignment round)"
+    Phase 0's contract grew: a new `textutil.py` module (`slugify` + `unique_path`) is now
+    the single title→filename rule, and `create()` must never overwrite an existing note
+    (collisions get numeric suffixes: `my-note-1.md`). New tests: `tests/phase_00/test_textutil.py`
+    plus `test_create_same_title_twice_does_not_overwrite`. If you finished this phase before
+    the change: run `make skeleton PHASE=0` — it copies the new `textutil.py` stub and never
+    touches files you already own — then implement the two functions and route `create()`
+    through them. A green recorded by `make resume` before this change predates these tests.
+
 **Core concept:** The file is the database. Not a cache, not a representation — the
 file *is* the record. Everything downstream (index, TUI, API) is derived from files
 and is expendable. Delete the index: rebuild it from files. The files are never
@@ -213,14 +222,16 @@ Phase 1A. When you reach 1A, come back and type these links.
 
 ## What You Build
 
-Single module: `parser.py`
+Two modules: `parser.py` and `textutil.py`
 
 | Function | What it does |
 |---|---|
 | `parse_node_file(path) → Node` | Read `.md` file → `Node` dataclass |
 | `write_node_file(path, frontmatter_dict, content)` | Serialize frontmatter + content to `.md` file, atomically |
-| `create(title, node_type, vault) → Node` | Generate new node file with fresh UUID; stamps `author` from `akanga.yaml` |
+| `create(title, node_type, vault) → Node` | Generate new node file with fresh UUID; stamps `author` from `akanga.yaml`; filename via `textutil` — collision-safe |
 | `content_hash(path) → str` | SHA-256 hex digest of file content |
+| `slugify(title) → str` | Lowercase; collapse non-alphanumeric runs to `-`; strip edge hyphens; `"untitled"` fallback |
+| `unique_path(vault, slug) → str` | First free filename: `slug.md`, then numeric suffixes — never overwrite an existing note |
 
 Behaviors the test suite enforces beyond the signatures (don't skip these):
 
@@ -303,7 +314,19 @@ def create(title: str, node_type: str, vault: Path) -> Node:
 
 ## Deliverable
 
-Passing the Phase 0 suite: `make test PHASE=0` runs `tests/phase_00/test_parser.py`.
+Passing the Phase 0 suite: `make test PHASE=0` runs `tests/phase_00/test_parser.py`
+and `tests/phase_00/test_textutil.py`.
+
+!!! tip "Testing pattern: the conformance table"
+    `test_textutil.py` asserts one table of input→expected-slug cases instead of
+    hand-writing a test per case. The payoff is that SEVERAL implementations can assert
+    the SAME table: noteapp replays its shared wikilink case table through both its
+    Python core and its TypeScript mirror (and pins its Lua slug mirror to the Python
+    source), so the surfaces can't drift apart silently. One table beats N parallel
+    hand-written suites — adding a case upgrades every implementation's coverage at once.
+    The 16 slug cases are inlined at the top of `tests/phase_00/test_textutil.py`; read
+    them before implementing `slugify`.
+
 These are the tests, by name:
 
 **Parsing:**
@@ -333,6 +356,13 @@ These are the tests, by name:
 - `test_create_writes_file_with_fresh_uuid` — `create()` writes a new `.md` file stamped with a fresh `uuid4()`
 - `test_create_stamps_author_from_vault_config` — `create()` reads `akanga.yaml` and stamps `author`
 - `test_create_roundtrip` — a created node parses back with the same `id`, `title`, and `type`
+- `test_create_same_title_twice_does_not_overwrite` — two `create()` calls with the same title yield two files; the first is untouched
+
+**Slug + collision safety (`test_textutil.py`):**
+
+- `test_slugify_conformance_table` — the 16-case input→slug table (inlined from noteapp's `slug_cases.json`)
+- `test_unique_path_no_collision` — a free slug returns `slug.md`
+- `test_unique_path_suffixes_in_order` — occupied slugs get `-1`, `-2`, … in order
 
 **Error paths:**
 

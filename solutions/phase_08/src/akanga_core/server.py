@@ -35,6 +35,7 @@ from pydantic import BaseModel
 from .db import GraphDatabase, NodeRecord
 from .indexer import full_scan_and_index, index_file
 from .parser import content_hash, parse_node_file, write_node_file
+from .textutil import slugify
 
 logger = logging.getLogger(__name__)
 
@@ -341,7 +342,7 @@ def create_node(body: CreateNodeRequest) -> dict[str, Any]:
     vault. The UUID is minted here and written into the frontmatter so a
     later re-parse returns the same identity (no UUID churn).
     """
-    raw_path = body.path or f"{body.title.lower().replace(' ', '-')}.md"
+    raw_path = body.path or f"{slugify(body.title)}.md"
     full_path = _safe_disk_path(raw_path)
 
     if full_path.exists():

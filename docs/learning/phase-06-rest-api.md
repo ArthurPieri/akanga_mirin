@@ -66,7 +66,7 @@ make serve               # start the REST API server (after implementation)
 An architectural style for HTTP APIs. Resources are identified by URLs (`/api/v1/nodes/{id}`).
 Operations are expressed as HTTP methods: GET (read), POST (create), PUT (replace),
 DELETE (remove). Responses carry status codes that express outcome without reading
-the body: 200 OK, 201 Created, 204 No Content, 404 Not Found, 422 Unprocessable Entity.
+the body: 200 OK, 201 Created, 204 No Content, 404 Not Found, 409 Conflict, 422 Unprocessable Entity.
 Stateless: every request contains all information needed to process it — no session
 state on the server between requests.
 
@@ -371,6 +371,11 @@ filename from the title. The field exists precisely so the SEC-02 containment ch
 has something to validate — a client-supplied path is the one input that can attempt
 `../` escapes, absolute paths, or symlink tricks, and the create handler must
 `resolve()` it and verify `is_relative_to(vault_root)` before writing anything.
+One deliberate asymmetry: an explicit `path` that already exists gets **409 Conflict**
+rather than a suffixed filename — a REST client stated exact intent and can retry with
+a different path — while `create()` and the MCP `create_node` auto-suffix
+(`my-note-1.md`), because a capture utility must never lose a note to a name collision
+(decision N6).
 
 **Frontmatter-level fields are not API fields:** `graph` (workspace names), `author`,
 and `meta` live in the node's YAML frontmatter, not in the Phase 6 request model. The

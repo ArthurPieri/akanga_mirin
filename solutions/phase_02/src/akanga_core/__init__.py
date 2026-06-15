@@ -2,6 +2,7 @@
 
 Layers, in dependency order:
 
+- ``textutil``   — the single title→filename slug rule (Phase 0)
 - ``models``     — the monotonic ``Node`` and ``Edge`` dataclasses (Phases 0/1A)
 - ``parser``     — file ⇄ Node boundary + inline-edge write-back (Phases 0/1A/1B)
 - ``sync_queue`` — pending rename-propagation jobs over raw SQL (Phase 1B)
