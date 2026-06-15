@@ -41,7 +41,7 @@ By the end of this phase, you will be able to:
 Check each item you can answer confidently. If you can't check 3 or more, review the linked foundation doc before proceeding.
 
 - [ ] I understand HTTP verbs (GET/POST/PUT/DELETE) and status codes → See `docs/foundations/http-fundamentals.md`
-- [ ] I know what Pydantic models are and how FastAPI uses them for validation
+- [ ] I know what Pydantic models are and how FastAPI uses them for validation → See `docs/foundations/http-fundamentals.md` ("Pydantic models for request bodies")
 - [ ] I understand async functions and FastAPI's async routing
 - [ ] I've completed Phases 0–5
 
