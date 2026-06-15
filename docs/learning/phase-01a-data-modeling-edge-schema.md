@@ -243,6 +243,26 @@ maps IDs to names, descriptions, and flags (symmetric, inverse pair).
 | `merge_edges(existing, inline) → list[Edge]` | Deduplicate: add inline edges not already in existing |
 | `write_back(path)` | parse → extract inline → merge → write atomically if changed |
 
+!!! tip "Technique: don't skip code blocks — delete them"
+    `extract_inline_edges` must ignore `[[wikilinks]]` that appear inside a fenced code
+    block (a code sample is not a link). The wrong instinct is one lookaround mega-regex
+    that matches links *except* inside fences — that way lies an unreadable tarpit. The
+    taught idiom is **strip first, match second**: remove the fenced blocks, then run the
+    link regex on what's left.
+
+    ~~~python
+    _FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
+    stripped = _FENCED_CODE_RE.sub("", body)
+    edges = _INLINE_EDGE_RE.findall(stripped)
+    ~~~
+
+    Why each flag matters: `re.DOTALL` lets `.` cross newlines so a multi-line fence matches
+    whole; the **non-greedy** `.*?` stops at the *nearest* closing fence — greedy `.*` would
+    swallow everything between the first fence and the last. Scope note: character offsets do
+    not survive stripping, which is fine here (the extractor returns matches, not positions);
+    if you ever need offsets, replace each fence with the same length of whitespace instead
+    of deleting it. The same strip-first idiom guards `links.extract_wikilinks` (W1).
+
 **Deduplication rule:** an edge is a duplicate if `(relation, target)` matches an
 existing edge. `target_id` is not part of the key — an empty `target_id` in an inline
 edge does not override a resolved `target_id` in frontmatter.
