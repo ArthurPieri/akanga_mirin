@@ -474,6 +474,9 @@ as extensions after the suite above is green:
   suite verifies create/delete via the API only, not by globbing the vault directory
 - `GET /api/v1/nodes/{id}/ego-graph` and the other stretch endpoints listed above
   (workspaces, relations, sync, git)
+- `GET /api/v1/export?format=json|mermaid` — serialize the whole graph as an edge list
+  (graphml is a named-only further stretch); the lesson is edge-list-as-serialization, the
+  same wire-format shape `docs/foundations/graph-theory-basics.md` §3 describes
 
 ---
 

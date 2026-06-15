@@ -654,6 +654,13 @@ Plus 6 vault nodes with typed edges.
 - `get_neighbors` / `ego_graph_tool` / the `akanga://nodes/{id}` resource
 - A uniform ~15,000-char output ceiling on every tool response, with explicit
   truncation markers (codegraph's `MAX_OUTPUT_LENGTH` pattern)
+- **Relation soft-validation (`suggest_relation`):** the registry only becomes
+  machine-readable in this phase, so a typo-catcher belongs here. Sketch:
+  `suggest_relation(relation: str) -> str | None` over
+  `difflib.get_close_matches(relation.lower(), known_slugs, n=1, cutoff=0.6)`, wired as a
+  **logged warning only** — never a rejection: `Minting unknown relation 'suports' — did
+  you mean 'supports'? (open vocabulary: the edge is kept either way)`. The principle is
+  open vocabulary by decision: warn, never reject. No shipped test pins it; write your own.
 
 ---
 

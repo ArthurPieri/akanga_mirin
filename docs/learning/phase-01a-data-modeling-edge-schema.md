@@ -345,3 +345,5 @@ not just the tests.
 > **Solo:** The deduplication key is `(relation, target)` — not `(relation_id, target_id)`. Why? What would break if you used the UUID-based keys as the dedup key instead, given that `target_id` can be an empty string when parsed from inline shorthand?
 
 > **Group:** `write_back` is described as "write atomically *if changed*." What is the check that determines "changed"? Who should own that check — `write_back` itself, or the caller? Discuss the tradeoffs of each approach and which leads to more correct behavior at scale.
+
+> **Going further:** `write_back` mints a fresh UUID `relation_id` for *any* unknown relation — including a typo like `suports`. At what layer would you catch that typo, and why must the answer be a *warning* rather than an *error*? (See the `suggest_relation` stretch in Phase 8.)

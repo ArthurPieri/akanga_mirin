@@ -386,6 +386,24 @@ mechanism the TUI builds on in Phase 5.
 
 ---
 
+## Stretch (untested)
+
+**`to_mermaid(ego: EgoGraph) -> str`** — export an ego-graph as a [Mermaid](https://mermaid.js.org)
+`graph TD` diagram you can paste into mermaid.live or a GitHub README. About 20 lines:
+
+1. Build an alias map so node IDs become short Mermaid-safe handles — `n0, n1, …` in
+   iteration order over `ego.nodes`.
+2. Emit `graph TD`, then one node line per entry — `n0["Title"]` — escaping any `"` in the
+   title as `#quot;`.
+3. Emit one edge line per `EgoEdge`: `n0 -->|relation| n1`, sanitizing `|` out of the
+   relation label and falling back to a bare `n0 --> n1` when the relation is empty.
+
+This is the *edge-list-as-serialization* idea from `graph-theory-basics.md` §3 made
+concrete — the diagram **is** the edge list with a header. No shipped test pins it; write
+your own if you build it.
+
+---
+
 ## Reflect
 
 > **Solo:** The traversal tracks `visited` by node ID and `seen_edges` by `(source_id, target_id, relation)`. Walk through the case where A → B and B → A both exist and `max_depth=2`: how many times does BFS *encounter* the edge A → B, and why does the dedup key include `relation` rather than just `(source_id, target_id)`? What real vault situation would the simpler key silently destroy?
