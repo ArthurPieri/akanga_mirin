@@ -62,7 +62,7 @@ phase mentions a concept you're not confident about.
 - [Python Dataclasses](foundations/python-dataclasses.md) — `@dataclass`, `field()`, frozen, equality
 - [Python Threading](foundations/python-threading.md) — threads, Lock, Timer, GIL, debounce
 - [Python Type Annotations](foundations/python-type-annotations.md) — type hints, generics, Protocol
-- [Relation Vocabulary](foundations/relation-vocabulary.md) — the 71 built-in relation types in 11 categories
+- [Relation Vocabulary](foundations/relation-vocabulary.md) — the 72 built-in relation types in 11 categories
 - [SQLite Basics](foundations/sqlite-basics.md) — WAL, FTS5, parameterized queries
 - [Terminal and tmux Basics](foundations/terminal-and-tmux-basics.md) — shell, tmux, the study session
 - [YAML and Markdown Frontmatter](foundations/yaml-and-markdown-frontmatter.md) — YAML, frontmatter, python-frontmatter

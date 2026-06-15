@@ -19,7 +19,7 @@ _Pre-implementation planning artifact. All items below are ready to be applied d
 
 ### Extending the Vocabulary
 
-The 71 built-in relation types are not a ceiling — they are a starting point. Akanga is designed so that adding new relation types to your vault is safe, reversible, and does not break existing edges. This section explains exactly what the schema contains, what safe extension looks like, and what makes a change dangerous.
+The 72 built-in relation types are not a ceiling — they are a starting point. Akanga is designed so that adding new relation types to your vault is safe, reversible, and does not break existing edges. This section explains exactly what the schema contains, what safe extension looks like, and what makes a change dangerous.
 
 #### How relation types are defined
 
@@ -154,7 +154,7 @@ Scenario: you have a 500-node vault. You want to add a new relation type `inspir
 
 ```yaml
 relation_types:
-  # ... existing 71 entries unchanged ...
+  # ... existing 72 entries unchanged ...
   - id: MY-001
     name: inspires
     description: "The source node sparked the idea in the target node."

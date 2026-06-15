@@ -112,7 +112,7 @@ akanga_mirin/
 │   └── foundations/
 │       ├── makefile-basics.md             [DONE]
 │       ├── design-patterns.md             [DONE]
-│       ├── relation-vocabulary.md         [DONE — 71 built-in relation types]
+│       ├── relation-vocabulary.md         [DONE — 72 built-in relation types]
 │       ├── python-type-annotations.md     [TODO — PED-10]
 │       ├── python-dataclasses.md          [TODO — PED-10]
 │       ├── yaml-and-markdown-frontmatter.md [TODO — PED-10]

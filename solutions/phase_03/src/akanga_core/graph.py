@@ -13,7 +13,7 @@ Two invariants matter throughout this module:
 - REAL RELATIONS: edges carry the relation label and registry id pulled
   from `db.get_edges_from` / `db.get_edges_to`. Phase 8 serializes these
   edges as `src -[rel]-> tgt` triples for an LLM — a hardcoded
-  `relation=""` here would gut the 71-type vocabulary downstream.
+  `relation=""` here would gut the 72-type vocabulary downstream.
 """
 from __future__ import annotations
 

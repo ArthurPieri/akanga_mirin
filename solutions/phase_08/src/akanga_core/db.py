@@ -458,7 +458,7 @@ class GraphDatabase:
         Unlike `get_neighbors`, the relation label and registry id travel
         with each neighbor — Phase 3 ego graphs and Phase 8 RAG triples
         need them (a bare node list forces `relation=""` downstream and
-        guts the 71-type vocabulary). No DISTINCT: two different relations
+        guts the 72-type vocabulary). No DISTINCT: two different relations
         between the same pair are two distinct edges.
         """
         with self._lock:

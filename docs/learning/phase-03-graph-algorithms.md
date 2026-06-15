@@ -237,7 +237,7 @@ may legitimately be connected by more than one relation type.
 > **Why relations are required here (forward reference):** Phase 8 serializes these
 > edges as `src --[rel]--> tgt` triples for an LLM. If you take the shortcut of
 > `relation=""`, every triple degrades to a generic `relates_to` and the entire
-> 71-type relation vocabulary never reaches the model. The relation you store in
+> 72-type relation vocabulary never reaches the model. The relation you store in
 > Phase 3 is the relation the LLM sees in Phase 8.
 
 **ASCII renderer:**

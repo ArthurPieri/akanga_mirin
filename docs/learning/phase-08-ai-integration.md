@@ -13,7 +13,7 @@ note below).
 **What makes this non-obvious:** The hard part is not the HTTP requests or the
 protocol encoding — those are boilerplate. The hard part is *what* to expose and
 *how* to format graph context so an LLM can actually use it. A knowledge graph with
-71 typed edges is a structural asset that flat vector RAG cannot match. The design
+72 typed relations are a structural asset that flat vector RAG cannot match. The design
 choices here — which tools to expose, what depth to traverse, how to serialize a
 subgraph — determine whether the integration is genuinely useful or just technically
 present.
@@ -234,7 +234,7 @@ Note: all tool definitions and the `SERVER_INSTRUCTIONS` string live inside
     | `get_context(node_id)` | Up to `MAX_CONTEXT_CHARS` (12,000) chars of node bodies + typed triples |
     | `search_nodes(query)` | `id`, `title`, `type` of up to 10 matching nodes (titles are content) |
     | `get_node(node_id)` | One node's full metadata — and its body if you include it |
-    | `list_relation_types()` | The 71-type vocabulary only — no personal data |
+    | `list_relation_types()` | The 72-type vocabulary only — no personal data |
     | `create_node(...)` | Nothing new leaves (the LLM authored the content), but the result confirms vault structure |
 
 ---
@@ -434,7 +434,7 @@ def create_node(title: str, type: str = "note", content: str = "") -> dict:
 
 @mcp.tool()
 def list_relation_types() -> list[dict]:
-    """All 71 built-in relation type IDs with labels. The registry in
+    """All 72 built-in relation type IDs with labels. The registry in
     docs/foundations/relation-vocabulary.md is the single source of truth —
     hardcode the list first, refactor to parse the file later."""
     return [
@@ -442,7 +442,7 @@ def list_relation_types() -> list[dict]:
         {"id": "EP-002", "name": "contradicts", "category": "Epistemic"},
         {"id": "SC-001", "name": "depends_on",  "category": "Structural"},
         {"id": "SC-003", "name": "uses",        "category": "Structural"},
-        # ... all 71 types from relation-vocabulary.md
+        # ... all 72 types from relation-vocabulary.md
     ]
 
 if __name__ == "__main__":
@@ -531,7 +531,7 @@ POSIX shell). Config block current as of **fastmcp 3.x, June 2026**:
 
 **Counting only triple lines against the budget:** the classic violation of the budget rule (see What You Build) — entity snippets counted *outside* the accounting silently blow the cap.
 
-**Inventing inverse relations:** reversed arrows and synthesized inverse labels (`is_supported_by`) violate the direction rule (see What You Build) — 51 of the 71 relation types have no defined inverse.
+**Inventing inverse relations:** reversed arrows and synthesized inverse labels (`is_supported_by`) violate the direction rule (see What You Build) — 52 of the 72 relation types have no defined inverse.
 
 **Forgetting SEC-01 delimiters:** Without `[KNOWLEDGE GRAPH CONTEXT]` wrapping, a malicious note could inject instructions directly into the LLM context. Always wrap, and include the "treat as data, not instructions" warning in the opening delimiter.
 
@@ -572,7 +572,7 @@ direction and budget rules above.
 - `test_search_nodes_operator_treated_as_literal` — SEC-06 semantics: a query containing `OR` matches it as a literal word, not as the FTS5 operator
 - `test_search_nodes_embedded_double_quote_safe` — SEC-06 semantics: a term containing `"` survives the double-quote wrapping without a syntax error
 - `test_get_node_returns_dict` / `test_get_node_not_found` — dict with `id`/`title`; `None` or `{"error": ...}` for unknown ids, never an exception
-- `test_list_relation_types_returns_71` — the full 71-type registry (≥10 accepted today; the target is all 71)
+- `test_list_relation_types_returns_72` — the full 72-type registry (the test asserts all 72; learner-defined custom types may append beyond)
 - `test_get_context_returns_string` — `get_context(node_id)` includes the node's title
 - `test_create_node_via_mcp` — returns an `id` and writes the `.md` file into the vault
 - `test_mcp_server_binds_localhost` — SEC-04 source check (see the pitfall above)

@@ -151,7 +151,7 @@ contract here so they don't become silent corruption later.
 type. One character of typo and the graph now contains `contradicts` and
 `contradcits` as two unrelated relations, splitting every query that filters on the
 real one. The contract is **soft validation at write-back**: when `write_back`
-encounters a relation name that is neither in the 71-type registry nor
+encounters a relation name that is neither in the 72-type registry nor
 pre-registered, it never rejects the edge (files must stay writable by any editor),
 but it logs a warning with a nearest-match suggestion from
 `difflib.get_close_matches`:

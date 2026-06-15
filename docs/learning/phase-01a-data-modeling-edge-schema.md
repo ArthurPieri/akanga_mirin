@@ -80,13 +80,13 @@ anonymous connections. "A links to B" is a hyperlink graph. "A *supports* B" is 
 knowledge graph. The label is what gives the edge semantic value: you can ask "what
 does this node contradict?" or "what does this node depend on?" and get meaningful,
 filtered answers. Akanga stores Tier 2 semantics: every edge has a `relation` field
-drawn from the 71-type vocabulary.
+drawn from the 72-type vocabulary.
 
 > Akanga node: `Labeled Property Graph`
 
 > → Foundation doc: `docs/foundations/design-patterns.md`
 
-> → Foundation doc: `docs/foundations/relation-vocabulary.md` (full 71-type vocabulary)
+> → Foundation doc: `docs/foundations/relation-vocabulary.md` (full 72-type vocabulary)
 
 ### Source of Truth
 

@@ -147,7 +147,7 @@ def _serialize_triples(ego, max_triples: int) -> str:
     Direction note (BUG-03): EgoEdge.source_id/target_id already hold the
     edge as stored in the DB — incoming edges arrive with source/target in
     natural order too. Do NOT swap source and target for incoming edges and
-    do NOT synthesize inverse names (no "is_X_by"): 51 of the 71 vocabulary
+    do NOT synthesize inverse names (no "is_X_by"): 52 of the 72 vocabulary
     types have no defined inverse, so any invented label is wrong by
     construction. One rendering rule, zero special cases.
 

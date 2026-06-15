@@ -172,7 +172,7 @@ app = AkangaApp(vault="./vault", db_path="./.akanga.db")
 
 **What it is:** A graph data model with three ingredients: **nodes** that carry properties (key-value pairs), **edges** that carry a type label (the relation), and optionally properties on the edges themselves. This is the model behind Neo4j and most modern graph databases — as opposed to a plain hyperlink graph, where edges are anonymous, or RDF triples, where everything is a flat statement.
 
-**Where:** The entire data model — `Node`, `Edge`, the frontmatter schema, and the 71-type relation vocabulary. Phase 1A is where you build it.
+**Where:** The entire data model — `Node`, `Edge`, the frontmatter schema, and the 72-type relation vocabulary. Phase 1A is where you build it.
 
 **Why Akanga uses it:** "A links to B" tells you almost nothing. "A *contradicts* B" or "A *depends_on* B" is a queryable fact. The label is what turns a pile of cross-referenced notes into a knowledge graph: you can filter traversals by relation type, ask directed questions ("what does this node refute?"), and compute meaningful neighborhoods.
 
@@ -184,14 +184,14 @@ title: BFS
 type: note              # node property
 tags: [algorithms]      # node property
 edges:
-  - relation: contrasts_with    # edge label, from the 71-type vocabulary
+  - relation: contrasts_with    # edge label, from the 72-type vocabulary
     target: "[[DFS]]"
   - relation: is_applied_in     # second typed edge from the same node
     target: "[[Ego-Graph Endpoint]]"
 ```
 
 - Every Markdown file is a **node**; its frontmatter keys (`title`, `type`, `tags`, `graph`) are the node's properties.
-- Every frontmatter edge entry (and every inline `[[wikilink]]` shorthand) becomes an **edge**; its `relation` field is the label, drawn from the 71-type vocabulary in `relation-vocabulary.md`.
+- Every frontmatter edge entry (and every inline `[[wikilink]]` shorthand) becomes an **edge**; its `relation` field is the label, drawn from the 72-type vocabulary in `relation-vocabulary.md`.
 - The SQLite `edges` table stores `(source_id, target_id, relation)` — the relational projection of the same model. The files are the source of truth; the table is the derived index.
 
 **The design consequence:** because the label lives on the edge, not the node, adding a new way for two notes to relate never requires touching either note's schema — you add one edge entry. That is the property-graph advantage over baking relationships into node fields.
