@@ -113,8 +113,10 @@ flag records only how the edge relates to the root (`OUTGOING` = root is the sou
 source/target and never changes how the triple is serialized.
 
 Every `EgoEdge` also carries the **real** `relation` and `relation_id` from the edges
-table — Phase 2's `get_edges_from(node_id)` / `get_edges_to(node_id)` return full edge
-rows, so the relation comes for free during traversal. Do not settle for `relation=""`.
+table — Phase 2's `get_edges_from(node_id)` / `get_edges_to(node_id)` return
+`(neighbour_node, relation, relation_id)` **tuples** — the neighbour `NodeRecord`
+travels with the labels, so the relation comes for free during traversal (and you
+never need a second `get_node` lookup for a neighbour). Do not settle for `relation=""`.
 
 > Akanga node: `Directed Edge Traversal`
 
@@ -169,8 +171,8 @@ class EgoEdge:
 
 @dataclass
 class EgoGraph:
-    root:  Node
-    nodes: dict[str, Node]   # UUID → Node (includes root)
+    root:  NodeRecord
+    nodes: dict[str, NodeRecord]   # the DB read model — six fields, no content (includes root)
     edges: list[EgoEdge]
 ```
 
@@ -185,13 +187,13 @@ def build_ego_graph(root_id: str, db: GraphDatabase, max_depth: int = 2) -> EgoG
     if root is None:
         raise ValueError(f"Node {root_id!r} not found")
 
-    queue      = deque([(root_id, 0)])
-    visited    = {root_id}
     nodes      = {root_id: root}
     edges      = []
     seen_edges = set()   # dedup key: (source_id, target_id, relation)
+    visited    = {root_id}
+    queue      = deque([(root_id, 0)])
 
-    def add_edge(source_id, target_id, relation, relation_id, direction):
+    def _record(source_id, target_id, relation, relation_id, direction):
         key = (source_id, target_id, relation)
         if key in seen_edges:
             return       # BFS reaches both endpoints — add each logical edge once
@@ -201,30 +203,29 @@ def build_ego_graph(root_id: str, db: GraphDatabase, max_depth: int = 2) -> EgoG
                              direction=direction))
 
     while queue:
-        node_id, current_depth = queue.popleft()
-
-        if current_depth >= max_depth:
+        current_id, depth = queue.popleft()
+        if depth >= max_depth:
             continue   # include the node but don't expand further
 
-        # Outgoing — get_edges_from returns real edge rows, so relation and
-        # relation_id come for free (Phase 2 API).
-        for edge in db.get_edges_from(node_id):
-            if edge.target_id not in visited:
-                visited.add(edge.target_id)
-                nodes[edge.target_id] = db.get_node(edge.target_id)
-                queue.append((edge.target_id, current_depth + 1))
-            add_edge(edge.source_id, edge.target_id, edge.relation,
-                     edge.relation_id, EdgeDirection.OUTGOING)
+        # Outgoing — get_edges_from returns (target_node, relation, relation_id)
+        # TUPLES (Phase 2 API): unpack them; the neighbour NodeRecord is the
+        # first element, so no extra get_node() lookup is needed.
+        for node, relation, relation_id in db.get_edges_from(current_id):
+            if node.id not in visited:
+                visited.add(node.id)
+                nodes[node.id] = node
+                queue.append((node.id, depth + 1))
+            _record(current_id, node.id, relation, relation_id, EdgeDirection.OUTGOING)
 
-        # Incoming — same natural direction (source → target); only the
-        # direction flag differs.
-        for edge in db.get_edges_to(node_id):
-            if edge.source_id not in visited:
-                visited.add(edge.source_id)
-                nodes[edge.source_id] = db.get_node(edge.source_id)
-                queue.append((edge.source_id, current_depth + 1))
-            add_edge(edge.source_id, edge.target_id, edge.relation,
-                     edge.relation_id, EdgeDirection.INCOMING)
+        # Incoming — get_edges_to returns (source_node, relation, relation_id):
+        # the OTHER node is the edge's source. Natural direction is preserved;
+        # only the direction flag differs.
+        for node, relation, relation_id in db.get_edges_to(current_id):
+            if node.id not in visited:
+                visited.add(node.id)
+                nodes[node.id] = node
+                queue.append((node.id, depth + 1))
+            _record(node.id, current_id, relation, relation_id, EdgeDirection.INCOMING)
 
     return EgoGraph(root=root, nodes=nodes, edges=edges)
 ```
