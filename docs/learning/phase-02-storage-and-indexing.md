@@ -128,7 +128,7 @@ SQLite's built-in full-text search extension. Creates a virtual table with an
 inverted index: for each word in the indexed fields, it stores which rows contain it.
 `SELECT * FROM nodes_fts WHERE nodes_fts MATCH 'cognition'` returns all matching
 nodes fast, regardless of vault size. In Akanga, FTS5 covers `title` and `tags` only — never the prose body. Body
-search is handled by ripgrep at the filesystem level. The DB never stores prose
+search is handled by ripgrep (`rg`, a fast recursive file-content search tool) at the filesystem level. The DB never stores prose
 content. (A `description` column for reference nodes is a candidate for a later
 phase — it is not in the Phase 02 schema.)
 

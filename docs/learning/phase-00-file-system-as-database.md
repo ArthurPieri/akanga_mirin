@@ -134,7 +134,7 @@ A file write that either fully completes or has no effect — no observable
 intermediate state. A naive write (`open(path, 'w')` then stream content) is not
 atomic: if the process dies mid-write, the file is left partially written with no
 recovery. The atomic pattern writes to a temp file first, then calls
-`os.replace(temp, target)` — a single OS syscall that renames the inode. The
+`os.replace(temp, target)` — a single OS syscall that repoints the directory entry at the temp file's inode (names live in the directory, not in the inode). The
 reader always sees the old complete file or the new complete file, never a partial
 one.
 

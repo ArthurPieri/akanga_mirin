@@ -130,21 +130,21 @@ Two layers, chosen at runtime based on terminal capability:
 
 **Layer 1 — Pixel-perfect (Kitty, Ghostty, WezTerm, iTerm2):** `textual-image` renders
 the graph as a PNG image inside a Textual widget using the Kitty Terminal Graphics
-Protocol. NetworkX computes a force-directed layout; matplotlib renders it (dark
+Protocol. NetworkX computes a force-directed layout (node positions found by simulating edges as springs and nodes as mutually repelling charges); matplotlib renders it (dark
 background, node shape + color by type, styled edges by direction). The result is
 indistinguishable from a desktop graph view. Falls back to Layer 2 if the protocol
 is unsupported.
 
 **Layer 2 — Universal half-block (every terminal):** `textual-canvas` uses half-block
 Unicode characters (`▀ ▄ █`) to simulate a pixel grid at 2x vertical resolution.
-Nodes are colored rounded boxes; edges are Bresenham lines terminated with Unicode
+Nodes are colored rounded boxes; edges are Bresenham lines (the classic integer algorithm for drawing a straight line on a pixel grid) terminated with Unicode
 arrow characters (`→`, `⟵`). Significantly better than ASCII art and works anywhere.
 
 > **Layer-1 field notes (from the reference build):** terminal-capability
 > auto-detection routinely fails under tmux — and `make study` *is* tmux — so
 > don't trust detection: when you know the terminal is Ghostty or Kitty, force
 > the Kitty graphics protocol explicitly. And render the matplotlib figure at
-> 2× the target pixel size, then downscale (supersampling) — node labels stay
+> 2× the target pixel size, then downscale (supersampling — render larger than the target, then shrink, so lines and labels antialias) — node labels stay
 > legible at terminal-cell resolutions.
 
 > Akanga node: `Two-Layer Graph Renderer`

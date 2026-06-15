@@ -150,28 +150,30 @@ contract here so they don't become silent corruption later.
 `[[Blink by Gladwell | contradcits]]` silently mints a brand-new custom relation
 type. One character of typo and the graph now contains `contradicts` and
 `contradcits` as two unrelated relations, splitting every query that filters on the
-real one. The contract is **soft validation at write-back**: when `write_back`
-encounters a relation name that is neither in the 72-type registry nor
-pre-registered, it never rejects the edge (files must stay writable by any editor),
-but it logs a warning with a nearest-match suggestion from
+real one. The intended contract is **soft validation**: an unknown relation name — neither in
+the 72-type registry nor pre-registered — is never rejected (files must stay writable
+by any editor), but it earns a warning with a nearest-match suggestion from
 `difflib.get_close_matches`:
 
 ```
 WARNING: unknown relation 'contradcits' in blink.md — did you mean 'contradicts'?
 ```
 
-Genuinely custom relation types are allowed — but they must be pre-registered in
-`akanga.yaml`, one line each under `custom_relations:`:
+*Future work (not built in this learning path):* genuinely custom relation types
+could be pre-registered in `akanga.yaml`, one line each under `custom_relations:`, to
+suppress the warning for names you have deliberately adopted:
 
 ```yaml
 custom_relations:
   - refutes_methodology_of
 ```
 
-A pre-registered name produces no warning. `make vault-check` already applies the
-same soft check (warning + nearest-match suggestion) across the whole vault; the
-write-back warning is that check moved to the moment of mutation, where a typo is
-cheapest to fix.
+A pre-registered name would produce no warning. **Today this check lives only in
+`make vault-check`** (a whole-vault pass). The second deferred half is moving that same
+check into `write_back` itself, so a typo is caught at the moment of mutation, where it
+is cheapest to fix. Both halves are specced here for completeness and deliberately
+deferred — the open-vocabulary rule (warn, never reject; mint a UUID for any unknown
+relation) is what ships.
 
 **Rename convergence.** The sync queue does not promise ordered delivery, and
 convergence is not automatic: two renames of the same node in quick succession leave
@@ -187,7 +189,7 @@ same final state: whatever is true now.
 
 *Future work (not built in this learning path):* even with the re-read contract, an
 edge can stay stale forever if its job row is lost — say, a crash after the rename
-commits but before the enqueue does. The V1 anti-entropy backstop is a full-vault
+commits but before the enqueue does. The V1 anti-entropy backstop (a background pass that re-reconciles two stores that may have silently drifted) is a full-vault
 reconciliation pass, `akanga sync --full`: walk every edge, compare each `target`
 display name against the current title of its `target_id`, rewrite mismatches. It
 needs no queue state at all and bounds staleness to "since the last full sync." It

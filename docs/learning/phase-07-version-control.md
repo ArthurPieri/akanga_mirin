@@ -321,7 +321,7 @@ confirmed `P` keybinding unless this flag is flipped.
 
 The watcher fires on every file change, but committing on every keystroke would create thousands of commits per hour. The solution is a **debounced commit**: after a file changes, wait 5 seconds before committing. If another change arrives within that window, restart the 5-second timer. Only when the vault is quiet for 5 full seconds does a commit fire.
 
-This is the same per-key timer pattern from Phase 4, applied to the vault path as the key. `GitManager.commit` is non-fatal — if git fails, log and continue.
+This is Phase 4's debounce design again — a monotonic deadline that every new event pushes forward, checked by a single worker — with one twist: there is only one key (the whole vault), not one per path. Do not reach for a `threading.Timer` per change; that is exactly the anti-pattern Phase 4's Common Pitfalls names. `GitManager.commit` is non-fatal — if git fails, log and continue.
 
 > **`.git` on a synced folder — read this if your vault lives in Dropbox/iCloud**
 >

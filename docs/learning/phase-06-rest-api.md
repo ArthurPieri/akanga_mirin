@@ -16,7 +16,7 @@
 **Core concept:** The TUI talks directly to `akanga_core` as a Python library — same
 process, no network. The REST API adds a second surface: an HTTP server that exposes
 everything the library can do over a network boundary. This enables external clients
-(curl scripts, the future Tauri GUI, third-party tools), and teaches the skill of
+(curl scripts, the future Tauri GUI (a Rust shell that packages a web frontend as a native desktop app), third-party tools), and teaches the skill of
 designing a contract that outlasts any single implementation.
 
 **What makes this non-obvious:** The API is not just "wrap the library in HTTP." It
@@ -362,7 +362,7 @@ class CreateEdgeRequest(BaseModel):
 
 **Why `path` is in the request model:** it is optional and always vault-relative
 (e.g. `"projects/my-note.md"`). When omitted, the server auto-generates a slug
-filename from the title. The field exists precisely so the SEC-02 containment check
+filename from the title (slugify: lowercase, non-alphanumeric runs collapsed to hyphens; see `textutil.slugify`). The field exists precisely so the SEC-02 containment check
 has something to validate — a client-supplied path is the one input that can attempt
 `../` escapes, absolute paths, or symlink tricks, and the create handler must
 `resolve()` it and verify `is_relative_to(vault_root)` before writing anything.
