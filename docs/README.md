@@ -16,7 +16,7 @@ table, the foundation list, and the project terminology. Start there.
 docs/
 ├── index.md                     ← site hub: phases, foundations, terminology
 ├── learning/                    10 phase docs (0, 1A, 1B, 2–8)
-├── foundations/                 15 background explainers
+├── foundations/                 17 background explainers
 │   ├── asyncio-primer.md          ├── mkdocs-basics.md
 │   ├── design-patterns.md         ├── python-dataclasses.md
 │   ├── direnv-basics.md           ├── python-threading.md
@@ -36,14 +36,16 @@ docs/
 │   # (see exclude_docs in mkdocs.yml)
 ├── status-remediation.md        the remediation handoff log — per-round finding
 │                                status + adopted decisions (start here for state)
-├── adversarial-analysis-v5.md   Round 5 risk analysis — readability/DRY (CURRENT)
+├── noteapp-alignment-audit.md   noteapp gap audit — source findings for the N-series round
+├── adversarial-analysis-v6.md   Round 6 risk analysis — noteapp-alignment plan (CURRENT)
+├── adversarial-analysis-v5.md   Round 5 risk analysis — readability/DRY (historical, resolved)
 ├── adversarial-analysis-v4.md   Round 4 risk analysis (historical, resolved)
 ├── adversarial-analysis-v3.md   Round 3 risk analysis (historical, resolved)
 ├── adversarial-analysis-v2.md   Round 2 risk analysis (historical, resolved)
 ├── adversarial-analysis.md      Round 1 risk analysis (historical, resolved)
 ├── implementation-plan.md       historical sprint plan (stale; trust `make status`)
 ├── analysis-and-enhancements.md findings + agreed decisions
-├── plan-*.md                    specialist plans (docs/tests, KG theory, Makefile, security)
+├── plan-*.md                    specialist plans (docs/tests, KG theory, Makefile, security, noteapp alignment)
 ├── roadmap.md                   MVP / V1 / V2 scope boundaries
 ├── user-stories.md              user journeys and requirements
 ├── future-ideas.md              parked features (cloud sync, embeddings, …)

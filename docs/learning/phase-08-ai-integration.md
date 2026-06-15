@@ -343,7 +343,7 @@ def build_context(
     budget = MAX_CONTEXT_CHARS - len(OPEN) - len(CLOSE) - len(HEADERS)
     char_total = 0
 
-    ego = build_ego_graph(node.id, db, depth=2)
+    ego = build_ego_graph(node.id, db, max_depth=2)
 
     # 1. Entity lines — body snippets are read from DISK (the DB stores no prose),
     #    capped at 500 chars per node, and counted INSIDE the budget.

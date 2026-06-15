@@ -374,7 +374,7 @@ class TestListRelationTypes:
 
         The 72 types span 11 prefix categories: EP, HT, SC, CT, AP, DR, CC,
         EV, PA, SO, TC. The registry is docs/foundations/relation-vocabulary.md.
-        Custom (learner-defined) types may append beyond 71 — but a partial
+        Custom (learner-defined) types may append beyond 72 — but a partial
         built-in list is a bug, not an implementation choice.
         """
         list_relation_types = _get_tool(mcp_env.mod, "list_relation_types")

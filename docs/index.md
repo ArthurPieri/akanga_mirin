@@ -48,13 +48,15 @@ Three terms appear throughout the docs; here is the canonical meaning of each.
 
 ## Foundations
 
-Fifteen background explainers, referenced from the phase docs. Read them when a
+Seventeen background explainers, referenced from the phase docs. Read them when a
 phase mentions a concept you're not confident about.
 
 - [Asyncio Primer](foundations/asyncio-primer.md) — event loop, coroutines, `run_coroutine_threadsafe`
 - [Design Patterns](foundations/design-patterns.md) — Observer, Debounce, Repository, Facade, Labeled Property Graph, Graph Traversal, Anemic Domain Model
 - [Direnv Basics](foundations/direnv-basics.md) — per-directory environments with `.envrc`
 - [Git Basics](foundations/git-basics.md) — git workflow, GitPython, commits and branches
+- [Graph Algorithms Beyond BFS](foundations/graph-algorithms-beyond-bfs.md) — centrality, communities, Adamic-Adar, Personalized PageRank (enrichment)
+- [Graph Theory Basics](foundations/graph-theory-basics.md) — your edges table as an adjacency list, recursive-CTE BFS, supernodes
 - [HTTP Fundamentals](foundations/http-fundamentals.md) — verbs, status codes, FastAPI, WebSocket, security
 - [JSON-RPC Basics](foundations/json-rpc-basics.md) — JSON-RPC 2.0, MCP protocol, FastMCP
 - [Makefile Basics](foundations/makefile-basics.md) — targets, variables, phony targets

@@ -404,7 +404,7 @@ doc-contract exit 0, skeleton_check 9/9, markers 3/3, mkdocs clean.
 
 ---
 
-# NOTEAPP ALIGNMENT (N-series) — noteapp-alignment round (2026-06-15, IN PROGRESS)
+# NOTEAPP ALIGNMENT (N-series) — noteapp-alignment round (2026-06-15, COMPLETE)
 
 Plan: `docs/plan-noteapp-alignment.md` (Rev 2). Findings:
 `docs/noteapp-alignment-audit.md` + `docs/adversarial-analysis-v6.md` (12 critiques,
@@ -431,11 +431,11 @@ all resolved in the plan). Branch: `noteapp-alignment-round`.
 - **N6 — single slug rule + collision-safe create (A-4, DONE).** New `textutil.slugify`
   (the one title→filename rule for create/API/MCP) + `unique_path` (numeric suffixes).
   Conformance table pins it byte-for-byte. Replaces three divergent ad-hoc slug rules.
-- **N7 — audience/read-time headers (C3, PENDING).** One-line `**Audience:** … · **Read
+- **N7 — audience/read-time headers (C3, DONE).** One-line `**Audience:** … · **Read
   time:** ~N min` under each foundation-doc H1.
-- **N8 — ego-graph node budget (C4, PENDING).** `build_ego_graph(..., limit=None)` +
+- **N8 — ego-graph node budget (C4, DONE).** `build_ego_graph(..., limit=None)` +
   `EgoGraph.truncated`; supernode guard, told-when-it-bit contract.
-- **N9 — doc-only stretch TEACH items (C9, PENDING).** Relation soft-validation → Phase 8;
+- **N9 — doc-only stretch TEACH items (C9, DONE).** Relation soft-validation → Phase 8;
   `to_mermaid`/export → Phase 3+6. Absorbs v6 #12b (stub-creation stretch mention → Phase 2
   Common Pitfalls, C6) and #12c (slugify conformance-table sidebar → phase-00, shipped with
   A-4's textutil doc edits).
@@ -485,13 +485,25 @@ all resolved in the plan). Branch: `noteapp-alignment-round`.
   "52 of the 72 relation types have no defined inverse"). ALLOW: `relcount:<file>:<n>`
   (empty). Plus this handoff section.
 
-## Workstream C — new content (IN PROGRESS)
+## Workstream C — new content (DONE)
 
-- **C-1 / C-2 (DONE):** `graph-theory-basics.md` (required) + `graph-algorithms-beyond-bfs.md`
-  (enrichment), with audience headers, real-schema examples, nav entries (strict mode green).
-- C3 (headers), C4 (ego budgeting + tests), C5 (three design sidebars), C6 (edge-lifecycle
-  box + stub-stretch), C7 (vector-RAG + prompt-injection + Pydantic pointer), C8 (fence-regex
-  tip), C9 (stretch TEACH), C10 (wiring + round close): PENDING.
+- **C-1 / C-2:** `graph-theory-basics.md` (required) + `graph-algorithms-beyond-bfs.md`
+  (enrichment), with audience headers, real-schema examples, nav entries.
+- **C-3:** audience/read-time headers on every foundation doc.
+- **C-4:** ego-graph node budget (`limit`/`truncated`) — code (3→8) + 2 tests + phase-03/06 docs.
+- **C-5:** three design sidebars (C5a anemic-domain §11, C5b alias-rule, C5c schema-vs-open-dict).
+- **C-6:** phase-02 edge-lifecycle pitfall box + stub-node stretch.
+- **C-7:** phase-08 Vector RAG + Prompt Injection concepts + phase-06 Pydantic pointer.
+- **C-8:** phase-01a fence-regex technique tip.
+- **C-9:** stretch TEACH items (relation soft-validation → Phase 8; to_mermaid export → Phase 3/6).
+- **C-10:** wiring + round close (nav verified, README 17 explainers + map, index.md bullets,
+  relation-vocabulary cross-links, this section finalized, CLAUDE.md flipped, mirror deleted).
+
+## Final verification gate (noteapp-alignment round, all green 2026-06-15)
+
+`make verify-all` (9/9 cumulative), drift `--check-all` (64 pairs converged), ruff clean,
+`check_doc_contracts.py` exit 0 (incl. new check 6), `mkdocs build --strict` clean,
+skeleton_check 0/3/8 OK, script-markers pin 3/3.
 
 ## Deferred item (with trigger)
 
