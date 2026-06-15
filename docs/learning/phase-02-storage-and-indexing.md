@@ -351,6 +351,48 @@ each node so Phase 3 never has to re-query the `edges` table.
 
 **Derived index: never store prose body in the DB.** The DB is rebuilt from files on `akanga index`. If you store prose content in the DB, you have two sources of truth that can diverge — and rebuild becomes lossy if the DB row has content that the file doesn't. FTS5 covers `title` and `tags` only. Body search lives at the filesystem level (ripgrep). This is not a performance choice — it is an architectural constraint that keeps the DB expendable.
 
+!!! note "Edge lifecycle — every way an edge disappears"
+    Edges come in two species. **Body-derived** edges are re-derived from prose on every
+    index — they live and die with the wikilink text. **Frontmatter `edges:`** entries are
+    the persistent source of truth; a typed inline shorthand `[[Target | relation]]` is
+    folded INTO frontmatter by `write_back` at index time, so after one cycle it has become
+    the persistent kind. The ways an edge goes away:
+
+    - **You deleted the wikilink text** → gone on the next index. Expected.
+    - **The target doesn't exist yet** → a warning is logged and *no edge* is created (N3).
+      It resolves automatically at the next **full scan** after the target appears (N2) —
+      the live watcher re-derives only the file that changed, so a running app waits for the
+      next full scan.
+    - **The link sits inside a fenced code block** → stripped before extraction, never an
+      edge (a feature, not a bug — code samples are not links).
+    - **An API-created edge** → persisted file-first to frontmatter, so it survives re-index
+      and even `rm *.db` (N1). Deleting a folded typed edge also de-types its inline
+      shorthand so it cannot re-fold — see the Phase 6 pitfall for the DB-only failure mode
+      this design prevents.
+    - **You deleted the file** → a tombstone records it and `ON DELETE CASCADE` removes its
+      outgoing edges.
+    - **Two notes share a title** → resolved deterministically (N10): the node first in
+      vault path order wins, and a warning names both. Frontmatter edges carrying a stored
+      `target_id` are immune (a UUID bypasses title resolution entirely); the real fix is
+      still to retitle. (noteapp resolves oldest-wins by `created_at`; this schema stores no
+      timestamps, so path order is the stable equivalent.)
+
+    See phase-01a's *Source of Truth* concept for why frontmatter, not the index, is
+    authoritative.
+
+> **Stretch (untested): stub nodes for unresolved links**
+>
+> Akanga logs a warning and creates no edge when a wikilink's target doesn't exist yet
+> (N3). noteapp goes one step further: `create_stub_node` auto-creates a minimal note
+> (`type: note`, tagged `stub`) in the vault root and attaches the edge to it — a link you
+> wrote is never lost, and a second unresolved reference to the same title reuses the
+> existing stub. Porting it is a genuine end-to-end exercise: it touches `create()` (minting
+> the file), the parser (the stub must round-trip), and the indexer (pass 2 must see the new
+> node) — plus two design questions noteapp answered that you'd have to answer too: a
+> `create_stubs=False` opt-out, and what happens when the real note finally arrives under a
+> different filename. No shipped test pins this; if you build it, write your own (the
+> "Optional self-written test" pattern from the Deliverable shows how).
+
 ---
 
 ## Deliverable
