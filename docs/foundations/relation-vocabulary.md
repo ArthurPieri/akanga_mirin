@@ -1,11 +1,15 @@
 # Relation Vocabulary — The 72 Built-in Relation Types
 
+**Audience:** anyone choosing a relation type for an edge · **Read time:** ~10 min skim; reference, don't memorize
+
 **This file is THE relation registry.** Every relation ID used anywhere in the
 repository — phase docs, skeletons, tests, solutions, examples — is defined here
 and only here.
 
 Akanga ships 72 relation types organized into 11 semantic categories. This is the
 vocabulary you build in Phase 1 and query by ID in Phase 8 (`list_relation_types()`).
+
+> **See also:** `graph-theory-basics.md` for what these typed edges *are* (a labeled multigraph) and how the `relation` column makes your edges table a multigraph for free.
 
 > **Note:** `HT-005 instance_of` was added after the initial release; older
 > documents that say "71 types" are counting the pre-`instance_of` vocabulary.
@@ -115,9 +119,11 @@ RDF: `instance_of` is `rdf:type`, `subtype_of` is `rdfs:subClassOf`.)
 | `SC-002` | `implements` | A is a concrete realization of the abstract specification or pattern B | ★ |
 | `SC-003` | `uses` | A employs B as a component, library, or tool | ★ |
 | `SC-004` | `overrides` | A replaces inherited behavior from B | |
-| `SC-005` | `satisfies` | A (design/implementation) satisfies the requirement B | ↔ SC-006 |
-| `SC-006` | `verifies` | A (test/analysis) verifies that a design satisfies requirement B | ↔ SC-005 |
+| `SC-005` | `satisfies` | A (design/implementation) satisfies the requirement B | |
+| `SC-006` | `verifies` | A (test/analysis) verifies that a design satisfies requirement B | |
 | `SC-007` | `aggregates` | A loosely groups B (B can exist independently of A) | |
+
+> **Note:** `satisfies` and `verifies` are complementary (both point at the requirement), not inverses.
 
 ---
 
@@ -237,6 +243,8 @@ RDF: `instance_of` is `rdf:type`, `subtype_of` is `rdfs:subClassOf`.)
 
 ## Choosing Between Overlapping Types
 
+> **Typos vs. custom types:** the vocabulary is open — `write_back` mints a UUID for any unknown relation rather than rejecting it. To catch a *typo* (`suports` for `supports`) without closing the vocabulary, Phase 8 sketches a `suggest_relation` stretch that warns with a `difflib` nearest match and keeps the edge either way.
+
 Two clusters of the vocabulary overlap heavily in practice. Use these discriminators.
 
 ### The "supersedes" cluster — `EP-007`, `EP-008`, `AP-003`, `EV-001`, `EV-002`
@@ -330,7 +338,7 @@ frontmatter instead. The derived names stay in the registry (their IDs are stabl
 forever) so old edges still resolve, but new edges should use the canonical member.
 
 **Everything else renders in natural direction only.** Directed types *without* a
-listed inverse (the other 56 directed types) have no sanctioned inverse label. A
+listed inverse (the other 52 directed types) have no sanctioned inverse label. A
 triple is always serialized in its stored, natural direction —
 `Source --[relation]--> Target` — regardless of which endpoint you are looking from.
 Do **not** invent inverse names like `is_supported_by` or `is_X_by`: mechanical

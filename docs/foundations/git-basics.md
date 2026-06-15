@@ -1,5 +1,7 @@
 # Git Basics
 
+**Audience:** Python developers who use git day-to-day but haven't seen its internals · **Read time:** ~8 min
+
 A practical reference for understanding git internals and how they map to
 GitPython — the library akanga uses in `gitmgr.py`.
 

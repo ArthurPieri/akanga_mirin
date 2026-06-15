@@ -642,3 +642,20 @@ def test_malformed_frontmatter(tmp_path, parse_fn):
     # as long as it doesn't crash silently.
     with pytest.raises(Exception):
         parse_fn(str(node_file))
+
+
+def test_create_same_title_twice_does_not_overwrite(tmp_vault, create_fn, parse_fn):
+    """Two create() calls with the same title yield two files — the first is intact (N6)."""
+    first = _call_create(create_fn, title="Shared Title", node_type="note", vault=tmp_vault)
+    second = _call_create(create_fn, title="Shared Title", node_type="note", vault=tmp_vault)
+
+    first_path = Path(_node_field(first, "path"))
+    second_path = Path(_node_field(second, "path"))
+    assert first_path != second_path, (
+        "a second create() with the same title must NOT overwrite the first — "
+        "use a collision-safe filename (my-note.md, then my-note-1.md, ...)"
+    )
+    assert first_path.exists() and second_path.exists(), "both files must remain on disk"
+    assert _node_field(parse_fn(str(first_path)), "id") != _node_field(
+        parse_fn(str(second_path)), "id"
+    ), "the two notes are distinct nodes with distinct ids"

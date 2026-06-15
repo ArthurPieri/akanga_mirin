@@ -331,3 +331,63 @@ class TestRenderAscii:
         assert ego.root.title in result, (
             f"Expected root title {ego.root.title!r} to appear in render_ascii output"
         )
+
+
+# ---------------------------------------------------------------------------
+# Node budget (C4 / N8): build_ego_graph(..., limit=) caps node count and
+# reports truncation. Assert COUNTS and the flag only — never WHICH neighbours
+# survived (the budget order is an implementation detail).
+# ---------------------------------------------------------------------------
+
+
+def _star_db(tmp_path: Path):
+    """Return a db + root id for a star: root → n1..n5 (5 outgoing edges)."""
+    GraphDatabase = _load_db()
+    db = GraphDatabase(str(tmp_path / "star.db"))
+
+    root_id = str(uuid.UUID("aaaaaaaa-0000-0000-0000-000000000000"))
+    ids = [root_id] + [
+        str(uuid.UUID(f"bbbbbbbb-0000-0000-0000-00000000000{i}")) for i in range(1, 6)
+    ]
+    for n, nid in enumerate(ids):
+        db.upsert_node(
+            {
+                "id": nid,
+                "title": f"Node-{n}",            # unique per node, never collide
+                "type": "note",
+                "tags": [],
+                "path": str(tmp_path / f"node-{nid}.md"),   # full UUID = unique path
+                "content": "",
+                "content_hash": f"hash_{nid[:8]}",
+            }
+        )
+    for nid in ids[1:]:
+        db.upsert_edge(root_id, nid, relation="links_to")
+    return db, root_id
+
+
+class TestEgoGraphNodeBudget:
+    def test_ego_graph_limit_truncates(self, tmp_path: Path) -> None:
+        """limit=3 on a root with 5 neighbours: exactly 3 nodes, truncated=True,
+        and every recorded edge has both endpoints inside nodes."""
+        db, root_id = _star_db(tmp_path)
+        try:
+            ego = build_ego_graph(root_id, db, max_depth=1, limit=3)
+            assert len(ego.nodes) == 3, "limit=3 must cap nodes at 3 (root + 2)"
+            assert ego.truncated is True, "truncation must be reported to the caller"
+            node_ids = set(ego.nodes)
+            for edge in ego.edges:
+                assert edge.source_id in node_ids, "edge source must be a kept node"
+                assert edge.target_id in node_ids, "edge target must be a kept node"
+        finally:
+            db.close()
+
+    def test_ego_graph_no_limit_not_truncated(self, tmp_path: Path) -> None:
+        """limit=None (default) keeps every neighbour and never flags truncation."""
+        db, root_id = _star_db(tmp_path)
+        try:
+            ego = build_ego_graph(root_id, db, max_depth=1)
+            assert len(ego.nodes) == 6, "unbounded build keeps root + 5 neighbours"
+            assert ego.truncated is False, "an unbounded build is never truncated"
+        finally:
+            db.close()

@@ -1,5 +1,7 @@
 # Python Threading
 
+**Audience:** developers comfortable with Python functions — this is the threading half of Akanga's concurrency model · **Read time:** ~10 min
+
 Phase 4 of the learning path covers concurrency — the hardest conceptual leap in the codebase. This doc covers the **threading** side. The companion doc `asyncio-primer.md` covers the async side. Both meet in `eventbus.py`.
 
 ---

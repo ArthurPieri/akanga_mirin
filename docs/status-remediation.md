@@ -353,6 +353,12 @@ hashes records; if a `set[NodeRecord]` is ever needed, change tags to
 
 # NOTEAPP SYNC — Cross-repo port batch (2026-06-12)
 
+> **Superseded note (2026-06-12, second pass):** a full alignment audit
+> (`docs/noteapp-alignment-audit.md`) found core-integrity gaps invisible to this
+> section's classification — file-first manual edges (F1, a P0) among them. "Most
+> core-integrity fix classes were already absorbed" no longer stands; see the
+> NOTEAPP ALIGNMENT (N-series) section below.
+
 A gap analysis of the noteapp reference implementation (the codebase this
 curriculum is distilled from) against the curriculum classified every recent
 noteapp theme as PORT / ADD / PARK / SKIP. Most core-integrity fix classes
@@ -394,3 +400,111 @@ Executed this batch:
 Gates green post-merge: lint, test-all 9/9 (phase_05 now 9 tests, phase_02
 41), verify PHASE=8 cumulative, drift gate converged (parser re-propagated),
 doc-contract exit 0, skeleton_check 9/9, markers 3/3, mkdocs clean.
+
+
+---
+
+# NOTEAPP ALIGNMENT (N-series) — noteapp-alignment round (2026-06-15, COMPLETE)
+
+Plan: `docs/plan-noteapp-alignment.md` (Rev 2). Findings:
+`docs/noteapp-alignment-audit.md` + `docs/adversarial-analysis-v6.md` (12 critiques,
+all resolved in the plan). Branch: `noteapp-alignment-round`.
+
+## Adopted decisions (N1–N11) — recorded, do not re-litigate
+
+- **N1 — file-first manual edges (A-1, DONE).** `POST /api/v1/edges` writes an `edges:`
+  frontmatter entry on the source note and reindexes; DELETE removes it. Survives
+  `rm *.db`. Deleting a folded typed edge also de-types its inline shorthand so it
+  cannot re-fold. Guards: 400 self-edge / reserved `wikilink` / missing endpoint;
+  409 duplicate. `db.get_edge()` added (canonical phase-02).
+- **N2 — re-derivation trigger (A-2, DONE).** `full_scan_and_index` re-derives all when
+  new files appear or any file was removed; the live watcher re-derives only the changed
+  file. An unresolved link resolves automatically at the next full scan after the target
+  appears.
+- **N3 — link warnings (A-2, DONE).** An unresolved wikilink / frontmatter edge logs a
+  warning and creates no edge (never a silent NULL-target edge in traversals).
+- **N4 — alias rule (A-3, DONE).** In `[[Target | x]]`, a pipe segment matching
+  `^[a-z][a-z0-9_-]*$` is a relation; anything else is an Obsidian display alias.
+  Documented residual: slug-shaped aliases still mint relations (accepted cost).
+- **N5 — single-edge links (A-3, DONE).** A typed inline shorthand becomes exactly one
+  edge; `extract_wikilinks` skips typed relations so the same link is never double-counted.
+- **N6 — single slug rule + collision-safe create (A-4, DONE).** New `textutil.slugify`
+  (the one title→filename rule for create/API/MCP) + `unique_path` (numeric suffixes).
+  Conformance table pins it byte-for-byte. Replaces three divergent ad-hoc slug rules.
+- **N7 — audience/read-time headers (C3, DONE).** One-line `**Audience:** … · **Read
+  time:** ~N min` under each foundation-doc H1.
+- **N8 — ego-graph node budget (C4, DONE).** `build_ego_graph(..., limit=None)` +
+  `EgoGraph.truncated`; supernode guard, told-when-it-bit contract.
+- **N9 — doc-only stretch TEACH items (C9, DONE).** Relation soft-validation → Phase 8;
+  `to_mermaid`/export → Phase 3+6. Absorbs v6 #12b (stub-creation stretch mention → Phase 2
+  Common Pitfalls, C6) and #12c (slugify conformance-table sidebar → phase-00, shipped with
+  A-4's textutil doc edits).
+- **N10 — deterministic title resolution (A-2, DONE).** Duplicate titles resolve in vault
+  path order (`ORDER BY path ASC`); a warning names both. Frontmatter edges with a stored
+  `target_id` bypass title resolution (UUIDs are immune). noteapp resolves oldest-wins by
+  `created_at`; this schema stores no timestamps, so path order is the stable equivalent.
+- **N11 — hyphen-key tolerance (A-3, DONE).** `_fm_get` reads a frontmatter key under its
+  underscore OR hyphen spelling, so `created_at`/`created-at` both parse.
+
+## Workstream B — documentation correctness (prose log)
+
+- **B-1 (DONE):** 71→72 relation-count sweep across docs/tests/skeletons/solutions;
+  inverse recount to "52 of the 72"; cleared the SC-005/006 `↔` flags (`satisfies` and
+  `verifies` are complementary, not inverses) with a note. Canonical db.py(2→8) /
+  graph.py(3→8) synced.
+- **B-2 (DONE):** phase-03 traversal rewrite — `get_edges_from/to` return
+  `(neighbour_NodeRecord, relation, relation_id)` tuples, not edge rows with
+  `.target_id`; `EgoGraph` fields corrected to `NodeRecord`.
+- **B-3 (DONE):** FTS5 external-content rewrite in sqlite-basics (real `title,tags,
+  content='nodes'` schema + the four-step `'delete'`-command sync dance; Minimal
+  GraphDatabase example brought in line); phase-02 DB_SCHEMA block gains
+  `UNIQUE(source,target,relation)` + both indexes (byte-equal to the skeleton constant).
+- **B-4 (DONE):** yaml-frontmatter tail rewritten to curriculum truth (type note|reference;
+  dual-key `graph` workspace membership; `meta`/`edges`; akanga.yaml default_workspace +
+  workspaces; relation types live in relation-vocabulary.md + UUID-minted, not akanga.yaml).
+  Nested-dict example switched off the cut active-node config.
+- **B-5 (DONE):** asyncio drift + active-manager ghost sweep. Removed the cut active-node
+  design's ghosts (ActiveNodeManager/active.py/aiohttp/active manager/active_result(s)/
+  `type="active"`/active-check endpoint). Rewrote `EventBus.publish()` to the real
+  three-rule contract with BUG-04 startup buffering; fixed the Phase 6 lifespan shape.
+  **Correct-to-truth deviation (user-approved):** `AkangaApp` is a REAL Phase-8 composition
+  root (sync `start_all`, wires watcher/db/eventbus/git) — kept and corrected, NOT erased to
+  `create_app` as the plan's B5/B6 assumed; the async bridge is presented as a tested
+  EventBus capability, not the shipped path (real subscribers are sync). Gate relaxed to
+  "zero active-* ghosts presented as real." design-patterns §7 Strategy → deferred design.
+- **B-6 (DONE):** small fixes (phase-07 debounce framing; http-fundamentals explicit dict
+  not `vars(node)`; phase-00 `os.replace` repoints the directory entry; phase-1B Relation
+  Hygiene reframed as deferred spec — open-vocabulary warn-never-reject is what ships) +
+  glossary one-liners (ripgrep, slugify, Tauri, anti-entropy, force-directed, Bresenham,
+  supersampling).
+- **B8 / B-7 (DONE):** `check_doc_contracts.py` check 6 — RELATION-COUNT DRIFT. Derives the
+  registry count from relation-vocabulary.md's unique ID-rows and flags any
+  `<n>-type` / `<n> relation types` / context-anchored `of the <n> {relation|directed|…}`
+  claim that disagrees. The bare `of the <n>` form is forbidden (false-positives on node
+  counts: pinned known-negative "22 of the 170 … 12,000-char budget"; pinned known-positive
+  "52 of the 72 relation types have no defined inverse"). ALLOW: `relcount:<file>:<n>`
+  (empty). Plus this handoff section.
+
+## Workstream C — new content (DONE)
+
+- **C-1 / C-2:** `graph-theory-basics.md` (required) + `graph-algorithms-beyond-bfs.md`
+  (enrichment), with audience headers, real-schema examples, nav entries.
+- **C-3:** audience/read-time headers on every foundation doc.
+- **C-4:** ego-graph node budget (`limit`/`truncated`) — code (3→8) + 2 tests + phase-03/06 docs.
+- **C-5:** three design sidebars (C5a anemic-domain §11, C5b alias-rule, C5c schema-vs-open-dict).
+- **C-6:** phase-02 edge-lifecycle pitfall box + stub-node stretch.
+- **C-7:** phase-08 Vector RAG + Prompt Injection concepts + phase-06 Pydantic pointer.
+- **C-8:** phase-01a fence-regex technique tip.
+- **C-9:** stretch TEACH items (relation soft-validation → Phase 8; to_mermaid export → Phase 3/6).
+- **C-10:** wiring + round close (nav verified, README 17 explainers + map, index.md bullets,
+  relation-vocabulary cross-links, this section finalized, CLAUDE.md flipped, mirror deleted).
+
+## Final verification gate (noteapp-alignment round, all green 2026-06-15)
+
+`make verify-all` (9/9 cumulative), drift `--check-all` (64 pairs converged), ruff clean,
+`check_doc_contracts.py` exit 0 (incl. new check 6), `mkdocs build --strict` clean,
+skeleton_check 0/3/8 OK, script-markers pin 3/3.
+
+## Deferred item (with trigger)
+
+`check_doc_contracts.run_checks` extraction — revisit only if that file grows materially.

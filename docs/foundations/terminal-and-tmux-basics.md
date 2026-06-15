@@ -1,5 +1,7 @@
 # Terminal and tmux Basics
 
+**Audience:** developers new to the terminal or to tmux as a daily driver · **Read time:** ~12 min
+
 A practical reference for working in the terminal — the primary environment for
 developing and running akanga.
 

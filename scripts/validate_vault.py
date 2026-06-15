@@ -7,7 +7,7 @@ Checks, in order:
   2. Edges are well-formed — both the canonical frontmatter `edges:` block
      (list of {relation, relation-id, target, target-id}) and the inline
      shorthand `[[Target | relation]]` taught in Phase 1A.
-  3. Relation names match the 71-type vocabulary in
+  3. Relation names match the 72-type vocabulary in
      docs/foundations/relation-vocabulary.md (soft warning + nearest-match
      suggestion — custom relations are allowed by design).
   4. With --phase N: the phase doc's "Vault Nodes to Create" table is present

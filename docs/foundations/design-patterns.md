@@ -1,5 +1,7 @@
 # Design Patterns in Akanga
 
+**Audience:** developers reading Akanga's code who want the *why* behind each design choice · **Read time:** ~18 min
+
 This document explains the software design patterns used in the Akanga knowledge graph. You will encounter all of these patterns as you work through Phases 0–8. Understanding the pattern before you write the code makes the "why" of each design decision legible.
 
 ---
@@ -16,7 +18,7 @@ Akanga is not just a knowledge graph — it is a worked example of how productio
 
 **Where:** `eventbus.py` — `EventBus.publish()`, `EventBus.subscribe()`
 
-**Why Akanga uses it:** The file watcher, the active node manager, the git manager, and the TUI all need to react when a vault file changes. If the watcher called each of these directly, every new feature would require modifying the watcher. With the EventBus, each new consumer subscribes independently; the watcher never changes.
+**Why Akanga uses it:** The file watcher publishes; the indexer, the git auto-commit batcher, and the TUI all need to react when a vault file changes. If the watcher called each of these directly, every new feature would require modifying the watcher. With the EventBus, each new consumer subscribes independently; the watcher never changes.
 
 ```python
 # Publisher — does not know who is listening
@@ -36,7 +38,7 @@ self.eventbus.subscribe("node_updated", self._active_mgr.on_node_updated)
 
 **What it is:** When an event fires multiple times in rapid succession, wait for a quiet period before acting. Cancel any pending action when a new event arrives.
 
-**Where:** `watcher.py` — `_EventHandler._debounced()` and `app.py` — `AkangaApp._queue_commit()`
+**Where:** `watcher.py` — `_EventHandler._debounced()` and `app.py` — `AkangaApp`'s git commit batcher (`_commit_loop` / `_flush_commit`)
 
 **Why Akanga uses it:** An editor like Neovim writes a file in multiple steps: create temp file, write content, rename to target. Without debouncing, the indexer would be called 3–5 times per save. The debounce coalesces these into one call, 500ms after the last write event.
 
@@ -110,20 +112,25 @@ except BaseException:
 
 **Where:** `app.py` — `AkangaApp`
 
-**Why Akanga uses it:** The system has six subsystems: database, file watcher, event bus, active node manager, git manager, and indexer. The server and TUI would need to construct and wire all six themselves — including getting the startup order right, threading the eventbus loop before the watcher starts, and tearing down in the correct order on shutdown. `AkangaApp` encapsulates all of this. Callers call `start_all()` and `stop_all()`.
+**Why Akanga uses it:** The system has five subsystems: database, file watcher, event bus, git manager, and indexer. The server and TUI would need to construct and wire them all themselves — getting the startup order right and tearing down in the correct order on shutdown. `AkangaApp` (the Phase 8 composition root) encapsulates all of this. Callers call `start_all()` and `stop_all()`.
 
 ```python
 # Caller sees one method
-await app.start_all()
+app.start_all()
 
-# AkangaApp wires everything in the right order
-async def start_all(self) -> None:
-    self.eventbus.set_loop(asyncio.get_running_loop())  # must be first
-    self.start()          # init git → initial index → start watcher
-    await self.start_active()  # starts asyncio health-check scheduler
+# AkangaApp wires everything in the right order (start_all is synchronous)
+def start_all(self) -> None:
+    full_scan_and_index(self.vault_path, self.db)  # DB reflects the vault as of now
+    self.watcher.start()                           # daemon thread reports changes
+    self._start_commit_batcher()                   # debounced git auto-commits
 ```
 
-**The ordering invariant:** `set_loop()` must be called before `start_watcher()`. If the watcher fires an event before the loop is set, the publish falls back to `asyncio.get_running_loop()` from a non-async thread — which raises `RuntimeError`. The Facade encodes this ordering rule so callers cannot get it wrong.
+**The ordering invariant:** the initial index runs *before* `watcher.start()`, so the
+DB reflects the vault before any change event arrives, and shutdown stops the watcher
+*before* flushing the final commit. The Facade encodes this ordering so callers cannot
+get it wrong. (The bundled subscribers are synchronous; if you add an async one, call
+`eventbus.set_loop(loop)` during startup — the bus buffers events published before the
+loop is set, so there is no startup race to get wrong.)
 
 ---
 
@@ -131,17 +138,17 @@ async def start_all(self) -> None:
 
 **What it is:** Instead of a component creating its own dependencies, the dependencies are passed in by the caller.
 
-**Where:** Every manager in the codebase — `ActiveNodeManager(db, eventbus=...)`, `VaultWatcher(vault, eventbus, debounce_ms)`, `AkangaApp(vault, db_path, git_sync)`
+**Where:** Every collaborator in the codebase — `VaultWatcher(vault_path, eventbus)`, `GraphDatabase(db_path)`, `AkangaApp(vault_path, db_path)`
 
-**Why Akanga uses it:** Unit tests need to substitute a real SQLite database with an in-memory one, or a real EventBus with a mock. If `ActiveNodeManager` created its own `GraphDatabase`, tests could not inject a temporary test database. Passing dependencies in makes components testable in isolation.
+**Why Akanga uses it:** Unit tests need to substitute a real SQLite database with an in-memory one, or a real EventBus with a mock. If `VaultWatcher` constructed its own `EventBus`, a test could not observe what it publishes. Passing dependencies in makes components testable in isolation.
 
 ```python
-# Test can inject a fresh in-memory db
+# Test can inject a fresh in-memory db and observe a real bus
 db = GraphDatabase(":memory:")
-manager = ActiveNodeManager(db, eventbus=EventBus())
+watcher = VaultWatcher("./vault", EventBus())   # bus injected, not constructed inside
 
-# Production wires real components
-app = AkangaApp(vault="./vault", db_path="./.akanga.db")
+# Production wiring (AkangaApp does this for you)
+app = AkangaApp(vault_path="./vault", db_path="./.akanga.db")
 ```
 
 **Contrast with module-level singletons:** A common anti-pattern is `DB = GraphDatabase(settings.DB_PATH)` at module level. Module-level singletons are shared across all tests in a pytest session — one test's writes contaminate the next test's reads. Dependency injection solves this by making every test's dependencies independent.
@@ -152,9 +159,16 @@ app = AkangaApp(vault="./vault", db_path="./.akanga.db")
 
 **What it is:** Define a family of interchangeable algorithms (strategies) behind a common interface. The client picks which strategy to use at runtime without knowing how it works.
 
-**Where:** `active.py` — HTTP and TCP health check actions, dispatched on `node.frontmatter["active"]["action"]`
+**Where:** *Deferred design — no phase builds this.* An earlier active-node design would
+have put HTTP and TCP health-check actions behind one interface, dispatched on an
+`action` field; it was cut (see `future-ideas.md`). The pattern is kept here because it
+is the cleanest illustration of Strategy and the most likely shape a future extension
+would take.
 
-**Why Akanga uses it:** Active nodes can check either an HTTP endpoint or a TCP port. Both produce a result (up/down + timestamp). The active manager does not need to know which kind it is handling — it calls the same `_check()` method and gets back the same result shape. Adding a new action type (e.g., CLI command) means adding a new branch, not rewriting the manager.
+**Why the pattern fits:** Two interchangeable checks (HTTP endpoint vs TCP port) would
+both produce the same result shape (up/down + timestamp). A caller dispatching on the
+`action` field would call one `_check()` method regardless of kind; adding a new action
+type (e.g. a CLI command) means adding a branch, not rewriting the caller.
 
 ---
 
@@ -172,7 +186,7 @@ app = AkangaApp(vault="./vault", db_path="./.akanga.db")
 
 **What it is:** A graph data model with three ingredients: **nodes** that carry properties (key-value pairs), **edges** that carry a type label (the relation), and optionally properties on the edges themselves. This is the model behind Neo4j and most modern graph databases — as opposed to a plain hyperlink graph, where edges are anonymous, or RDF triples, where everything is a flat statement.
 
-**Where:** The entire data model — `Node`, `Edge`, the frontmatter schema, and the 71-type relation vocabulary. Phase 1A is where you build it.
+**Where:** The entire data model — `Node`, `Edge`, the frontmatter schema, and the 72-type relation vocabulary. Phase 1A is where you build it.
 
 **Why Akanga uses it:** "A links to B" tells you almost nothing. "A *contradicts* B" or "A *depends_on* B" is a queryable fact. The label is what turns a pile of cross-referenced notes into a knowledge graph: you can filter traversals by relation type, ask directed questions ("what does this node refute?"), and compute meaningful neighborhoods.
 
@@ -184,14 +198,14 @@ title: BFS
 type: note              # node property
 tags: [algorithms]      # node property
 edges:
-  - relation: contrasts_with    # edge label, from the 71-type vocabulary
+  - relation: contrasts_with    # edge label, from the 72-type vocabulary
     target: "[[DFS]]"
   - relation: is_applied_in     # second typed edge from the same node
     target: "[[Ego-Graph Endpoint]]"
 ```
 
 - Every Markdown file is a **node**; its frontmatter keys (`title`, `type`, `tags`, `graph`) are the node's properties.
-- Every frontmatter edge entry (and every inline `[[wikilink]]` shorthand) becomes an **edge**; its `relation` field is the label, drawn from the 71-type vocabulary in `relation-vocabulary.md`.
+- Every frontmatter edge entry (and every inline `[[wikilink]]` shorthand) becomes an **edge**; its `relation` field is the label, drawn from the 72-type vocabulary in `relation-vocabulary.md`.
 - The SQLite `edges` table stores `(source_id, target_id, relation)` — the relational projection of the same model. The files are the source of truth; the table is the derived index.
 
 **The design consequence:** because the label lives on the edge, not the node, adding a new way for two notes to relate never requires touching either note's schema — you add one edge entry. That is the property-graph advantage over baking relationships into node fields.
@@ -230,6 +244,39 @@ def ego_graph(db, root_id: str, max_depth: int = 2) -> set[str]:
 
 ---
 
+## 11. Dataclasses + Services (the deliberately anemic domain model)
+
+**What it is:** Domain data lives in plain dataclasses that carry no behavior; the behavior lives in module-level functions that take their dependencies as arguments. The opposite of the *rich* domain object (`node.save()`, `node.link_to(other)`) you may expect from object-oriented Python — Martin Fowler calls this the "anemic domain model," and means it as a warning. Akanga adopts it on purpose.
+
+**Where:** `models.Node` and `db.NodeRecord` are pure data; `graph.build_ego_graph(root_id, db)` and the indexer functions are the behavior.
+
+```python
+# Not this — the rich/active-record object
+node.save()
+node.link_to(other)
+graph = node.ego_graph()        # where does the db come from?
+
+# This — dumb data + a function that names its dependency
+record = db.get_node(node_id)            # a frozen NodeRecord, no methods
+ego = build_ego_graph(node_id, db)       # the db is right there in the signature
+```
+
+**Why Akanga uses it:** Graphs are the textbook OOP example — a `Node` object holding methods and direct references to its neighbours feels like the obvious model, and that instinct is fair. Three concrete forces push the other way:
+
+1. **A self-saving `Node` welds the parse model to the storage model.** Akanga keeps two models apart on purpose (decision W9): `models.Node` is the round-trip parse model — it carries `content` and `frontmatter`; `db.NodeRecord` is the six-field DB read model — `@dataclass(frozen=True, slots=True)`, no body. A `node.save()` method would force one class to know both the frontmatter shape and the SQL schema, so a frontmatter change could ripple into a schema change. Two dumb dataclasses keep that seam honest: write path takes a `Node`, read path returns a `NodeRecord`.
+
+2. **Behavior lives where its dependencies live.** `build_ego_graph(root_id, db)` openly declares the `db` it needs in its signature — which is exactly what makes Dependency Injection (§6) and isolated testing work. A `node.ego_graph()` method has no parameter to inject; it would have to reach for a hidden module-level `db` global, the very anti-pattern §6 exists to avoid.
+
+3. **Dumb data crosses boundaries cleanly; live objects do not.** A `NodeRecord` is just six fields — it pickles, serializes to JSON, and travels across the watcher/async thread boundary without complaint. An object holding a live SQLite handle or a `threading.Lock` cannot be pickled, cannot be handed to another thread, and cannot be returned as an HTTP response body.
+
+**Where the line is — this is not "never use classes":** `GraphDatabase` *is* a class, because it owns a resource: one shared connection plus the `threading.Lock` that serializes writes. That is the Repository pattern (§3), and a resource-owning object is precisely where a class earns its keep. The distinction is about what the object holds, not about avoiding `class`.
+
+**The rule, stated crisply:** state that owns a resource → a class; data that crosses a boundary → a dataclass; behavior → a module function with injected dependencies.
+
+> → You build the first of these dataclasses (`Edge`, `Node`) in Phase 1A.
+
+---
+
 ## Summary Table
 
 | Pattern | Where in codebase | Problem it solves |
@@ -240,10 +287,11 @@ def ego_graph(db, root_id: str, max_depth: int = 2) -> set[str]:
 | Atomic Write | `parser.py` | Crash-safe file writes with no partial state |
 | Facade | `app.py` | Hide startup ordering complexity from callers |
 | Dependency Injection | All managers | Enable isolated unit tests |
-| Strategy | `active.py` | Swap health-check implementations without changing the manager |
+| Strategy | *(deferred design)* | Sketched for the cut active-node design — swap health-check implementations behind one interface |
 | Two-Phase Commit | `indexer.py` | Ensure referenced nodes exist before creating edges |
 | Labeled Property Graph | `models.py`, frontmatter schema | Typed, queryable edges instead of anonymous links |
 | Graph Traversal (BFS) | `graph.py` | Bounded ego-graphs with cycle-safe iteration |
+| Anemic Domain Model | `models.py` + `graph.py` functions | Keep parse/storage models apart; data crosses boundaries, behavior is injected |
 
 ---
 

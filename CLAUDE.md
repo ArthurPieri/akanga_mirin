@@ -61,15 +61,22 @@ that log over any prose — including this file.
 
 ## Current focus
 
-Round 5 remediation is **COMPLETE** — all 9 findings of
-`docs/adversarial-analysis-v5.md` (readability + DRY lens) are resolved. The
-running handoff log with per-finding status and adopted decisions (W1–W9) is
-`docs/status-remediation.md`.
+The **noteapp-alignment round (N-series) is COMPLETE** (2026-06-15) — every
+finding of `docs/noteapp-alignment-audit.md` plus all 12 amendments of
+`docs/adversarial-analysis-v6.md` are resolved; decisions N1–N11 are logged in
+`docs/status-remediation.md`. (Prior: Round 5 readability/DRY, decisions W1–W9,
+also complete.) **No round is currently in progress** — `make status` and
+`docs/status-remediation.md` are the live state.
 
-No round is currently in progress — `make status` and
-`docs/status-remediation.md` are the live state. One deferred item with a
-trigger: `check_doc_contracts.run_checks` extraction, revisit only if that
-file grows.
+One deferred item with a trigger: `check_doc_contracts.run_checks` extraction,
+revisit only if that file grows.
+
+One adopted deviation worth knowing: the asyncio/active-manager sweep was executed
+**correct-to-truth** rather than to the plan's literal B5/B6 text — `AkangaApp` is a
+real Phase-8 composition root (sync `start_all`, wires watcher/db/eventbus/git, no
+active manager), so it was kept and corrected, not erased to `create_app`; the async
+EventBus bridge is documented as a tested capability, not the shipped path (real
+subscribers are sync).
 
 ---
 

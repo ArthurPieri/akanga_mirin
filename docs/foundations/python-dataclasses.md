@@ -1,5 +1,7 @@
 # Python Dataclasses
 
+**Audience:** Python developers who know classes but haven't used `@dataclass` · **Read time:** ~10 min
+
 A dataclass is a regular Python class with a decorator that auto-generates boilerplate: `__init__`, `__repr__`, and `__eq__`. Instead of writing the same field-assignment code in every `__init__`, you declare fields as annotated class attributes and let Python generate the rest.
 
 Dataclasses were added in Python 3.7 (PEP 557). They are the standard way to define data-carrying objects in modern Python — lighter than full classes when you don't need custom behavior, and more structured than plain dicts.

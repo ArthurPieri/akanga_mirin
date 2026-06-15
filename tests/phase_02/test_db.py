@@ -259,7 +259,7 @@ def test_get_edges_from(db_path: str, vault_dir: Path):
 
     Unlike get_neighbors, this preserves the relation label and registry id —
     Phase 3 ego graphs and Phase 8 RAG triples need them (a bare node list
-    forces relation='' downstream and guts the 71-type vocabulary).
+    forces relation='' downstream and guts the 72-type vocabulary).
     """
     db = GraphDatabase(db_path)
     node_a = _make_node("33333333-0001-0001-0001-000000000001", "Edge From Source", vault_dir)

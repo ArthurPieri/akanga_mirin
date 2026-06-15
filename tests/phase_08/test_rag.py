@@ -334,7 +334,7 @@ class TestTripleSerialization:
         BUG-03 regression guard: an edge X→Cognition, seen while building
         context for Cognition, must still render 'X --[rel]--> Cognition' —
         never an inverted 'Cognition <-[rel]- X' arrow and never a synthesized
-        'is_X_by' inverse label (51 of the 71 directed types have no defined
+        'is_X_by' inverse label (52 of the 72 relation types have no defined
         inverse, so there is no sanctioned label for an inverted rendering).
         """
         rag = _load_rag()

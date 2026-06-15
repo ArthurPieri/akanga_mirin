@@ -55,17 +55,20 @@ def resolve_wikilink(title: str, db: "GraphDatabase") -> str | None:
 
     HOW:
     1. Inside `with db._lock:`, execute:
-           SELECT id FROM nodes WHERE lower(title) = lower(?)
-       with `(title,)` as the parameter.
-    2. Call `.fetchone()`. If the result is None, return None.
-    3. Otherwise return `row[0]` (or `row["id"]` if using `sqlite3.Row`).
+           SELECT id, path FROM nodes WHERE lower(title) = lower(?) ORDER BY path ASC
+       with `(title,)` as the parameter, then `.fetchall()`.
+    2. If no rows, return None.
+    3. If MORE than one row, log a warning naming the shadowed duplicate(s) —
+       a link you wrote should never resolve silently to an unpredictable node.
+    4. Return the FIRST row's id (`rows[0]["id"]`).
 
     Notes:
     - Case-insensitive matching handles "cognitive load" == "Cognitive Load".
-    - Returning None (not raising) lets the indexer silently skip unresolvable
-      wikilinks rather than aborting the entire scan.
-    - If multiple nodes share the same title, the first result is returned.
-      Disambiguating by path or UUID is out of scope for Phase 02.
+    - Returning None (not raising) lets the indexer skip-and-warn on
+      unresolvable wikilinks rather than aborting the entire scan.
+    - Duplicate titles resolve DETERMINISTICALLY by vault PATH order (path is
+      NOT NULL UNIQUE — a total order, stable across `rm *.db` rebuilds, unlike
+      rowid/insertion order). The first path wins (N10).
     """
     raise NotImplementedError(
         "SELECT id FROM nodes WHERE lower(title) = lower(?); fetchone(); "

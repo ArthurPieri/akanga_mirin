@@ -1,5 +1,7 @@
 # Python Type Annotations
 
+**Audience:** Python developers who write untyped code and want the annotation style Akanga uses · **Read time:** ~10 min
+
 Python is dynamically typed — you can assign any value to any variable at any time. Type annotations are a way to document your intentions about what types a variable or function should hold, without changing how Python actually runs the code. They were standardized in PEP 484 (Python 3.5) and have become the expected style in serious Python codebases.
 
 ---

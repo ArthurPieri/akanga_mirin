@@ -74,7 +74,7 @@ DB file — readers block. In WAL mode, writers append to a separate log file wh
 readers continue reading the last committed snapshot. Readers and writers don't block
 each other (except at checkpoint time, when the log is merged back). Akanga needs WAL
 because three things access the DB concurrently: the file watcher thread, the asyncio
-event loop (active manager, API), and CLI commands. Without WAL, a reader that hits
+event loop (the API), and CLI commands. Without WAL, a reader that hits
 the DB mid-write gets an `SQLITE_BUSY` error (`database is locked`) — not a deadlock,
 but a hard failure the caller would have to catch and retry. WAL's real payoff is
 **cross-process readers during writes**: a CLI command in another process can read
@@ -128,7 +128,7 @@ SQLite's built-in full-text search extension. Creates a virtual table with an
 inverted index: for each word in the indexed fields, it stores which rows contain it.
 `SELECT * FROM nodes_fts WHERE nodes_fts MATCH 'cognition'` returns all matching
 nodes fast, regardless of vault size. In Akanga, FTS5 covers `title` and `tags` only — never the prose body. Body
-search is handled by ripgrep at the filesystem level. The DB never stores prose
+search is handled by ripgrep (`rg`, a fast recursive file-content search tool) at the filesystem level. The DB never stores prose
 content. (A `description` column for reference nodes is a candidate for a later
 phase — it is not in the Phase 02 schema.)
 
@@ -140,7 +140,7 @@ phase — it is not in the Phase 02 schema.)
 
 Shared mutable state accessed from multiple threads without synchronization produces
 data races: corrupted writes, partial reads, crashes. Akanga's DB is shared between
-the file watcher thread (sync), the asyncio event loop (active manager, API), and CLI
+the file watcher thread (sync), the asyncio event loop (the API), and CLI
 commands. WAL mode handles concurrent SQLite-level access, but application-level
 sequences like "check if node exists → upsert" must be atomic at the application
 level. A `threading.Lock` wraps each compound operation so only one thread executes
@@ -262,8 +262,11 @@ CREATE TABLE IF NOT EXISTS edges (
     target_id TEXT,
     relation TEXT,
     relation_id TEXT,
+    UNIQUE (source_id, target_id, relation),
     FOREIGN KEY (source_id) REFERENCES nodes(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_id);
+CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
     title,
     tags,
@@ -283,8 +286,8 @@ CREATE TABLE IF NOT EXISTS sync_queue (
 
     The `sync_queue` table was introduced conceptually in Phase 1B (where your
     functions ran against a hand-created table); here it becomes part of `DB_SCHEMA`, so
-    every `GraphDatabase` carries it. The `active_results` table is added when building
-    the active node manager (advanced — not covered in this phase). Fields like `author`,
+    every `GraphDatabase` carries it. An `active_results` table belonged to a cut active-node design and is built by no
+    phase (see `future-ideas.md`). Fields like `author`,
     `created_at`, `updated_at`, `meta`, `url`, `external_type`, and `description` that
     you see in node frontmatter are not columns in the Phase 02 `nodes` table — they are
     stored only in the `.md` file itself and accessible by re-parsing it.
@@ -347,6 +350,48 @@ each node so Phase 3 never has to re-query the `edges` table.
 **Thread safety: lock the whole compound.** See the Thread Safety concept above — the read-check-write sequence is the unit `with self._lock:` must wrap, not the final write alone.
 
 **Derived index: never store prose body in the DB.** The DB is rebuilt from files on `akanga index`. If you store prose content in the DB, you have two sources of truth that can diverge — and rebuild becomes lossy if the DB row has content that the file doesn't. FTS5 covers `title` and `tags` only. Body search lives at the filesystem level (ripgrep). This is not a performance choice — it is an architectural constraint that keeps the DB expendable.
+
+!!! note "Edge lifecycle — every way an edge disappears"
+    Edges come in two species. **Body-derived** edges are re-derived from prose on every
+    index — they live and die with the wikilink text. **Frontmatter `edges:`** entries are
+    the persistent source of truth; a typed inline shorthand `[[Target | relation]]` is
+    folded INTO frontmatter by `write_back` at index time, so after one cycle it has become
+    the persistent kind. The ways an edge goes away:
+
+    - **You deleted the wikilink text** → gone on the next index. Expected.
+    - **The target doesn't exist yet** → a warning is logged and *no edge* is created (N3).
+      It resolves automatically at the next **full scan** after the target appears (N2) —
+      the live watcher re-derives only the file that changed, so a running app waits for the
+      next full scan.
+    - **The link sits inside a fenced code block** → stripped before extraction, never an
+      edge (a feature, not a bug — code samples are not links).
+    - **An API-created edge** → persisted file-first to frontmatter, so it survives re-index
+      and even `rm *.db` (N1). Deleting a folded typed edge also de-types its inline
+      shorthand so it cannot re-fold — see the Phase 6 pitfall for the DB-only failure mode
+      this design prevents.
+    - **You deleted the file** → a tombstone records it and `ON DELETE CASCADE` removes its
+      outgoing edges.
+    - **Two notes share a title** → resolved deterministically (N10): the node first in
+      vault path order wins, and a warning names both. Frontmatter edges carrying a stored
+      `target_id` are immune (a UUID bypasses title resolution entirely); the real fix is
+      still to retitle. (noteapp resolves oldest-wins by `created_at`; this schema stores no
+      timestamps, so path order is the stable equivalent.)
+
+    See phase-01a's *Source of Truth* concept for why frontmatter, not the index, is
+    authoritative.
+
+> **Stretch (untested): stub nodes for unresolved links**
+>
+> Akanga logs a warning and creates no edge when a wikilink's target doesn't exist yet
+> (N3). noteapp goes one step further: `create_stub_node` auto-creates a minimal note
+> (`type: note`, tagged `stub`) in the vault root and attaches the edge to it — a link you
+> wrote is never lost, and a second unresolved reference to the same title reuses the
+> existing stub. Porting it is a genuine end-to-end exercise: it touches `create()` (minting
+> the file), the parser (the stub must round-trip), and the indexer (pass 2 must see the new
+> node) — plus two design questions noteapp answered that you'd have to answer too: a
+> `create_stubs=False` opt-out, and what happens when the real note finally arrives under a
+> different filename. No shipped test pins this; if you build it, write your own (the
+> "Optional self-written test" pattern from the Deliverable shows how).
 
 ---
 

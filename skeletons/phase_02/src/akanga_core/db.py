@@ -403,7 +403,7 @@ class GraphDatabase:
         to a meaningless `relates_to`. This method keeps the edge's relation
         name and stable vocabulary ID attached to each neighbor, so Phase 3's
         `build_ego_graph` (and ultimately the LLM context in Phase 8) gets the
-        full 71-type relation vocabulary for free.
+        full 72-type relation vocabulary for free.
 
         HOW:
         1. Inside `with self._lock:`, execute:

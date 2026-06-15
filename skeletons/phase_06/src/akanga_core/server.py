@@ -366,28 +366,38 @@ def get_node_backlinks(node_id: str):
 
 @router.post("/api/v1/edges", status_code=201)
 def create_edge(body: CreateEdgeRequest):
-    """WHAT: Create a manual directed edge between two existing nodes.
+    """WHAT: Create a manual directed edge — FILE-FIRST.
 
-    WHY: Not all relationships are expressed as wikilinks in prose. Users
-    may want to assert an explicit typed relation (e.g. "supports", "contradicts").
+    WHY: A naive handler that only calls db.upsert_edge writes the edge to the
+    DB and nowhere else. Phase 2's doctrine is that the DB is EXPENDABLE: the
+    next time the source file is re-indexed (delete-then-rederive) the manual
+    edge vanishes, and `rm *.db && scan` loses it outright. The fix is to write
+    the edge into the SOURCE node's frontmatter `edges:` block (the source of
+    truth, Phase 1A) and then re-index — so the row is DERIVED from the file
+    like every other edge and survives a rebuild.
 
     HOW:
-    1. Validate source_id: get_db().get_node(body.source_id) — raise HTTP 400 if None
-    2. Validate target_id: get_db().get_node(body.target_id) — raise HTTP 400 if None
-    3. edge_id = get_db().upsert_edge(
-           source_id=body.source_id,
-           target_id=body.target_id,
-           relation=body.relation,
-           relation_id=body.relation_id,
-       )
-    4. Return HTTP 201 with dict:
-       {"id": edge_id, "source_id": body.source_id,
-        "target_id": body.target_id, "relation": body.relation,
-        "relation_id": body.relation_id}
+    1. source = get_db().get_node(body.source_id) — raise HTTP 400 if None
+    2. target = get_db().get_node(body.target_id) — raise HTTP 400 if None
+    3. Reject 400 if body.source_id == body.target_id (self-edge), and reject
+       400 if (body.relation or "") is a RESERVED_RELATION ({"wikilink"}) — a
+       manual wikilink edge is indistinguishable from a prose-derived one.
+    4. full_path = _safe_disk_path(str(source.path)) (SEC-02).
+    5. Append a frontmatter `edges:` entry — UNDERSCORE keys, the write_back
+       convention: {"relation", "relation_id", "target": target.title,
+       "target_id": body.target_id}. Refuse with 409 if a matching entry
+       already exists. NOTE: a typed inline edge folds to an entry with
+       target_id="" — so duplicate detection must match by target_id OR by the
+       target node's title (case-insensitive, like resolve_wikilink).
+    6. index_file(str(full_path), get_db(), str(_vault_root())) — the fold
+       pipeline derives the DB row from the new entry.
+    7. edge_id = get_db().upsert_edge(...) returns that row's id (INSERT OR
+       IGNORE → the existing id). Return 201 with the edge dict.
     """
     raise NotImplementedError(
-        "Validate source and target (400 if missing). Generate UUID edge_id. "
-        "upsert_edge. Return 201 with edge dict."
+        "File-first: validate (400 self-edge / reserved wikilink / missing), "
+        "append a frontmatter edges entry (409 on duplicate, matched by "
+        "target_id OR title), index_file the source, upsert_edge for the id, 201."
     )
 
 
@@ -409,24 +419,36 @@ def list_templates():
 
 @router.delete("/api/v1/edges/{edge_id}", status_code=204)
 def delete_edge(edge_id: str):
-    """WHAT: Delete an edge by its UUID.
+    """WHAT: Delete a manual edge by its UUID — FILE-FIRST; 404 if unknown.
 
-    WHY: Users need to remove incorrect or stale explicit edges.
+    WHY: Deleting only the DB row is not a real delete: the frontmatter entry
+    (or, for a typed inline edge, the `[[Target | relation]]` prose) re-folds
+    the edge back on the next index. A real delete removes the entry AND
+    de-types the originating shorthand, so re-indexing cannot resurrect it.
 
     HOW:
-    1. if not get_db().delete_edge(edge_id):
-           raise HTTPException(status_code=404, detail="Edge not found")
-       Note: GraphDatabase does not have a delete_edge method by default.
-       Add one to your db.py as part of this phase's deliverable — it owns
-       the SQL and reports via its return value whether a row died:
+    1. edge = get_db().get_edge(edge_id) — 404 if None. (Add get_edge to your
+       db.py: a sanctioned read returning the row as a dict.)
+    2. If edge["relation"] is NOT a RESERVED_RELATION and the source node
+       exists: full_path = _safe_disk_path(str(source.path)); remove the
+       matching frontmatter `edges:` entry (by target_id OR target title) AND
+       rewrite the body's `[[Target | relation]]` -> `[[Target]]`; then
+       index_file(...) the source.
+    3. get_db().delete_edge(edge_id) (ignore the return — the reindex may have
+       already dropped the row). Return 204. A prose-derived `wikilink` edge
+       has no frontmatter entry: 204, but it resurrects on rescan (edit the
+       prose to remove it).
+
+       Add delete_edge to your db.py — it owns the SQL and returns whether a
+       row died:
            def delete_edge(self, edge_id: str) -> bool:
                with self._lock, self.conn:
                    cursor = self.conn.execute(
                        "DELETE FROM edges WHERE id = ?", (edge_id,)
                    )
                return cursor.rowcount > 0
-    2. Return HTTP 204 No Content
     """
     raise NotImplementedError(
-        "db.delete_edge(edge_id) → False means 404 → otherwise return 204."
+        "File-first: get_edge → 404 if None; remove the frontmatter entry and "
+        "de-type the inline shorthand, index_file the source, delete_edge, 204."
     )

@@ -1,7 +1,6 @@
 # Makefile Basics
 
-**Estimated read time:** 20 minutes
-**Prerequisite:** None — this doc assumes only that you can open a terminal.
+**Audience:** anyone who can open a terminal — no prior make experience · **Read time:** ~15 min
 
 ---
 

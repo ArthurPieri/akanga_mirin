@@ -369,12 +369,12 @@ class TestGetNode:
 
 
 class TestListRelationTypes:
-    def test_list_relation_types_returns_71(self, mcp_env) -> None:
-        """list_relation_types() must return all 71 built-in relation types.
+    def test_list_relation_types_returns_72(self, mcp_env) -> None:
+        """list_relation_types() must return all 72 built-in relation types.
 
-        The 71 types span 11 prefix categories: EP, HT, SC, CT, AP, DR, CC,
+        The 72 types span 11 prefix categories: EP, HT, SC, CT, AP, DR, CC,
         EV, PA, SO, TC. The registry is docs/foundations/relation-vocabulary.md.
-        Custom (learner-defined) types may append beyond 71 — but a partial
+        Custom (learner-defined) types may append beyond 72 — but a partial
         built-in list is a bug, not an implementation choice.
         """
         list_relation_types = _get_tool(mcp_env.mod, "list_relation_types")
@@ -384,8 +384,8 @@ class TestListRelationTypes:
             f"list_relation_types must return a list, "
             f"got {type(result).__name__!r}."
         )
-        assert len(result) >= 71, (
-            f"list_relation_types must return all 71 built-in relation types, "
+        assert len(result) >= 72, (
+            f"list_relation_types must return all 72 built-in relation types, "
             f"got {len(result)}.\n"
             "Load the full registry (docs/foundations/relation-vocabulary.md — "
             "the Phase 1 relation registry) — do not hardcode a sample subset."

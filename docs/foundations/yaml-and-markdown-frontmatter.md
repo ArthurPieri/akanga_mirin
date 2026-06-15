@@ -1,5 +1,7 @@
 # YAML and Markdown Frontmatter
 
+**Audience:** Python developers working with YAML frontmatter in the vault · **Read time:** ~18 min
+
 A practical guide for Python developers working with structured text files in a knowledge graph.
 
 ---
@@ -58,17 +60,16 @@ Both parse to the same Python list: `["python", "knowledge-graph", "sqlite"]`.
 Indentation creates nesting. YAML requires consistent indentation (spaces only — never tabs):
 
 ```yaml
-active:
-  action: http
-  url: https://example.com/health
-  interval: 60
-  timeout: 5
+meta:
+  status: draft
+  priority: 2
+  reviewed: false
 ```
 
 Equivalent Python:
 
 ```python
-{"active": {"action": "http", "url": "https://example.com/health", "interval": 60, "timeout": 5}}
+{"meta": {"status": "draft", "priority": 2, "reviewed": False}}
 ```
 
 ### Scalar types
@@ -474,60 +475,97 @@ Every node in the vault is a `.md` file with this frontmatter shape:
 
 ```yaml
 ---
-id: "550e8400-e29b-41d4-a716-446655440000"   # UUID, generated once and never changed
-title: My Node                                 # human-readable name
-type: note                                     # note | active | active-service | diagram | virtual
-tags: [tag1, tag2]                             # optional list of strings
-active:                                        # only for active/active-service nodes
-  action: http                                 # http | tcp
-  url: https://example.com/health
-  interval: 60                                 # seconds between checks
-  timeout: 5                                   # seconds before giving up
-virtual:                                       # only for virtual nodes
-  url: https://github.com/user/repo
-  external_type: github                        # github | webpage | app | file | api
-  description: External resource description
+id: a3f7c2be-1234-5678-abcd-ef0123456789        # UUID, generated once and never changed
+title: Fast Thinking is Unreliable               # human-readable name
+type: note                                       # note | reference
+tags: [cognition, decision-making]               # list of strings; defaults to []
+graph:                                           # workspace membership (dual-key: name + id)
+  - name: Nhamandu
+    id: a3f7c2be-1234-5678-abcd-ef0123456789
+author: Arthur Pieri                             # stamped from akanga.yaml on create()
+created_at: 2026-05-23
+updated_at: 2026-05-23
+meta:                                            # optional, user-defined, no schema
+  status: draft
+edges: []                                        # persistent typed edges (source of truth)
 ---
 
-Markdown body content here. [[wikilinks]] and [markdown links](other-file.md) are supported.
+Markdown body content here. [[wikilinks]] and [[Other Note | supports]] typed
+shorthand are supported.
 ```
 
 Key design decisions:
 
-- **`id` is a UUID string, quoted.** Quoting prevents YAML from misinterpreting UUID-like strings
-  (hyphens are fine unquoted, but quoting makes intent explicit).
-- **`type` drives behavior.** The parser, indexer, and active manager all branch on this field.
-- **`active` and `virtual` sections are optional dicts.** Code checks `post.metadata.get("active")`
-  and treats `None` as "no active config."
-- **`tags` defaults to `[]`.** Always call `.get("tags", [])` — never assume the field exists.
+- **`id` is a UUID, generated once and never changed.** The filename can drift (a
+  rename repoints the path); the `id` is the authoritative identity that edges and
+  `graph` references point at.
+- **`type` is `note` or `reference` — and that is the whole vocabulary.** There is no
+  `active`, `active-service`, `diagram`, or `virtual` node type; an earlier active-node
+  design was cut (see `future-ideas.md`). The parser and indexer never branch on
+  exotic types.
+- **`graph` is workspace membership, dual-keyed.** Each entry carries `name` (a display
+  cache that can go stale after a rename) and `id` (the authoritative UUID) — the same
+  dual-key pattern as edges. An absent or empty `graph` auto-populates with the default
+  workspace on first write-back.
+- **`meta` is an optional, schema-free block** of user key/value pairs. It lives only in
+  the `.md` file; the Phase 2 DB does not index it as a column (you read it by
+  re-parsing the file).
+- **`edges` is the persistent edge list** — the source of truth for typed links. Inline
+  `[[Target | relation]]` shorthand in the body is folded into `edges:` by `write_back`
+  at index time.
+- **`tags` defaults to `[]`.** Always read it as `.get("tags", [])` — never assume the
+  key exists.
+
+---
+
+## When Would Frontmatter Earn a Schema?
+
+It is tempting to give frontmatter a typed schema — a Pydantic `FRONTMATTER_SCHEMA` with
+`extra="allow"`, say — so a malformed note fails loudly instead of silently. Akanga sketched
+that and **rejected** it. Three reasons:
+
+1. **Frontmatter is user-authored text.** The vault is a folder of files the user owns and
+   edits in any editor. A schema turns an honest typo (`tag:` instead of `tags:`) into a
+   *parse failure* on a file the user controls — the tool refusing to open the user's own
+   note. Contrast Phase 6: the REST API's request bodies ARE Pydantic-validated, because the
+   trust boundary there is different — the bytes arrive from a client over the wire, not from
+   a file the user hand-edited.
+2. **`extra="allow"` launders the known keys.** Keeping unknown keys sounds safe, but Pydantic
+   still coerces and re-emits the keys it *does* know — silently rewriting the user's text (a
+   quoted UUID comes back unquoted; a date string becomes a `date` object) on round-trip.
+3. **The vault must round-trip.** `parse → write_back` has to return a file byte-near the
+   original; an aggressive normalization layer breaks that contract.
+
+What Akanga does instead is one **targeted coercion at the parse boundary** — `_normalize_fm`
+fixes only the few shapes that actually bite (see *Implicit Typing: The Value You See Is Not
+the Type You Get* above — the Norway problem, dates, hex-looking strings) and leaves
+everything else verbatim.
+
+**The rule:** validate at boundaries you own (the API), normalize at boundaries you don't
+(user files); reach for a real schema only when a wrong shape must be a hard error.
 
 ---
 
 ## Akanga's Vault Config: `akanga.yaml`
 
-In addition to per-node frontmatter, the vault root contains an `akanga.yaml` config file that
-describes the vault itself. This is a plain YAML file (no Markdown, no frontmatter):
+In addition to per-node frontmatter, the vault root holds an `akanga.yaml` config file
+describing the vault itself. It is a plain YAML file (no Markdown, no frontmatter),
+created by `make vault-init`:
 
 ```yaml
-owner: alice
-default_workspace: personal
-
+# akanga.yaml
+owner: Arthur Pieri
+default_workspace:
+  name: Nhamandu
+  id: a3f7c2be-1234-5678-abcd-ef0123456789   # generated at vault-init, never changes
 workspaces:
-  - name: personal
-    path: ./personal
-  - name: work
-    path: ./work
-
-relations:
-  - name: depends_on
-    inverse: is_dependency_of
-  - name: documents
-    inverse: is_documented_by
-  - name: references
-    inverse: is_referenced_by
+  - name: ProjectX
+    id: b2c3d4e5-abcd-ef01-2345-678901234567
+  - name: BookNotes
+    id: c3d4e5f6-bcde-f012-3456-789012345678
 ```
 
-Reading it is straightforward:
+Read it with `safe_load`:
 
 ```python
 import yaml
@@ -536,27 +574,35 @@ with open("akanga.yaml") as f:
     config = yaml.safe_load(f)
 
 owner = config["owner"]
+default_workspace = config["default_workspace"]   # dict: {name, id}
 workspaces = config.get("workspaces", [])
-relations = config.get("relations", [])
 ```
 
-This config is introduced in Phase 1 of the learning path. It lets users define custom relation
-types with their inverses — a building block for the full graph model.
+`create()` reads this on every new node to stamp `author` and assign the default
+workspace as the node's first `graph` entry.
+
+**Relation types do NOT live here.** The 72 built-in relations live in
+`docs/foundations/relation-vocabulary.md`, and custom relations are minted on demand —
+`write_back` assigns a fresh UUID `relation_id` to any unknown relation name, no
+pre-registration required. (Phase 1B sketches an optional `custom_relations:` block for
+*soft validation* of those names; it is a deferred spec, not something `akanga.yaml`
+requires today.)
 
 ---
 
 ## In Your Implementation
 
-- **`parser.py`** (Phase 0) — `parse_node_file(path)` calls `frontmatter.load()` and returns a
-  `Node` dataclass. `write_node_file(path, frontmatter_dict, content)` calls
-  `frontmatter.dumps()` and writes atomically. All metadata access uses `.get()`
-  with safe defaults.
-
-- **Phase 1 work** — introduces `akanga.yaml` vault config. `yaml.safe_load` is the correct parser.
-  The config schema includes `owner`, `default_workspace`, `workspaces`, and `relations`.
-
-- **Never use `yaml.load` without `Loader=yaml.SafeLoader`** anywhere in your implementation. The vault
-  directory is user-controlled, but it is still good practice to use `safe_load` everywhere.
+- **`parser.py`** (Phase 0) — `parse_node_file(path)` calls `frontmatter.load()` and
+  returns a `Node` dataclass; `write_node_file(path, frontmatter_dict, content)` calls
+  `frontmatter.dumps()` and writes atomically. All metadata access uses `.get()` with
+  safe defaults.
+- **`create()`** (Phase 0) — reads `akanga.yaml` with `yaml.safe_load`, stamps `author`,
+  and assigns `default_workspace` as the first `graph` entry.
+- **Phase 1B** — adds the workspace registry and the deferred `custom_relations:`
+  soft-validation spec; relation *types* are still vocabulary + UUID-minted, never an
+  `akanga.yaml` schema.
+- **Never `yaml.load` without `SafeLoader`.** The vault is user-controlled text;
+  `safe_load` everywhere is the rule, not a nicety.
 
 ---
 

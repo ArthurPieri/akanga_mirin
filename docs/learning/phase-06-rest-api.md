@@ -2,10 +2,21 @@
 
 **Estimated time:** 3–4 hours + ~1h vault/reflect
 
+!!! warning "Changed 2026-06 (noteapp-alignment round)"
+    Manual edge endpoints became file-first: `POST /api/v1/edges` now writes an `edges:`
+    entry into the source note's frontmatter and reindexes (DELETE removes the entry), with
+    new guards — 400 for self-edges, the reserved `wikilink` relation, or missing endpoints;
+    409 for duplicates. New tests in `tests/phase_06/test_server.py`, including one that
+    deletes the DB and asserts the edge survives. If you finished this phase before the
+    change: rework `create_edge`/`delete_edge` per the rewritten WHAT/WHY/HOW in
+    `skeletons/phase_06/src/akanga_core/server.py` (re-running `make skeleton PHASE=6`
+    cannot update docstrings inside files you already own — open the skeleton file directly),
+    and add the small `get_edge` accessor to your `GraphDatabase`.
+
 **Core concept:** The TUI talks directly to `akanga_core` as a Python library — same
 process, no network. The REST API adds a second surface: an HTTP server that exposes
 everything the library can do over a network boundary. This enables external clients
-(curl scripts, the future Tauri GUI, third-party tools), and teaches the skill of
+(curl scripts, the future Tauri GUI (a Rust shell that packages a web frontend as a native desktop app), third-party tools), and teaches the skill of
 designing a contract that outlasts any single implementation.
 
 **What makes this non-obvious:** The API is not just "wrap the library in HTTP." It
@@ -30,7 +41,7 @@ By the end of this phase, you will be able to:
 Check each item you can answer confidently. If you can't check 3 or more, review the linked foundation doc before proceeding.
 
 - [ ] I understand HTTP verbs (GET/POST/PUT/DELETE) and status codes → See `docs/foundations/http-fundamentals.md`
-- [ ] I know what Pydantic models are and how FastAPI uses them for validation
+- [ ] I know what Pydantic models are and how FastAPI uses them for validation → See `docs/foundations/http-fundamentals.md` ("Pydantic models for request bodies")
 - [ ] I understand async functions and FastAPI's async routing
 - [ ] I've completed Phases 0–5
 
@@ -55,7 +66,7 @@ make serve               # start the REST API server (after implementation)
 An architectural style for HTTP APIs. Resources are identified by URLs (`/api/v1/nodes/{id}`).
 Operations are expressed as HTTP methods: GET (read), POST (create), PUT (replace),
 DELETE (remove). Responses carry status codes that express outcome without reading
-the body: 200 OK, 201 Created, 204 No Content, 404 Not Found, 422 Unprocessable Entity.
+the body: 200 OK, 201 Created, 204 No Content, 404 Not Found, 409 Conflict, 422 Unprocessable Entity.
 Stateless: every request contains all information needed to process it — no session
 state on the server between requests.
 
@@ -69,8 +80,8 @@ A Python web framework built on Starlette (async HTTP) and Pydantic (validation)
 Type-annotated function signatures become the API contract: FastAPI reads the
 annotations, validates incoming data automatically, and generates an OpenAPI spec
 (browsable at `/docs`) without any extra configuration. Async-first: route handlers
-are coroutines, so the API server and the active manager share the same asyncio loop
-without blocking each other.
+are coroutines on one asyncio loop, so slow I/O in one request never blocks the
+others.
 
 > Akanga node: `FastAPI`
 
@@ -78,10 +89,10 @@ without blocking each other.
 
 FastAPI's pattern for startup and shutdown logic. A single `@asynccontextmanager`
 function runs setup code before `yield` (on startup) and teardown code after `yield`
-(on shutdown). For Akanga: startup loads vault config, indexes the vault, drains the
-sync queue, starts the file watcher, starts the active manager. Shutdown stops the
-watcher and active manager cleanly. Without proper shutdown, background threads and
-asyncio tasks leak — the process hangs on exit.
+(on shutdown). For Akanga: startup opens the database and indexes the vault, so the API serves a
+current index from the first request; shutdown closes the database. Without a clean
+shutdown, the open connection and any background threads leak — the process can hang
+on exit.
 
 > Akanga node: `Lifespan Context Manager`
 
@@ -100,7 +111,7 @@ never receives malformed data and never leaks internal state.
 
 A persistent, bidirectional connection initiated over HTTP and then upgraded. The
 client opens one WebSocket connection to `/ws`; the server pushes events as JSON
-messages whenever something changes: `node_updated`, `node_deleted`, `active_result`.
+messages whenever something changes: `node_updated`, `node_deleted`.
 The client never needs to poll. This is how the Tauri GUI (v2) will receive live
 updates — the same event model as the TUI's EventBus, but over the network.
 
@@ -177,8 +188,8 @@ GET    /api/v1/nodes/{id}/edges         all edges touching this node
 GET    /api/v1/nodes/{id}/neighbors     neighbor nodes (outgoing)
 GET    /api/v1/nodes/{id}/backlinks     nodes linking TO this node
 
-POST   /api/v1/edges                    create manual edge
-DELETE /api/v1/edges/{id}              delete edge
+POST   /api/v1/edges                    create manual edge (writes frontmatter edges: entry, then indexes)
+DELETE /api/v1/edges/{id}              delete edge (removes the frontmatter entry; de-types the prose)
 
 GET    /api/v1/templates                list available node templates
 ```
@@ -187,8 +198,7 @@ The following are stretch endpoints — not in the skeleton and not tested. Buil
 only after the core suite is green (see "Stretch deliverables" in the Deliverable section):
 
 ```
-GET    /api/v1/nodes/{id}/ego-graph     ego-graph data (depth param)
-GET    /api/v1/nodes/{id}/results       active check results
+GET    /api/v1/nodes/{id}/ego-graph     ego-graph data (?depth= · ?limit= — response carries "truncated": bool)
 GET    /api/v1/workspaces               list workspaces (from config)
 GET    /api/v1/relations                list relation vocabulary (from config)
 POST   /api/v1/sync/drain               trigger sync queue drain
@@ -304,18 +314,14 @@ the lifespan is defined inside `create_app`):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # startup
-    # Note: GraphDatabase opens the connection in __init__ — no db.connect() call needed.
-    # db = GraphDatabase(db_path) is called before passing db into the lifespan.
-    # TODO: load_vault_config(vault) — reads akanga.yaml config; no skeleton
-    # implementation exists yet (described in Phase 00 concepts). Add when implemented.
-    indexer.full_scan_and_index(vault, db)
-    sync_worker.drain(db, vault)
-    watcher.start()
-    active_manager.start()
+    # GraphDatabase opens the connection in __init__ — no db.connect() call needed.
+    db = GraphDatabase(db_path)
+    # The API serves the INDEX, so the vault must be indexed before the first request.
+    # The scan is hash-first and idempotent, so an already-indexed vault is nearly free.
+    full_scan_and_index(vault, db)
     yield
     # shutdown
-    active_manager.stop()
-    watcher.stop()
+    db.close()
 
 app = FastAPI(lifespan=lifespan)
 ```
@@ -356,10 +362,15 @@ class CreateEdgeRequest(BaseModel):
 
 **Why `path` is in the request model:** it is optional and always vault-relative
 (e.g. `"projects/my-note.md"`). When omitted, the server auto-generates a slug
-filename from the title. The field exists precisely so the SEC-02 containment check
+filename from the title (slugify: lowercase, non-alphanumeric runs collapsed to hyphens; see `textutil.slugify`). The field exists precisely so the SEC-02 containment check
 has something to validate — a client-supplied path is the one input that can attempt
 `../` escapes, absolute paths, or symlink tricks, and the create handler must
 `resolve()` it and verify `is_relative_to(vault_root)` before writing anything.
+One deliberate asymmetry: an explicit `path` that already exists gets **409 Conflict**
+rather than a suffixed filename — a REST client stated exact intent and can retry with
+a different path — while `create()` and the MCP `create_node` auto-suffix
+(`my-note-1.md`), because a capture utility must never lose a note to a name collision
+(decision N6).
 
 **Frontmatter-level fields are not API fields:** `graph` (workspace names), `author`,
 and `meta` live in the node's YAML frontmatter, not in the Phase 6 request model. The
@@ -418,6 +429,8 @@ All three must return HTTP 400. SECURITY.md lists symlink escape as in-scope; th
 
 **Not handling the DELETE of a non-existent node:** If the file is already gone (e.g., manual deletion), the DELETE endpoint should still return 404, not 500.
 
+**DB-only manual edges violate Phase 2's "expendable DB" invariant.** The naive `POST /api/v1/edges` handler just calls `db.upsert_edge` and returns — the edge lives only in the index. But Phase 2 established that the DB is *derived*: `_reindex_edges` wipes a node's outgoing edges and rebuilds them from the file (`delete_edges_from` + re-derive) on the next index, and `rm *.db && scan` rebuilds the whole graph from the vault. A DB-only manual edge survives neither. The fix is *file-first*: write the edge into the **source node's frontmatter `edges:` block** (Phase 1A's source of truth) and then `index_file` the source, so the row is derived from the file like every other edge. `test_manual_edge_survives_db_rebuild` is the doctrine test — it deletes the `.db` and asserts the edge comes back. Two further wrinkles the suite pins: a typed inline `[[Target | relation]]` folds to a frontmatter entry with `target_id: ""`, so duplicate-detection and deletion must match by target title as well as id; and DELETE must *de-type the originating prose shorthand* (`[[Target | relation]]` → `[[Target]]`), or the next index re-folds the entry and the edge resurrects.
+
 ---
 
 ## Deliverable
@@ -435,6 +448,11 @@ Happy-path tests:
 - `test_list_nodes_search` — `?query=` returns only matching nodes (FTS5 or LIKE fallback)
 - `test_list_nodes_pagination` — `limit=2&offset=2` over 5 nodes returns exactly 2
 - `test_create_and_get_edge` — `POST /api/v1/edges` returns 201; the edge appears in `/edges`
+- `test_post_edge_writes_frontmatter_entry` — the edge is persisted to the source node's frontmatter `edges:` block
+- `test_manual_edge_survives_db_rebuild` — the doctrine test: delete the `.db`, rescan, the edge is still there
+- `test_reindex_after_post_does_not_duplicate` — re-indexing the source keeps each manual edge a single row
+- `test_post_self_edge_returns_400` / `test_post_reserved_relation_returns_400` / `test_post_duplicate_edge_returns_409` — the guards
+- `test_delete_edge_removes_frontmatter_entry` / `test_delete_folded_typed_edge_stays_dead` / `test_post_duplicate_of_folded_edge_returns_409` — delete removes the entry and de-types the prose; folded edges (`target_id: ""`) are matched by title
 - `test_get_neighbors` / `test_get_backlinks` — A→B traversal in both directions
 - `test_list_templates` — `GET /api/v1/templates` returns a non-empty list of template names
 
@@ -456,6 +474,9 @@ as extensions after the suite above is green:
   suite verifies create/delete via the API only, not by globbing the vault directory
 - `GET /api/v1/nodes/{id}/ego-graph` and the other stretch endpoints listed above
   (workspaces, relations, sync, git)
+- `GET /api/v1/export?format=json|mermaid` — serialize the whole graph as an edge list
+  (graphml is a named-only further stretch); the lesson is edge-list-as-serialization, the
+  same wire-format shape `docs/foundations/graph-theory-basics.md` §3 describes
 
 ---
 

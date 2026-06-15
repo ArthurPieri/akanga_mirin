@@ -95,17 +95,22 @@ def full_scan_and_index(vault_path: str, db: "GraphDatabase") -> int:
        `errors`. index_file's hash-first skip means unchanged files cost one hash
        and zero writes.
 
-    Pass 2 — Resolve wikilinks for CHANGED nodes:
-    4. For each node that index_file actually re-wrote (collect them in pass 1),
-       read its body from disk:
+    Pass 2 — Resolve wikilinks (CHANGED nodes, OR all nodes on the trigger):
+    4. For each node whose edges you must re-derive, read its body from disk:
            parsed = parse_node_file(disk_path)
            links = extract_wikilinks(parsed.content or "")
        The DB does not store body content — always re-read from disk. Two passes
        guarantee every wikilink target already exists before resolution.
+       REDERIVE-ALL TRIGGER (N2): track whether pass 1 saw any NEW file and
+       whether the tombstone pass REMOVED any node. If either happened, a
+       wikilink in an UNCHANGED file may now resolve (or just lost its target),
+       so re-derive edges for EVERY node, not just the changed ones. Otherwise
+       the changed-only set is enough and far cheaper.
     5. For each wikilink title, `resolve_wikilink(title, db)` → target UUID.
     6. If the target UUID is not None and differs from the source node's id,
        `db.upsert_edge(node.id, target_id, relation="wikilink", relation_id="")`.
-       UNIQUE + INSERT OR IGNORE makes re-runs no-ops.
+       UNIQUE + INSERT OR IGNORE makes re-runs no-ops. If it IS None, log a
+       warning naming the target — a link you wrote never silently evaporates (N3).
 
     Pass 3 — Tombstones (the DB is a derived index, finding #1):
     7. For every DB node whose vault-relative path was NOT seen on disk in pass 1,

@@ -53,7 +53,7 @@ Some relations have explicit inverses in `docs/foundations/relation-vocabulary.m
 |---|---|---|
 | `search_nodes(query)` | FTS query string | List of `{id, title, type}` |
 | `get_node(node_id)` | UUID string | Node dict or None |
-| `list_relation_types()` | — | List of `{id, name, category}` (71 entries) |
+| `list_relation_types()` | — | List of `{id, name, category}` (72 entries) |
 | `get_context(node_id)` | UUID string | RAG context string |
 | `create_node(title, type, content)` | Node fields | `{id, title, type}` dict |
 

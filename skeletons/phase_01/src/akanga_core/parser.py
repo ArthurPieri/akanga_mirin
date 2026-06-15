@@ -109,22 +109,47 @@ def extract_inline_edges(body: str) -> list[Edge]:
     prose, extract the edges, then merge them into frontmatter.
 
     HOW:
-    1. Strip fenced code blocks first so that example syntax inside triple-
-       backtick blocks is not mistakenly matched. Replace the content between
-       opening and closing ``` with empty strings. A simple regex like
-       r"```.*?```" with `re.DOTALL` works.
+    1. Strip fenced code blocks AND inline code spans first so example syntax
+       inside ``` fences or `backticks` is not matched. Two regexes:
+       r"```.*?```" with `re.DOTALL`, then r"`[^`]+`".
     2. Find all matches of `r"\\[\\[([^\\]|]+)\\|([^\\]]+)\\]\\]"` in the
-       stripped body. Group 1 is the target title; group 2 is the relation.
-       Strip whitespace from both groups.
-    3. For each match, construct an `Edge(relation=relation.strip(),
-       relation_id="", target=target.strip(), target_id="")`.
-       `relation_id` and `target_id` are left empty — they get resolved later
-       by the resolver and sync queue.
-    4. Return the list of Edge objects (may be empty).
+       stripped body. Group 1 is the target title; group 2 is the pipe segment.
+    3. NOT every pipe is a relation. Apply the grammar (`split_pipe_segment`):
+       - if the target ends with a backslash, the pipe was escaped (`[[X \\| y]]`)
+         → it is a display alias, NOT a typed edge → skip it;
+       - else classify group 2: only a slug-shaped segment (`^[a-z][a-z0-9_-]*$`
+         after stripping) is a relation. A spaced/uppercase/digit-first segment
+         is an Obsidian display alias → skip it (it stays a plain wikilink).
+    4. For each segment that IS a relation, construct
+       `Edge(relation=slug, relation_id="", target=target.strip(), target_id="")`.
+       `relation_id`/`target_id` are resolved later by the resolver/sync queue.
+    5. Return the list of Edge objects (may be empty).
     """
     raise NotImplementedError(
-        "Strip code blocks with re.sub, then findall r'\\[\\[([^\\]|]+)\\|([^\\]]+)\\]\\]' "
-        "and build Edge(relation=..., relation_id='', target=..., target_id='') for each match"
+        "Strip fences AND inline code; findall the pipe pattern; keep only "
+        "segments split_pipe_segment classifies as a relation (skip escaped "
+        "pipes and display aliases); build one Edge per relation."
+    )
+
+
+def split_pipe_segment(segment: str) -> tuple[str, str]:
+    """WHAT: Classify a wikilink pipe segment as a relation or a display alias.
+
+    WHY: `[[Title | text]]` is overloaded. In Obsidian the pipe means a display
+    ALIAS; in Akanga a slug-shaped pipe means a typed RELATION. One grammar
+    settles it so the same rule governs both `extract_inline_edges` (Phase 1A)
+    and `extract_wikilinks` (Phase 2) — they must never disagree.
+
+    HOW:
+    1. text = segment.strip()
+    2. If text matches `^[a-z][a-z0-9_-]*$` (a lowercase slug like "supports"
+       or "relates-to"), return ("relation", text).
+    3. Otherwise (spaces, uppercase, a leading digit, punctuation, empty),
+       return ("alias", text).
+    """
+    raise NotImplementedError(
+        "Strip; if it matches ^[a-z][a-z0-9_-]*$ return ('relation', text) "
+        "else ('alias', text)."
     )
 
 
@@ -208,15 +233,15 @@ def create(
        "note" or "reference"), `tags=[]`, and `id`.
        If `type == "reference"`, also set the three top-level keys:
        `url`, `external_type`, and `description`.
-    4. Convert the title to a filename-safe slug — e.g.
-       `title.lower().replace(" ", "-") + ".md"` (strip remaining special
-       characters as needed). Write the file atomically to
-       `Path(vault) / slug` using `write_node_file`.
+    4. Derive a collision-safe filename with
+       `textutil.unique_path(str(vault), textutil.slugify(title))` (the shared
+       Phase 0 rule — never overwrite an existing note). Write the file
+       atomically with `write_node_file`.
     5. Return `parse_node_file` on the written file to get the final Node.
     """
     raise NotImplementedError(
         "Generate str(uuid4()), read akanga.yaml with yaml.safe_load for defaults, "
         "build frontmatter (plus url/external_type/description when type='reference'), "
-        "derive slug via title.lower().replace(' ', '-'), write_node_file, "
-        "return parse_node_file result."
+        "derive the filename via textutil.unique_path(vault, textutil.slugify(title)), "
+        "write_node_file, return parse_node_file result."
     )

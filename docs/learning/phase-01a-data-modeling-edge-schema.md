@@ -2,6 +2,16 @@
 
 **Estimated time: 2–3h + ~1h vault/reflect**
 
+!!! warning "Changed 2026-06 (noteapp-alignment round)"
+    The pipe grammar changed: a pipe segment is a relation only when it matches
+    `^[a-z][a-z0-9_-]*$` (after strip) — spaces, uppercase, digit-first, or an escaped `\|`
+    now mean an Obsidian-style display alias, which yields a plain wikilink instead. The
+    grammar lives in one new public helper, `split_pipe_segment`, and a typed link now
+    produces exactly ONE edge (the typed one). Seven new tests in `tests/phase_01/test_schema.py`.
+    If you finished this phase before the change: run `make skeleton PHASE=1` — the merge
+    appends the new `split_pipe_segment` stub into your `parser.py` without modifying your
+    code — then implement the classification and update `extract_inline_edges` to use it.
+
 **Core concept:** Deciding how to represent a *connection* between two nodes as plain
 text. Phase 0 gave you a file with metadata and a body. Phase 1A asks: what does a
 typed edge look like inside a file? What happens when a user writes connections
@@ -70,13 +80,13 @@ anonymous connections. "A links to B" is a hyperlink graph. "A *supports* B" is 
 knowledge graph. The label is what gives the edge semantic value: you can ask "what
 does this node contradict?" or "what does this node depend on?" and get meaningful,
 filtered answers. Akanga stores Tier 2 semantics: every edge has a `relation` field
-drawn from the 71-type vocabulary.
+drawn from the 72-type vocabulary.
 
 > Akanga node: `Labeled Property Graph`
 
 > → Foundation doc: `docs/foundations/design-patterns.md`
 
-> → Foundation doc: `docs/foundations/relation-vocabulary.md` (full 71-type vocabulary)
+> → Foundation doc: `docs/foundations/relation-vocabulary.md` (full 72-type vocabulary)
 
 ### Source of Truth
 
@@ -121,30 +131,70 @@ The canonical frontmatter edge block:
 ```yaml
 edges:
   - relation: contradicts
-    relation-id: EP-002
+    relation_id: EP-002
     target: Blink — Malcolm Gladwell
-    target-id: d4e1f9cc-5678-1234-efab-012345678901
+    target_id: d4e1f9cc-5678-1234-efab-012345678901
   - relation: supports
-    relation-id: EP-001
+    relation_id: EP-001
     target: Kahneman System 1 and System 2
-    target-id: b2c3d4e5-abcd-ef01-2345-678901234567
+    target_id: b2c3d4e5-abcd-ef01-2345-678901234567
 ```
+
+Underscore keys are canonical — they match the `Edge` dataclass fields below.
+Hyphenated spellings (`relation-id:`/`target-id:`) found in hand-authored or
+Obsidian-exported vaults are tolerated on read (the parser accepts both) and
+normalized to underscores on the next write-back: **read both, write underscores.**
 
 The dual-key pattern applies to both fields:
 - `relation` — human-readable display cache; may be stale after a relation rename
-- `relation-id` — stable ID from the vocabulary (`EP-002`, `CT-005`, etc.); never changes
+- `relation_id` — stable ID from the vocabulary (`EP-002`, `CT-005`, etc.); never changes
 - `target` — human-readable title; may be stale after the target node is renamed
-- `target-id` — UUID of the target node; stable forever; empty string if unresolved
+- `target_id` — UUID of the target node; stable forever; empty string if unresolved
 
-For custom relation types not in the built-in vocabulary, `relation-id` is a UUID
+For custom relation types not in the built-in vocabulary, `relation_id` is a UUID
 generated at first use. Built-in IDs use the category-prefix format (`EP-001`…`TC-004`)
 — see `docs/foundations/relation-vocabulary.md` for the full table.
 
 **Inline shorthand in prose:** `[[Target Title | relation]]`
 
-On write-back, this becomes an entry in the `edges:` block. `target-id` is resolved
+On write-back, this becomes an entry in the `edges:` block. `target_id` is resolved
 by looking up the title in the DB index — left empty if the target node does not exist
 yet (dangling reference, resolved on next sync after the target is created).
+
+**Not every pipe is a relation.** Akanga shares the `[[Title | text]]` syntax with
+Obsidian, where the pipe means a display *alias*. The grammar that settles the overload
+(`split_pipe_segment`): a segment is a **relation** only when it is slug-shaped —
+`^[a-z][a-z0-9_-]*$` after stripping (e.g. `supports`, `relates-to`). Anything with
+spaces, uppercase, a leading digit, or an escaped pipe (`[[Note \| text]]`) is an
+Obsidian-style **display alias** and yields a plain wikilink, never a typed edge. The
+canonical spaced form `[[Target Title | relation]]` still works — the segment is
+stripped before classification. One consequence: a typed link produces exactly **one**
+edge (the typed one), not a typed edge plus a redundant untyped wikilink.
+
+!!! note "Design Decision: what does the pipe mean? (interop vs typed edges)"
+    The pipe in `[[Title|segment]]` is overloaded. Obsidian reads it as a display
+    alias; Akanga also wants it for relations. Both readings cannot win — and this is
+    exactly the kind of syntax overload you must **decide before data accretes**. A
+    vault already full of ambiguous pipes is far more expensive to disambiguate later
+    than a rule chosen on day one (the real lesson behind the R2 interop review).
+
+    Akanga resolves it by **shape**:
+
+    | You write | Segment shape | Result |
+    |---|---|---|
+    | `[[Auth]]` | — | plain edge, relation `wikilink` |
+    | `[[Auth\|depends_on]]` | slug `^[a-z][a-z0-9_-]*$` | **typed edge**, relation `depends_on` |
+    | `[[Auth\|the auth note]]` | has spaces | plain edge, alias "the auth note" |
+    | `[[Auth\|Supports]]` | has uppercase | plain edge, alias "Supports" |
+    | `[[Auth\\|alias]]` | escaped pipe | always an alias, never a relation |
+
+    **The accepted residual:** a slug-shaped Obsidian alias — `[[Title|the-talk]]` —
+    still mints a relation, because shape is all the parser can see. Akanga adopts the
+    shape rule anyway (decision N4): it keeps the common cases compatible in both
+    directions, and the residual is the documented cost of reusing one pipe for two
+    jobs. Opening an Akanga vault in Obsidian renders a typed link's relation as its
+    link text; a future importer with slug-alias quarantine is the planned mitigation.
+    The classification is pinned by `split_pipe_segment`'s tests (this phase's Deliverable).
 
 ---
 
@@ -164,6 +214,10 @@ yet (dangling reference, resolved on next sync after the target is created).
 
 Extensions to `parser.py` from Phase 0.
 
+> `Edge` and `Node` are deliberately *anemic* dataclasses — data with no behavior; the
+> logic lives in module functions like `write_back` and `build_ego_graph`. See
+> `docs/foundations/design-patterns.md` §11 for why Akanga models data this way.
+
 **`Edge` dataclass:**
 
 ```python
@@ -177,16 +231,37 @@ class Edge:
 
 The dual-key pattern applies to both the relation and the target: `relation` and
 `target` are human-readable display caches; `relation_id` and `target_id` are the
-stable machine keys. The relation registry (in `akanga.yaml` or `vocabulary.yaml`)
+stable machine keys. The relation registry (`docs/foundations/relation-vocabulary.md`)
 maps IDs to names, descriptions, and flags (symmetric, inverse pair).
 
 **New functions in `parser.py`:**
 
 | Function | What it does |
 |---|---|
-| `extract_inline_edges(body) → list[Edge]` | Regex scan for `[[Target \| relation]]`; skips code blocks |
+| `extract_inline_edges(body) → list[Edge]` | Scan for `[[Target \| relation]]`; skips code blocks and inline code; only slug-shaped segments are relations |
+| `split_pipe_segment(segment) → tuple[str, str]` | Classify a pipe segment: `("relation", slug)` when it matches `^[a-z][a-z0-9_-]*$` after strip, else `("alias", text)` |
 | `merge_edges(existing, inline) → list[Edge]` | Deduplicate: add inline edges not already in existing |
 | `write_back(path)` | parse → extract inline → merge → write atomically if changed |
+
+!!! tip "Technique: don't skip code blocks — delete them"
+    `extract_inline_edges` must ignore `[[wikilinks]]` that appear inside a fenced code
+    block (a code sample is not a link). The wrong instinct is one lookaround mega-regex
+    that matches links *except* inside fences — that way lies an unreadable tarpit. The
+    taught idiom is **strip first, match second**: remove the fenced blocks, then run the
+    link regex on what's left.
+
+    ~~~python
+    _FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
+    stripped = _FENCED_CODE_RE.sub("", body)
+    edges = _INLINE_EDGE_RE.findall(stripped)
+    ~~~
+
+    Why each flag matters: `re.DOTALL` lets `.` cross newlines so a multi-line fence matches
+    whole; the **non-greedy** `.*?` stops at the *nearest* closing fence — greedy `.*` would
+    swallow everything between the first fence and the last. Scope note: character offsets do
+    not survive stripping, which is fine here (the extractor returns matches, not positions);
+    if you ever need offsets, replace each fence with the same length of whitespace instead
+    of deleting it. The same strip-first idiom guards `links.extract_wikilinks` (W1).
 
 **Deduplication rule:** an edge is a duplicate if `(relation, target)` matches an
 existing edge. `target_id` is not part of the key — an empty `target_id` in an inline
@@ -197,13 +272,17 @@ edge does not override a resolved `target_id` in frontmatter.
 ## Deliverable
 
 The snippets below are illustrative — the shipped suite is
-`tests/phase_01/test_schema.py` (15 tests; the names differ):
+`tests/phase_01/test_schema.py` (the names differ):
 `test_extract_inline_edges_basic` / `_multiple` / `_ignores_code_blocks` /
 `_ignores_regular_wikilinks` / `_empty_body`, `test_merge_edges_deduplicates` /
 `_adds_new` / `_empty_inputs` / `_conflicting_target_id_keeps_existing`,
 `test_merge_is_not_order_sensitive`, `test_edge_dataclass_fields`,
 `test_write_back_moves_inline_to_frontmatter` / `_idempotent` /
-`_preserves_existing_edges` / `_malformed_edges_yaml_raises`.
+`_preserves_existing_edges` / `_malformed_edges_yaml_raises`, plus the alias-rule
+tests (2026-06): `test_alias_with_spaces_is_not_inline_edge`,
+`test_uppercase_segment_is_alias_not_edge`, `test_digit_first_segment_is_alias`,
+`test_escaped_pipe_never_a_relation`, `test_spaced_canonical_syntax_still_typed`,
+`test_inline_code_is_ignored`, `test_split_pipe_segment_table`.
 
 The illustrative sketches:
 
@@ -266,3 +345,5 @@ not just the tests.
 > **Solo:** The deduplication key is `(relation, target)` — not `(relation_id, target_id)`. Why? What would break if you used the UUID-based keys as the dedup key instead, given that `target_id` can be an empty string when parsed from inline shorthand?
 
 > **Group:** `write_back` is described as "write atomically *if changed*." What is the check that determines "changed"? Who should own that check — `write_back` itself, or the caller? Discuss the tradeoffs of each approach and which leads to more correct behavior at scale.
+
+> **Going further:** `write_back` mints a fresh UUID `relation_id` for *any* unknown relation — including a typo like `suports`. At what layer would you catch that typo, and why must the answer be a *warning* rather than an *error*? (See the `suggest_relation` stretch in Phase 8.)

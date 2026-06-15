@@ -33,12 +33,48 @@ import frontmatter
 import yaml
 
 from .models import Edge, Node
+from .textutil import slugify, unique_path
 
-# `[[Target | relation]]` — group 1 is the target title, group 2 the relation.
+# `[[Target | relation]]` — group 1 is the target title, group 2 the pipe segment.
 _INLINE_EDGE_RE = re.compile(r"\[\[([^\]|]+)\|([^\]]+)\]\]")
-# Fenced code blocks are stripped before edge extraction so that example
-# syntax inside ``` fences is never mistaken for a real edge.
+# Fenced code blocks AND inline code spans are stripped before edge extraction
+# so example syntax inside ``` fences or `backticks` is never a real edge.
 _CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+_INLINE_CODE_RE = re.compile(r"`[^`]+`")
+
+# THE wikilink pipe grammar (single source — `links.py` defers to it). A pipe
+# segment is a RELATION only when it is slug-shaped after stripping; anything
+# else (spaces, uppercase, a leading digit, punctuation, an escaped `\|`) is an
+# Obsidian-style display alias and yields a plain wikilink, not a typed edge.
+RELATION_SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
+
+
+def split_pipe_segment(segment: str) -> tuple[str, str]:
+    """Classify the text after a wikilink pipe: relation vs display alias.
+
+    Returns ``("relation", slug)`` when ``segment`` (after stripping) matches
+    ``^[a-z][a-z0-9_-]*$`` — a lowercase slug such as ``supports`` or
+    ``relates-to``. Otherwise returns ``("alias", text)``: spaces, uppercase,
+    a leading digit, or punctuation all mean an Obsidian-style display alias,
+    which is NOT a typed relation. Callers detect an escaped ``\\|`` (always an
+    alias) before reaching this function.
+    """
+    text = segment.strip()
+    if RELATION_SLUG_RE.match(text):
+        return ("relation", text)
+    return ("alias", text)
+
+
+def _fm_get(raw: dict, key: str) -> str:
+    """Read a frontmatter edge field, tolerating a hyphenated spelling.
+
+    Underscore keys are canonical, but a hand-authored vault (or an Obsidian
+    export) may write ``relation-id:``/``target-id:``. Read BOTH spellings,
+    write underscores (N11) — so a hyphenated entry is honoured, never silently
+    ignored and never destroyed when write-back re-serializes the block.
+    """
+    value = raw.get(key, raw.get(key.replace("_", "-")))
+    return "" if value is None else str(value)
 
 
 def _normalize_fm(value: Any) -> Any:
@@ -170,8 +206,7 @@ def create(
     if default_workspace:
         fm["graph"] = [default_workspace]
 
-    slug = re.sub(r"[^a-z0-9-]", "", title.lower().replace(" ", "-")) or "untitled"
-    target = Path(vault) / f"{slug}.md"
+    target = Path(unique_path(str(vault), slugify(title)))
     write_node_file(str(target), fm, "")
     return parse_node_file(str(target))
 
@@ -182,23 +217,27 @@ def create(
 
 
 def extract_inline_edges(body: str) -> list[Edge]:
-    """Find all `[[Target | relation]]` patterns in prose and return Edges.
+    """Find `[[Target | relation]]` TYPED-edge shorthand in prose → Edge list.
 
-    Fenced code blocks are stripped first so example syntax in ``` fences
-    is ignored. Plain `[[Title]]` wikilinks (no pipe) are NOT inline edges
-    and never match. `relation_id` and `target_id` are left empty — they
-    are resolved later by the resolver and the sync queue.
+    Fenced code blocks and inline code spans are stripped first so example
+    syntax is ignored. The pipe grammar (`split_pipe_segment`) decides what
+    counts: only a slug-shaped segment is a relation. A display alias
+    (`[[Note | My Alias]]`) or an escaped pipe (`[[Note \\| text]]`) is NOT a
+    typed edge — it stays a plain wikilink that `links.extract_wikilinks`
+    handles. Plain `[[Title]]` (no pipe) never matches. `relation_id` and
+    `target_id` are left empty — resolved later by the resolver / sync queue.
     """
-    stripped = _CODE_FENCE_RE.sub("", body)
-    return [
-        Edge(
-            relation=relation.strip(),
-            relation_id="",
-            target=target.strip(),
-            target_id="",
-        )
-        for target, relation in _INLINE_EDGE_RE.findall(stripped)
-    ]
+    stripped = _INLINE_CODE_RE.sub("", _CODE_FENCE_RE.sub("", body))
+    edges: list[Edge] = []
+    for target, segment in _INLINE_EDGE_RE.findall(stripped):
+        if target.endswith("\\"):
+            continue  # escaped pipe → display alias, never a relation
+        kind, slug = split_pipe_segment(segment)
+        if kind == "relation":
+            edges.append(
+                Edge(relation=slug, relation_id="", target=target.strip(), target_id="")
+            )
+    return edges
 
 
 def merge_edges(existing: list[Edge], inline: list[Edge]) -> list[Edge]:
@@ -230,10 +269,10 @@ def write_back(path: str | Path) -> None:
     raw_edges = node.frontmatter.get("edges") or []
     existing = [
         Edge(
-            relation=str(d.get("relation", "")),
-            relation_id=str(d.get("relation_id", "")),
-            target=str(d.get("target", "")),
-            target_id=str(d.get("target_id", "")),
+            relation=_fm_get(d, "relation"),
+            relation_id=_fm_get(d, "relation_id"),
+            target=_fm_get(d, "target"),
+            target_id=_fm_get(d, "target_id"),
         )
         for d in raw_edges
         if isinstance(d, dict)

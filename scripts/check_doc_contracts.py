@@ -537,6 +537,77 @@ FIX_DIRECTION = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Check 6 — relation-count drift (relation-vocabulary.md IS the registry)
+# ---------------------------------------------------------------------------
+
+_RELID_ROW_RE = re.compile(r"^\|\s*`([A-Z]{2}-\d{3})`\s*\|")
+
+# A number CLAIMED to be the relation-type count. Three accepted shapes; the
+# BARE "of the <n>" form is deliberately NOT used because it false-positives on
+# node counts (pinned known-negative: phase-08 "roughly 22 of the 170 consume
+# the whole 12,000-char budget" — neither 22 nor 170 may match). Pinned
+# known-positive (must match -> 72): phase-08 "52 of the 72 relation types have
+# no defined inverse" (the 72 matches; the 52 inverse-subcount must NOT).
+_RELCOUNT_RES = (
+    re.compile(r"\b(\d{2,3})-(?:type|relation)\b"),
+    re.compile(r"\b(\d{2,3}) (?:built-in )?(?:typed )?relations?\b"),
+    re.compile(r"\b(\d{2,3}) (?:built-in )?relation types?\b"),
+    re.compile(r"of the (\d{2,3})(?=\s+(?:relation|typed|directed|have no))"),
+)
+
+
+def _registry_relation_count() -> int:
+    path = REPO_ROOT / FOUNDATIONS_DIR / "relation-vocabulary.md"
+    if not path.is_file():
+        return 0
+    ids = set()
+    for line in path.read_text().splitlines():
+        m = _RELID_ROW_RE.match(line)
+        if m:
+            ids.add(m.group(1))
+    return len(ids)
+
+
+def check_relation_count_drift() -> list[Finding]:
+    """Every relation-type count across phase/foundation docs must equal the
+    number of unique ID-first rows in relation-vocabulary.md. ALLOW entries are
+    ``relcount:<filename>:<number>`` (expected to stay empty)."""
+    findings: list[Finding] = []
+    expected = _registry_relation_count()
+    if expected == 0:
+        return findings  # registry unreadable — do not mask it with false drift
+    scan = sorted(REPO_ROOT.glob(DOC_GLOB))
+    scan += [
+        p
+        for p in sorted((REPO_ROOT / FOUNDATIONS_DIR).glob("*.md"))
+        if p.name != "relation-vocabulary.md"
+    ]
+    for path in scan:
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            nums = set()
+            for rx in _RELCOUNT_RES:
+                nums.update(int(m.group(1)) for m in rx.finditer(line))
+            for n in sorted(nums):
+                if n == expected:
+                    continue
+                if f"relcount:{path.name}:{n}" in ALLOW:
+                    continue
+                findings.append(
+                    Finding(
+                        kind="RELATION-COUNT DRIFT",
+                        lines=[
+                            f"{rel(path)}:{lineno} claims {n} relation types; the "
+                            f"registry (relation-vocabulary.md) has {expected}.",
+                            f"  > {line.strip()}",
+                            "fix the doc (relation-vocabulary.md is the source of "
+                            f"truth), or ALLOW relcount:{path.name}:{n} if intentional.",
+                        ],
+                    )
+                )
+    return findings
+
+
 def run_checks() -> list[Finding]:
     findings: list[Finding] = []
 
@@ -711,6 +782,9 @@ def run_checks() -> list[Finding]:
                     ],
                 )
             )
+
+    # ---- 6. relation-count drift -----------------------------------
+    findings += check_relation_count_drift()
 
     return findings
 

@@ -34,7 +34,7 @@ write to it.
 | Component | What it delivers |
 |---|---|
 | Parser (`parser.py`) | Read and write `.md` files with YAML frontmatter atomically. Generate UUIDs. Compute content hashes. |
-| Schema (`schema.py`) | `Node` and `Edge` dataclasses. 71 typed relation vocabulary. |
+| Schema (`schema.py`) | `Node` and `Edge` dataclasses. 72 typed relation vocabulary. |
 | DB (`db.py`) | SQLite with WAL mode, FTS5 full-text search. CRUD for nodes and edges. Thread-safe via `threading.Lock`. |
 | Indexer (`indexer.py`) | Two-pass vault walk: index nodes, then extract edges from wikilinks and Markdown links. |
 | Links (`links.py`) | Wikilink and Markdown link extraction. Case-insensitive title resolution. |

@@ -256,7 +256,7 @@ make vault-check PHASE=N
 ```
 
 This validates that the phase's expected nodes exist, that edges are well-formed,
-and that relation names match the 71-type vocabulary (custom relations warn, not
+and that relation names match the 72-type vocabulary (custom relations warn, not
 fail). `make vault-check FULL=1` adds the ≥50-node end-of-path check.
 
 **What a good vault node looks like.** Titles matching the manifest is the floor.

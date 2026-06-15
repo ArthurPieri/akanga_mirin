@@ -1,5 +1,7 @@
 # HTTP Fundamentals
 
+**Audience:** Python developers about to read or write the Phase 6 FastAPI server · **Read time:** ~12 min
+
 A practical reference for HTTP, REST, and how FastAPI implements them —
 directly applicable to reading `server.py` in akanga.
 
@@ -240,11 +242,14 @@ class NodeCreate(BaseModel):       # the Phase 6 skeleton names this CreateNodeR
 @app.post("/api/v1/nodes", status_code=201)
 async def create_node(payload: NodeCreate):
     # payload is a validated NodeCreate instance
-    # 1) Determine file path from payload.title (slugify + join vault path)
+    # 1) Determine file path from payload.title (slugify — lowercase the title, collapse non-alphanumeric runs to hyphens — then join the vault path)
     # 2) write_node_file(str(file_path), {"title": payload.title, "type": payload.type}, payload.content or "")
     # 3) node = parse_node_file(str(file_path))
     # 4) db.upsert_node(node)
-    return vars(node)
+    # Build the response dict explicitly — don't return vars(node)/__dict__:
+    # the DB read model is a slots dataclass (no __dict__), so vars() raises
+    # TypeError, and an explicit dict keeps the JSON shape stable (Phase 6's rule).
+    return {"id": node.id, "title": node.title, "type": node.type, "tags": node.tags}
 ```
 
 ### Returning status codes

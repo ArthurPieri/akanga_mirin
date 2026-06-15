@@ -1,5 +1,7 @@
 # asyncio Primer
 
+**Audience:** developers comfortable with Python functions who have read `python-threading.md` — this is the async half of Akanga's concurrency model · **Read time:** ~12 min
+
 This doc covers the **async** half of akanga's concurrency model. Read `python-threading.md` first — the two models run side by side in the system you build and meet at `EventBus.publish()`.
 
 ---
@@ -102,7 +104,7 @@ asyncio.run(main())
 # Total elapsed: ~2s, not 3.5s — they overlapped
 ```
 
-In akanga, `ActiveNodeManager` uses `asyncio.create_task()` (a lower-level relative of gather) to run one polling loop per active node concurrently.
+In akanga, `asyncio.create_task()` (a lower-level relative of gather) is how a FastAPI handler can kick off background work without blocking the response — it schedules a coroutine on the running loop and moves on. (An earlier active-node design used one polling task per node; it was cut — see `future-ideas.md`.)
 
 ---
 
@@ -155,15 +157,17 @@ async def main():
     # task is done by now
 ```
 
-In akanga's `ActiveNodeManager._schedule_if_active()`:
+A robust pattern keeps a reference to every task you schedule — a bare `create_task(...)` whose return value is dropped can be garbage-collected mid-flight:
 
 ```python
-self._tasks[node_id] = asyncio.create_task(
-    self._run_loop(node_id, active_cfg, interval)
-)
+self._tasks: set[asyncio.Task] = set()
+
+task = asyncio.create_task(self._background_job(node_id))
+self._tasks.add(task)                        # keep a strong reference …
+task.add_done_callback(self._tasks.discard)  # … and drop it when finished
 ```
 
-Each active node gets a persistent polling loop running as an independent task. Tasks are stored in `self._tasks` so they can be canceled when a node is updated or deleted.
+Storing tasks in a container also lets you cancel them later — on shutdown, or when the work they were doing is no longer needed.
 
 ---
 
@@ -171,7 +175,7 @@ Each active node gets a persistent polling loop running as an independent task. 
 
 This is the most important function for understanding how akanga's threading and asyncio worlds connect.
 
-**The problem**: the watchdog file watcher runs in its own OS thread. The eventbus subscribers (like `ActiveNodeManager.on_node_updated`) are `async def` functions. You cannot `await` a coroutine from a non-async thread — there is no event loop in that thread to run it.
+**The problem**: the watchdog file watcher runs in its own OS thread. An eventbus subscriber may be an `async def` function (say, an indexer hook that awaits I/O). You cannot `await` a coroutine from a non-async thread — there is no event loop in that thread to run it.
 
 **The solution**: `asyncio.run_coroutine_threadsafe(coro, loop)` submits a coroutine to a running event loop from any thread. It is thread-safe. It returns a `concurrent.futures.Future` (not an asyncio Future) that you can check or block on from the calling thread.
 
@@ -198,34 +202,47 @@ The submitted coroutine runs inside `loop`'s thread — not the calling thread. 
 
 ## Why the bridge matters: `eventbus.py`
 
-This is the heart of the `EventBus` you build in Phase 4 (`eventbus.py` in your implementation):
+This is the heart of the `EventBus` you build in Phase 4. `publish()` dispatches each subscriber by three rules — and the loop check and the buffer append happen inside **one** lock acquisition, because reading `self._loop` outside the lock would race `set_loop()`:
 
 ```python
-def publish(self, topic: str, payload: Any) -> None:
-    for cb in list(self._subs.get(topic, [])):
-        coro = cb(topic, payload)              # cb is async def; calling it gives a coroutine
-        if self._loop and self._loop.is_running():
-            # Called from a non-async thread (e.g., watchdog):
-            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-            future.add_done_callback(self._handle_error)
-        else:
-            try:
-                loop = asyncio.get_running_loop()
-                task = loop.create_task(coro)  # already inside the loop — just schedule it
-                task.add_done_callback(self._handle_task_error)
-            except RuntimeError:
-                logger.warning("No event loop available for publish on topic '%s'", topic)
+def publish(self, event: str, **kwargs) -> None:
+    with self._lock:
+        handlers = list(self._handlers.get(event, ()))   # snapshot, then release the lock
+
+    for handler in handlers:
+        try:
+            if asyncio.iscoroutinefunction(handler):
+                with self._lock:
+                    loop = self._loop
+                    if loop is None:
+                        # Startup window: no loop yet. BUFFER (handler, kwargs) —
+                        # never drop it, never call the coroutine directly. set_loop()
+                        # drains the buffer FIFO once the loop is registered.
+                        self._buffer.append((handler, dict(kwargs)))
+                if loop is not None:
+                    future = asyncio.run_coroutine_threadsafe(handler(**kwargs), loop)
+                    future.add_done_callback(_log_future_exception)
+            else:
+                handler(**kwargs)            # sync subscriber: the only no-loop fallback
+        except Exception:
+            logger.exception("subscriber for %r failed", event)
 ```
 
-The flow when a file changes:
+The three dispatch rules:
 
-1. Watchdog thread calls `eventbus.publish("node.updated", {...})`.
-2. `publish()` is running in the watchdog thread — no event loop here.
-3. `self._loop` was set by `AkangaApp.start_all()` and is the asyncio event loop running in the main thread.
-4. `run_coroutine_threadsafe` hands the coroutine to the main thread's event loop.
-5. The event loop runs the subscriber (e.g., `ActiveNodeManager.on_node_updated`) as a coroutine.
+- **async subscriber + loop set** → `run_coroutine_threadsafe` schedules it on the loop, with a done-callback that logs any exception the coroutine raises.
+- **async subscriber + no loop yet** → **buffer** the `(handler, kwargs)` pair; it is never dropped and never called directly. `set_loop()` stores the loop (under the same lock) and then drains the buffer FIFO, so a too-early event is replayed exactly once.
+- **sync subscriber** → call it directly. This is the only path that needs no loop, and it is the path the shipped `AkangaApp` uses (its subscribers are synchronous).
 
-Without this bridge, the watcher could never trigger async behavior — it would have to call synchronous code only.
+The flow when a file changes, *if* you have wired an async subscriber:
+
+1. The watchdog thread calls `eventbus.publish("file_changed", path=...)`.
+2. `publish()` runs in the watchdog thread — no event loop there.
+3. The loop was registered by `set_loop()` during startup (you pass `asyncio.get_running_loop()` from inside the async app).
+4. `run_coroutine_threadsafe` hands the coroutine to that loop; the done-callback logs any error.
+5. The loop runs the subscriber as a coroutine.
+
+Without this bridge a thread could never trigger async work — and without the buffer, any event published in the startup window before `set_loop()` would be silently lost.
 
 ---
 
@@ -246,14 +263,16 @@ async def list_nodes(query: str = ""):
     return results
 ```
 
-In akanga's `server.py`, all route handlers are `async def`, and the lifespan context manager (startup/shutdown) is also async:
+In akanga's `server.py`, all route handlers are `async def`, and the lifespan context manager (startup/shutdown) is also async — Phase 6's opens the database and indexes the vault before the first request, then closes the database on shutdown:
 
 ```python
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await akanga_app.start_all()   # starts active manager, watcher, etc.
+    db = GraphDatabase(resolved_db)
+    _app_state["db"] = db
+    full_scan_and_index(resolved_vault, db)   # the API serves the index
     yield
-    await akanga_app.stop_all()
+    db.close()
 ```
 
 ---
@@ -308,9 +327,9 @@ asyncio.run(wrapper())
 
 | File (phase where you build it) | What it does |
 |---|---|
-| `eventbus.py` (Phase 4) | `run_coroutine_threadsafe` bridges watchdog thread to event loop; `create_task` for same-loop delivery |
-| `active.py` (Phase 4) | `ActiveNodeManager` — one `asyncio.Task` per active node, running concurrent HTTP/TCP checks with `aiohttp` |
-| `app.py` (Phase 4) | `start_all()` / `stop_all()` are async; sets the loop on the eventbus so the bridge knows which loop to target |
+| `eventbus.py` (Phase 4) | `run_coroutine_threadsafe` bridges the watchdog thread to the event loop; async subscribers published before `set_loop()` are buffered and drained FIFO |
+| `watcher.py` (Phase 4) | the watchdog file watcher runs in a daemon thread; `_EventHandler._debounced()` publishes events that cross into the async world through the bridge |
+| `app.py` (Phase 8) | `AkangaApp` composition root; `start_all()` / `stop_all()` are synchronous and wire the watcher, db, eventbus, and git manager |
 | `server.py` (Phase 6) | FastAPI async throughout; lifespan is an async context manager |
 
 ---
