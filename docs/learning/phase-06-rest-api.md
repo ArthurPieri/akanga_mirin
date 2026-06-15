@@ -80,8 +80,8 @@ A Python web framework built on Starlette (async HTTP) and Pydantic (validation)
 Type-annotated function signatures become the API contract: FastAPI reads the
 annotations, validates incoming data automatically, and generates an OpenAPI spec
 (browsable at `/docs`) without any extra configuration. Async-first: route handlers
-are coroutines, so the API server and the active manager share the same asyncio loop
-without blocking each other.
+are coroutines on one asyncio loop, so slow I/O in one request never blocks the
+others.
 
 > Akanga node: `FastAPI`
 
@@ -89,10 +89,10 @@ without blocking each other.
 
 FastAPI's pattern for startup and shutdown logic. A single `@asynccontextmanager`
 function runs setup code before `yield` (on startup) and teardown code after `yield`
-(on shutdown). For Akanga: startup loads vault config, indexes the vault, drains the
-sync queue, starts the file watcher, starts the active manager. Shutdown stops the
-watcher and active manager cleanly. Without proper shutdown, background threads and
-asyncio tasks leak — the process hangs on exit.
+(on shutdown). For Akanga: startup opens the database and indexes the vault, so the API serves a
+current index from the first request; shutdown closes the database. Without a clean
+shutdown, the open connection and any background threads leak — the process can hang
+on exit.
 
 > Akanga node: `Lifespan Context Manager`
 
@@ -111,7 +111,7 @@ never receives malformed data and never leaks internal state.
 
 A persistent, bidirectional connection initiated over HTTP and then upgraded. The
 client opens one WebSocket connection to `/ws`; the server pushes events as JSON
-messages whenever something changes: `node_updated`, `node_deleted`, `active_result`.
+messages whenever something changes: `node_updated`, `node_deleted`.
 The client never needs to poll. This is how the Tauri GUI (v2) will receive live
 updates — the same event model as the TUI's EventBus, but over the network.
 
@@ -199,7 +199,6 @@ only after the core suite is green (see "Stretch deliverables" in the Deliverabl
 
 ```
 GET    /api/v1/nodes/{id}/ego-graph     ego-graph data (depth param)
-GET    /api/v1/nodes/{id}/results       active check results
 GET    /api/v1/workspaces               list workspaces (from config)
 GET    /api/v1/relations                list relation vocabulary (from config)
 POST   /api/v1/sync/drain               trigger sync queue drain
@@ -315,18 +314,14 @@ the lifespan is defined inside `create_app`):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # startup
-    # Note: GraphDatabase opens the connection in __init__ — no db.connect() call needed.
-    # db = GraphDatabase(db_path) is called before passing db into the lifespan.
-    # TODO: load_vault_config(vault) — reads akanga.yaml config; no skeleton
-    # implementation exists yet (described in Phase 00 concepts). Add when implemented.
-    indexer.full_scan_and_index(vault, db)
-    sync_worker.drain(db, vault)
-    watcher.start()
-    active_manager.start()
+    # GraphDatabase opens the connection in __init__ — no db.connect() call needed.
+    db = GraphDatabase(db_path)
+    # The API serves the INDEX, so the vault must be indexed before the first request.
+    # The scan is hash-first and idempotent, so an already-indexed vault is nearly free.
+    full_scan_and_index(vault, db)
     yield
     # shutdown
-    active_manager.stop()
-    watcher.stop()
+    db.close()
 
 app = FastAPI(lifespan=lifespan)
 ```

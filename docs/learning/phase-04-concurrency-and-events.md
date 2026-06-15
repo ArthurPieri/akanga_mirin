@@ -3,8 +3,8 @@
 **Estimated time:** 3–4 hours + ~1h vault/reflect
 
 **Core concept:** A running Akanga process has multiple things happening simultaneously
-— the file watcher fires when you save a note, the active manager pings URLs on a
-schedule, the API handles a request, and the TUI renders. These components run in
+— the file watcher fires when you save a note, the API handles a request, the git
+batcher debounces a commit, and the TUI renders. These components run in
 different concurrency models and cannot call each other directly. Phase 4 is about
 wiring them together safely without deadlocks, missed events, or blocked UIs.
 
@@ -77,8 +77,8 @@ Two distinct concurrency models in Python. Threads run OS-managed execution cont
 that can run in parallel (limited by the GIL for CPU-bound work, effective for
 I/O-bound work). `asyncio` runs coroutines cooperatively in a single thread — a
 coroutine yields control explicitly with `await`, letting others run. The file watcher
-(watchdog) runs in a daemon thread using blocking OS callbacks. The active manager and
-API server run in asyncio. These two models cannot directly call each other — a thread
+(watchdog) runs in a daemon thread using blocking OS callbacks. The FastAPI server
+runs in asyncio. These two models cannot directly call each other — a thread
 cannot `await` a coroutine, and a coroutine cannot block on a thread without stalling
 the whole loop. A bridge is required.
 
@@ -271,29 +271,26 @@ single-semantics design is deliberate: workspace renames, relation renames, and
 dangling-edge marking (see the Dangling Edges concept above) are future extensions,
 and the column is reserved until they exist.
 
-**`app.py`** — `AkangaApp` startup sequence:
+**`app.py`** — `AkangaApp.start_all()` is the Phase 8 composition root; it wires the
+subsystems in order (the connection opens in `GraphDatabase.__init__`, so there is no
+separate `db.connect()` call):
 
 ```
-1. db = GraphDatabase(db_path)        → connection opens in __init__ (no db.connect() call)
-   # TODO: load_vault_config(vault) — reads akanga.yaml; no skeleton implementation
-   # exists yet (described in Phase 00 concepts). Add when implemented.
-2. eventbus.set_loop(loop)            → register the running asyncio loop
-                                        (loop = asyncio.get_running_loop() in async context)
-3. full_scan_and_index(vault, db)     → two-pass; DB fully populated
-4. sync_worker.drain(db, vault)       → resolve stale display names
-5. watcher.start()                    → begin watching for changes
+1. full_scan_and_index(vault, db)   → initial scan; the DB reflects the vault as of now
+2. watcher.start()                  → daemon thread begins reporting file changes
+3. start the git commit batcher     → background thread debounces auto-commits (Phase 7)
 
-on file_changed:
-  indexer.index_file(path, db)            → re-index
-  git_manager.commit("auto: update node") → debounced 5s (Phase 7)
-  eventbus.publish('node_updated')        → TUI refreshes (Phase 5)
+on file_changed (runs on the watcher's debounce worker thread):
+  indexer.index_file(path, db)        → re-index the one changed file
+  mark the vault dirty                → the batcher auto-commits after an idle window (Phase 7)
 ```
 
-**Ordering matters:** `set_loop` must run *before* `watcher.start()` — the moment the
-watcher starts, its daemon thread can call `publish()`, and async subscribers can only
-be scheduled if the bus already knows the loop (the startup buffer catches anything
-published even earlier, but never rely on it as the normal path). Drain runs *before*
-the watcher too, so its file rewrites don't fire change events mid-startup.
+The subscribers `AkangaApp` registers (`_on_file_changed`, `_on_file_deleted`) are
+**synchronous**, so they run inline on the watcher's worker thread — no event loop is
+involved. If you instead register an *async* subscriber, call `eventbus.set_loop(loop)`
+during startup (before `watcher.start()`) so the bus can bridge those coroutines onto the
+running loop; the EventBus buffers anything published before the loop is set, so an early
+event is never dropped.
 
 ---
 

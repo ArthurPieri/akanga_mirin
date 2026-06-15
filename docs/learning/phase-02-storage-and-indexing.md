@@ -74,7 +74,7 @@ DB file — readers block. In WAL mode, writers append to a separate log file wh
 readers continue reading the last committed snapshot. Readers and writers don't block
 each other (except at checkpoint time, when the log is merged back). Akanga needs WAL
 because three things access the DB concurrently: the file watcher thread, the asyncio
-event loop (active manager, API), and CLI commands. Without WAL, a reader that hits
+event loop (the API), and CLI commands. Without WAL, a reader that hits
 the DB mid-write gets an `SQLITE_BUSY` error (`database is locked`) — not a deadlock,
 but a hard failure the caller would have to catch and retry. WAL's real payoff is
 **cross-process readers during writes**: a CLI command in another process can read
@@ -140,7 +140,7 @@ phase — it is not in the Phase 02 schema.)
 
 Shared mutable state accessed from multiple threads without synchronization produces
 data races: corrupted writes, partial reads, crashes. Akanga's DB is shared between
-the file watcher thread (sync), the asyncio event loop (active manager, API), and CLI
+the file watcher thread (sync), the asyncio event loop (the API), and CLI
 commands. WAL mode handles concurrent SQLite-level access, but application-level
 sequences like "check if node exists → upsert" must be atomic at the application
 level. A `threading.Lock` wraps each compound operation so only one thread executes
@@ -286,8 +286,8 @@ CREATE TABLE IF NOT EXISTS sync_queue (
 
     The `sync_queue` table was introduced conceptually in Phase 1B (where your
     functions ran against a hand-created table); here it becomes part of `DB_SCHEMA`, so
-    every `GraphDatabase` carries it. The `active_results` table is added when building
-    the active node manager (advanced — not covered in this phase). Fields like `author`,
+    every `GraphDatabase` carries it. An `active_results` table belonged to a cut active-node design and is built by no
+    phase (see `future-ideas.md`). Fields like `author`,
     `created_at`, `updated_at`, `meta`, `url`, `external_type`, and `description` that
     you see in node frontmatter are not columns in the Phase 02 `nodes` table — they are
     stored only in the `.md` file itself and accessible by re-parsing it.

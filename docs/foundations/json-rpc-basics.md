@@ -294,8 +294,8 @@ Claude sees this as a tool that requires `title` (string) and optionally accepts
 
 3. The subprocess sends an `initialize` response advertising its tools.
 
-4. When you ask Claude "what are my active nodes?", Claude decides to call the
-   `search_nodes` tool with `type="active"`.
+4. When you ask Claude "what do I have tagged psychology?", Claude decides to call the
+   `search_nodes` tool with `query="psychology"`.
 
 5. Claude sends a JSON-RPC `tools/call` request to the subprocess via stdin.
 

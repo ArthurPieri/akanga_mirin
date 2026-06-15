@@ -16,7 +16,7 @@ Akanga is not just a knowledge graph — it is a worked example of how productio
 
 **Where:** `eventbus.py` — `EventBus.publish()`, `EventBus.subscribe()`
 
-**Why Akanga uses it:** The file watcher, the active node manager, the git manager, and the TUI all need to react when a vault file changes. If the watcher called each of these directly, every new feature would require modifying the watcher. With the EventBus, each new consumer subscribes independently; the watcher never changes.
+**Why Akanga uses it:** The file watcher publishes; the indexer, the git auto-commit batcher, and the TUI all need to react when a vault file changes. If the watcher called each of these directly, every new feature would require modifying the watcher. With the EventBus, each new consumer subscribes independently; the watcher never changes.
 
 ```python
 # Publisher — does not know who is listening
@@ -36,7 +36,7 @@ self.eventbus.subscribe("node_updated", self._active_mgr.on_node_updated)
 
 **What it is:** When an event fires multiple times in rapid succession, wait for a quiet period before acting. Cancel any pending action when a new event arrives.
 
-**Where:** `watcher.py` — `_EventHandler._debounced()` and `app.py` — `AkangaApp._queue_commit()`
+**Where:** `watcher.py` — `_EventHandler._debounced()` and `app.py` — `AkangaApp`'s git commit batcher (`_commit_loop` / `_flush_commit`)
 
 **Why Akanga uses it:** An editor like Neovim writes a file in multiple steps: create temp file, write content, rename to target. Without debouncing, the indexer would be called 3–5 times per save. The debounce coalesces these into one call, 500ms after the last write event.
 
@@ -110,20 +110,25 @@ except BaseException:
 
 **Where:** `app.py` — `AkangaApp`
 
-**Why Akanga uses it:** The system has six subsystems: database, file watcher, event bus, active node manager, git manager, and indexer. The server and TUI would need to construct and wire all six themselves — including getting the startup order right, threading the eventbus loop before the watcher starts, and tearing down in the correct order on shutdown. `AkangaApp` encapsulates all of this. Callers call `start_all()` and `stop_all()`.
+**Why Akanga uses it:** The system has five subsystems: database, file watcher, event bus, git manager, and indexer. The server and TUI would need to construct and wire them all themselves — getting the startup order right and tearing down in the correct order on shutdown. `AkangaApp` (the Phase 8 composition root) encapsulates all of this. Callers call `start_all()` and `stop_all()`.
 
 ```python
 # Caller sees one method
-await app.start_all()
+app.start_all()
 
-# AkangaApp wires everything in the right order
-async def start_all(self) -> None:
-    self.eventbus.set_loop(asyncio.get_running_loop())  # must be first
-    self.start()          # init git → initial index → start watcher
-    await self.start_active()  # starts asyncio health-check scheduler
+# AkangaApp wires everything in the right order (start_all is synchronous)
+def start_all(self) -> None:
+    full_scan_and_index(self.vault_path, self.db)  # DB reflects the vault as of now
+    self.watcher.start()                           # daemon thread reports changes
+    self._start_commit_batcher()                   # debounced git auto-commits
 ```
 
-**The ordering invariant:** `set_loop()` must be called before `start_watcher()`. If the watcher fires an event before the loop is set, the publish falls back to `asyncio.get_running_loop()` from a non-async thread — which raises `RuntimeError`. The Facade encodes this ordering rule so callers cannot get it wrong.
+**The ordering invariant:** the initial index runs *before* `watcher.start()`, so the
+DB reflects the vault before any change event arrives, and shutdown stops the watcher
+*before* flushing the final commit. The Facade encodes this ordering so callers cannot
+get it wrong. (The bundled subscribers are synchronous; if you add an async one, call
+`eventbus.set_loop(loop)` during startup — the bus buffers events published before the
+loop is set, so there is no startup race to get wrong.)
 
 ---
 
@@ -131,17 +136,17 @@ async def start_all(self) -> None:
 
 **What it is:** Instead of a component creating its own dependencies, the dependencies are passed in by the caller.
 
-**Where:** Every manager in the codebase — `ActiveNodeManager(db, eventbus=...)`, `VaultWatcher(vault, eventbus, debounce_ms)`, `AkangaApp(vault, db_path, git_sync)`
+**Where:** Every collaborator in the codebase — `VaultWatcher(vault_path, eventbus)`, `GraphDatabase(db_path)`, `AkangaApp(vault_path, db_path)`
 
-**Why Akanga uses it:** Unit tests need to substitute a real SQLite database with an in-memory one, or a real EventBus with a mock. If `ActiveNodeManager` created its own `GraphDatabase`, tests could not inject a temporary test database. Passing dependencies in makes components testable in isolation.
+**Why Akanga uses it:** Unit tests need to substitute a real SQLite database with an in-memory one, or a real EventBus with a mock. If `VaultWatcher` constructed its own `EventBus`, a test could not observe what it publishes. Passing dependencies in makes components testable in isolation.
 
 ```python
-# Test can inject a fresh in-memory db
+# Test can inject a fresh in-memory db and observe a real bus
 db = GraphDatabase(":memory:")
-manager = ActiveNodeManager(db, eventbus=EventBus())
+watcher = VaultWatcher("./vault", EventBus())   # bus injected, not constructed inside
 
-# Production wires real components
-app = AkangaApp(vault="./vault", db_path="./.akanga.db")
+# Production wiring (AkangaApp does this for you)
+app = AkangaApp(vault_path="./vault", db_path="./.akanga.db")
 ```
 
 **Contrast with module-level singletons:** A common anti-pattern is `DB = GraphDatabase(settings.DB_PATH)` at module level. Module-level singletons are shared across all tests in a pytest session — one test's writes contaminate the next test's reads. Dependency injection solves this by making every test's dependencies independent.
@@ -152,9 +157,16 @@ app = AkangaApp(vault="./vault", db_path="./.akanga.db")
 
 **What it is:** Define a family of interchangeable algorithms (strategies) behind a common interface. The client picks which strategy to use at runtime without knowing how it works.
 
-**Where:** `active.py` — HTTP and TCP health check actions, dispatched on `node.frontmatter["active"]["action"]`
+**Where:** *Deferred design — no phase builds this.* An earlier active-node design would
+have put HTTP and TCP health-check actions behind one interface, dispatched on an
+`action` field; it was cut (see `future-ideas.md`). The pattern is kept here because it
+is the cleanest illustration of Strategy and the most likely shape a future extension
+would take.
 
-**Why Akanga uses it:** Active nodes can check either an HTTP endpoint or a TCP port. Both produce a result (up/down + timestamp). The active manager does not need to know which kind it is handling — it calls the same `_check()` method and gets back the same result shape. Adding a new action type (e.g., CLI command) means adding a new branch, not rewriting the manager.
+**Why the pattern fits:** Two interchangeable checks (HTTP endpoint vs TCP port) would
+both produce the same result shape (up/down + timestamp). A caller dispatching on the
+`action` field would call one `_check()` method regardless of kind; adding a new action
+type (e.g. a CLI command) means adding a branch, not rewriting the caller.
 
 ---
 
@@ -240,7 +252,7 @@ def ego_graph(db, root_id: str, max_depth: int = 2) -> set[str]:
 | Atomic Write | `parser.py` | Crash-safe file writes with no partial state |
 | Facade | `app.py` | Hide startup ordering complexity from callers |
 | Dependency Injection | All managers | Enable isolated unit tests |
-| Strategy | `active.py` | Swap health-check implementations without changing the manager |
+| Strategy | *(deferred design)* | Sketched for the cut active-node design — swap health-check implementations behind one interface |
 | Two-Phase Commit | `indexer.py` | Ensure referenced nodes exist before creating edges |
 | Labeled Property Graph | `models.py`, frontmatter schema | Typed, queryable edges instead of anonymous links |
 | Graph Traversal (BFS) | `graph.py` | Bounded ego-graphs with cycle-safe iteration |
